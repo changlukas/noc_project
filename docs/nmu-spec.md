@@ -346,7 +346,7 @@ The implementation does not handle the following, they are guaranteed not to hap
 
 ## 4. Specifications
 
-Each item names its verification and the failure condition. "ctest" items run in the pure C++ suite (`ref_model/c_model/tests/`), "co-sim" items run under the generated testbench (`make -C sim TB=<topology> PATTERN=<pattern>`, regression via `sim/run_regress.py`) where correctness is judged by the scoreboard's per-transaction write-to-readback compare plus the model's internal asserts (any assert abort fails the run).
+Each item names its verification and the failure condition. "ctest" items run in the pure C++ suite (`ref_model/c_model/tests/`), "co-sim" items run under the generated testbench (`make sim TB=<topology> PATTERN=<pattern>`, regression via `sim/run_regress.py`) where correctness is judged by the scoreboard's per-transaction write-to-readback compare plus the model's internal asserts (any assert abort fails the run).
 
 1. Interface: the block implements exactly the Section 3.1 / 3.2 ports of `nmu_wrap` with the given widths (REQ 136 b, RSP 126 b, DAT 633 b flits; DAT_NUM_VC-wide credit vectors). Verified: co-sim elaboration (AXI struct port binding, scalar NoC-face binding, `$fatal` width guard in `nmu_wrap.sv`). Failure: elaboration error or width-guard fatal.
 2. Reset: after the single initial rst_ni assertion, every output is 0, and outputs stay 0 until traffic (rule P6). Verified: `TEST(NmuWrap, idle_adapter_keeps_readys_low)` (`ref_model/c_model/tests/wrap/test_nmu_wrap.cpp`) and cycle-1 sampling in co-sim. Failure: any nonzero output during or immediately after reset.

@@ -10,28 +10,30 @@
 # Makefile includes ../build_config.mk by relative path and writes its logs to a
 # relative output/, so it has to run with verilator/ as its working directory.
 
-.PHONY: help sim sim-injection-sweep
+.PHONY: help sim build run sim-injection-sweep
 
 # `make -C sim TB=... PATTERN=...` carries no goal, so the default has to be the
 # run, not the first target in the file.
 .DEFAULT_GOAL := sim
 
 help:
-	@echo "Simulate (from repo root, or drop the -C sim if you are already here):"
-	@echo "  make -C sim TB=<topo> PATTERN=<p> [SEED=<n>]"
-	@echo "  make -C sim TB=mesh_4x4_vc1 PATTERN=neighbor"
+	@echo "Simulate (from the repo root; inside sim/ they are sim, build, run):"
+	@echo "  make sim TB=<topo> PATTERN=<p> [SEED=<n>]   build, then run"
+	@echo "  make sim-build TB=<topo>                    build only, no run"
+	@echo "  make sim-run TB=<topo> PATTERN=<p>          run only; errors if not built"
+	@echo "  make sim TB=mesh_4x4_vc1 PATTERN=neighbor"
 	@echo "  TB:      topology from topologies/"
 	@echo "  PATTERN: $(_VALID_PATTERNS)"
 	@echo "  Vars: INJECTION_MODE=0|1|2 READ_ROB=0|1 INJECTION_RATE= INJECTION_COUNT= IDS_PER_INITIATOR= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT= HOTSPOT_PERIPHERALS=1; SEED unset draws + prints a random seed"
 	@echo "  Forensics: TIMEOUT_CYCLES=<n> fires the watchdog early, so a hang dumps per-node outstanding and last_progress without waiting out the formula"
 	@echo ""
-	@echo "  make -C sim TB=mesh_2x2_vc1 DMA=1            pulp iDMA on every master face"
+	@echo "  make sim TB=mesh_2x2_vc1 DMA=1               pulp iDMA on every master face"
 	@echo "  DMA=1 ignores PATTERN: stimulus is gen_dma_jobs.py's per-node job files, and"
 	@echo "  the run ends when every DMA has retired every job and every destination"
 	@echo "  region matches its source. Vars: DMA_JOBS_PER_NODE= DMA_LENGTH= DMA_RW=read|write"
 	@echo "  (all three feed the job files AND the top's compare) DECERR_FAULT=1 DECERR_FAULT_WR=1"
 	@echo ""
-	@echo "  make -C sim sim-injection-sweep PATTERN=<p>   saturation sweep, long"
+	@echo "  make sim-injection-sweep PATTERN=<p>         saturation sweep, long"
 	@echo ""
 	@echo "Build and test gates stay at the repo root: make build / make test / make pytest"
 
@@ -89,13 +91,20 @@ _INJ_ARGS := \
 # ends when every DMA has retired every job its file holds and every
 # destination region matches its source, so PATTERN names nothing on this path.
 
-sim:
-	@echo ">>> sim TB=$(_TOPO) PATTERN=$(PATTERN) SEED=$(_SEED)"
+sim run:
+	@echo ">>> $@ TB=$(_TOPO) PATTERN=$(PATTERN) SEED=$(_SEED)"
 	$(MAKE) -C verilator $(if $(ELABORATE_ONLY),elaborate,run-directed) \
 	    TOPOLOGY=$(_TOPO) RUN_CLASS=directed \
+	    $(if $(filter run,$@),NO_BUILD=1) \
 	    PATTERN=$(PATTERN) SEED=$(_SEED) $(_INJ_ARGS) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT)) \
 	    $(if $(HOTSPOT_PERIPHERALS),HOTSPOT_PERIPHERALS=$(HOTSPOT_PERIPHERALS)) \
 	    $(if $(MCAST_SHAPE),MCAST_SHAPE=$(MCAST_SHAPE))
+
+# Build alone. PATTERN names nothing here: the binary a topology builds is the
+# same one every pattern runs on, because a pattern is stimulus read at runtime.
+build:
+	@echo ">>> build TB=$(_TOPO)"
+	$(MAKE) -C verilator build TOPOLOGY=$(_TOPO) RUN_CLASS=directed
 
 # Injection-rate sweep: four VC configs x nine rates, one point per make sim.
 # MAX_UNIQUE_IDS and MAX_OUTSTANDING are inherited, not forced. Both are shipped

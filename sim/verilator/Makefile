@@ -169,6 +169,17 @@ $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(NOC_FABRIC_SV) $(C_SRC) $(DPI_HDR
 elaborate: ELABORATE_ONLY := 1
 elaborate: $(TBTOP_EXE)
 
+# The whole build, run excluded: Verilator plus the g++ of what it emitted.
+.PHONY: build
+build: $(TBTOP_EXE)
+
+# NO_BUILD=1 makes run-directed a run and nothing else, so it cannot silently
+# spend a build's worth of time. It reports the missing binary instead.
+.PHONY: check-built
+check-built:
+	@[ -x "$(TBTOP_EXE)" ] || { \
+	    echo "ERROR: $(TOPOLOGY) is not built. Run: make sim-build TB=$(TOPOLOGY)"; exit 1; }
+
 SEED       ?= 1
 
 # One directed run recipe, three injection modes.
@@ -265,7 +276,7 @@ _HOTSPOT_ARGS  := $(if $(filter hotspot,$(PATTERN)),$(if $(HOTSPOT_PERIPHERALS),
 _MCAST_ARGS    := $(if $(filter multicast,$(PATTERN)),--mcast-shape $(MCAST_SHAPE),)
 
 .PHONY: run-directed
-run-directed: $(TBTOP_EXE)
+run-directed: $(if $(NO_BUILD),check-built,$(TBTOP_EXE))
 	# Guard runs first in the recipe (before emit/run), so a wrong RUN_CLASS exits
 	# before a vacuous no-scoreboard run. Deliberately a recipe check, not a
 	# parse-time $(error): OBJ_DIR/TBTOP_EXE are := fixed at parse, so a target-

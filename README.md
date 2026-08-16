@@ -91,7 +91,15 @@ python3 specgen/tools/codegen.py --check   # committed generated code matches so
 
 ## Simulate (cosim)
 
-`make -C sim` builds the chosen topology and runs one directed pattern.
+`make sim` builds the chosen topology and runs one directed pattern. The two
+halves are also separate targets, so a run can be timed without a build hiding
+inside it:
+
+| target | does |
+|---|---|
+| `make sim TB= PATTERN=` | build, then run |
+| `make sim-build TB=` | build only. `PATTERN` names nothing here: a pattern is stimulus read at runtime, so every pattern runs on the same binary |
+| `make sim-run TB= PATTERN=` | run only. Reports the missing binary rather than building it |
 
 | var | values |
 |---|---|
@@ -103,8 +111,8 @@ python3 specgen/tools/codegen.py --check   # committed generated code matches so
 a run.
 
 ~~~bash
-make -C sim TB=mesh_4x4_vc1 PATTERN=neighbor
-make -C sim TB=mesh_4x4_vc8 PATTERN=transpose
+make sim TB=mesh_4x4_vc1 PATTERN=neighbor
+make sim TB=mesh_4x4_vc8 PATTERN=transpose
 ~~~
 
 On success the make wrapper prints `DIRECTED PASS: <run-tag> scoreboard
@@ -158,8 +166,8 @@ Fault injection, for proving a checker fires rather than assuming it does:
 | `ELABORATE_ONLY=1` | elaborates and stops, without running |
 
 ~~~bash
-make -C sim TB=mesh_4x4_vc4 PATTERN=uniform_random INJECTION_MODE=1 INJECTION_RATE=0.3
-make -C sim TB=mesh_4x4_vc4 PATTERN=uniform_random INJECTION_MODE=2 INJECTION_RATE=0.5
+make sim TB=mesh_4x4_vc4 PATTERN=uniform_random INJECTION_MODE=1 INJECTION_RATE=0.3
+make sim TB=mesh_4x4_vc4 PATTERN=uniform_random INJECTION_MODE=2 INJECTION_RATE=0.5
 ~~~
 
 On success mode 1 prints `CONTINUOUS PASS: <run-tag>` and writes
@@ -168,7 +176,7 @@ with the monitor's bandwidth and latency numbers; mode 2 prints
 `CHECKED PASS: <run-tag> scoreboard clean, non-vacuous` with run tag
 `checked_<topo>_rob<READ_ROB>_<pattern>_r<rate>_s<seed>`.
 
-`make -C sim sim-injection-sweep PATTERN=<p>` runs the full saturation sweep
+`make sim-injection-sweep PATTERN=<p>` runs the full saturation sweep
 (VC configs 1/2/4/8, nine rates each, overridable via `SWEEP_VCS` and
 `SWEEP_RATES`), then merges every `result.csv` and plots
 `sim/tools/injection_sweep.png`. The sweep rebuilds Verilator once per
@@ -202,8 +210,8 @@ disagree. Each direction gets its own stimulus directory and run tag, so a read
 run and a write run do not overwrite one another.
 
 ~~~bash
-make -C sim TB=mesh_4x4_vc1 DMA=1                 # 100 read jobs per node
-make -C sim TB=mesh_4x4_vc1 DMA=1 DMA_RW=write
+make sim TB=mesh_4x4_vc1 DMA=1                 # 100 read jobs per node
+make sim TB=mesh_4x4_vc1 DMA=1 DMA_RW=write
 ~~~
 
 On success the wrapper prints `DMA PASS: <run-tag> every job retired, every

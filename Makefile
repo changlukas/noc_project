@@ -1,6 +1,6 @@
 # Top-level Makefile — build and test gates. Run these targets from repo root.
 #
-# Simulation is not here: `make -C sim TB=... PATTERN=...`, see sim/Makefile.
+# Simulation is not here: `make sim TB=... PATTERN=...`, see sim/Makefile.
 # Run logs land in sim/verilator/output/<scenario>/run.log.
 #
 # All build artifacts live under the top-level build/ tree (gitignored):
@@ -27,9 +27,11 @@ help:
 	@echo "  make build-cmodel     c_model only -> build/cmodel/"
 	@echo "  make build-verilator  Verilator binaries -> build/verilator/"
 	@echo ""
-	@echo "Simulate (runs from sim/):"
-	@echo "  make -C sim TB=<topo> PATTERN=<p> [SEED=<n>]"
-	@echo "  make -C sim help      every simulation variable"
+	@echo "Simulate:"
+	@echo "  make sim TB=<topo> PATTERN=<p> [SEED=<n>]   build, then run"
+	@echo "  make sim-build TB=<topo>                    build only, no run"
+	@echo "  make sim-run TB=<topo> PATTERN=<p>          run only; errors if not built"
+	@echo "  make -C sim help                            every simulation variable"
 	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
@@ -59,7 +61,7 @@ build: build-cmodel build-verilator
 #   BUILD_ROOT := $(HOME)/noc_build   # native-Linux build dir (WSL rejects /mnt COFF)
 #   PYTHON3    := python3
 #   VERILATOR  := verilator
-# Then `make -C sim TB=tb_mesh_4x4_vc1 PATTERN=hotspot` needs no path/tool args
+# Then `make sim TB=tb_mesh_4x4_vc1 PATTERN=hotspot` needs no path/tool args
 # either: sim/build_config.mk reads this same file through PROJ_ROOT.
 -include local.mk
 
@@ -141,14 +143,20 @@ pytest:
 	(cd sim/tools && $(PYTHON3) -m pytest . -q) || status=1; \
 	exit $$status
 
-# Simulation runs from sim/, not here. `sim` is also a directory name, so
-# without these two make would answer the old command with "'sim' is up to
-# date" and run nothing — a silent no-op is worse than an error.
-.PHONY: sim sim-injection-sweep
+# Simulation runs from sim/, whose Makefiles reach tools/ and output/ by
+# relative path, so these forward with -C rather than include. TB, PATTERN and
+# the rest reach the sub-make on their own: make passes command-line variables
+# down through MAKEFLAGS. .PHONY is what stops `sim` matching the directory of
+# the same name and answering "'sim' is up to date" without running anything.
+.PHONY: sim sim-build sim-run sim-injection-sweep
 sim sim-injection-sweep:
-	@echo "Simulation moved to sim/. Use: make -C sim $(if $(filter sim-injection-sweep,$@),sim-injection-sweep )TB=<topo> PATTERN=<p>" >&2
-	@echo "  make -C sim help   for every variable" >&2
-	@false
+	@$(MAKE) -C sim $@
+
+sim-build:
+	@$(MAKE) -C sim build
+
+sim-run:
+	@$(MAKE) -C sim run
 
 # --- clean ---
 
