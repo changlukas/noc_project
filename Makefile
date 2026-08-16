@@ -148,7 +148,7 @@ pytest:
 # the rest reach the sub-make on their own: make passes command-line variables
 # down through MAKEFLAGS. .PHONY is what stops `sim` matching the directory of
 # the same name and answering "'sim' is up to date" without running anything.
-.PHONY: sim sim-build sim-run sim-injection-sweep
+.PHONY: sim sim-build sim-run sim-gen sim-injection-sweep
 sim sim-injection-sweep:
 	@$(MAKE) -C sim $@
 
@@ -157,6 +157,9 @@ sim-build:
 
 sim-run:
 	@$(MAKE) -C sim run
+
+sim-gen:
+	@$(MAKE) -C sim gen
 
 # --- clean ---
 

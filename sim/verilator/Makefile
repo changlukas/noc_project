@@ -275,6 +275,28 @@ EMIT_CSV       := $(COSIM_ROOT)/tools/emit_result_csv.py
 _HOTSPOT_ARGS  := $(if $(filter hotspot,$(PATTERN)),$(if $(HOTSPOT_PERIPHERALS),--hotspot-peripherals,--hotspot $(HOTSPOT)),)
 _MCAST_ARGS    := $(if $(filter multicast,$(PATTERN)),--mcast-shape $(MCAST_SHAPE),)
 
+.PHONY: gen-directed
+gen-directed:
+	@mkdir -p $(STIM_ROOT)
+	$(if $(filter 1,$(DMA)),,$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
+	    --out $(STIM_ROOT) --pattern $(PATTERN) \
+	    --transactions-per-node $(INJECTION_COUNT) --size 5 --len $(BURST_LEN) \
+	    --seed $(SEED) $(_HOTSPOT_ARGS) $(_MCAST_ARGS) \
+	    $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)))
+	$(if $(filter 1,$(DMA)),$(PYTHON3) $(GEN_DMA_JOBS) --topology $(TOPOLOGY) \
+	    --out $(STIM_ROOT) $(_DMA_JOB_ARGS))
+	@echo "stimulus: $(STIM_ROOT)"
+
+# Parse-time, unlike the RUN_CLASS guard at :288 which must be a recipe check:
+# nothing target-overrides STIM_ROOT, so its value is final here, and firing
+# before the first prerequisite is what keeps a missing stimulus tree from
+# costing a build first.
+ifneq ($(filter run-directed,$(MAKECMDGOALS)),)
+ifeq ($(wildcard $(STIM_ROOT)),)
+$(error no stimulus at $(STIM_ROOT). Run: make sim-gen TB=$(TOPOLOGY) PATTERN=$(PATTERN))
+endif
+endif
+
 .PHONY: run-directed
 run-directed: $(if $(NO_BUILD),check-built,$(TBTOP_EXE))
 	# Guard runs first in the recipe (before emit/run), so a wrong RUN_CLASS exits
@@ -283,13 +305,6 @@ run-directed: $(if $(NO_BUILD),check-built,$(TBTOP_EXE))
 	# specific override cannot re-key them; the cost is a wasted wrong-flavor build.
 	@[ "$(RUN_CLASS)" = "directed" ] || { echo "ERROR: run-directed requires RUN_CLASS=directed (got '$(RUN_CLASS)')"; exit 1; }
 	@mkdir -p output/$(SIM_TAG)
-	$(if $(filter 1,$(DMA)),,$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
-	    --out $(STIM_ROOT) --pattern $(PATTERN) \
-	    --transactions-per-node $(INJECTION_COUNT) --size 5 --len $(BURST_LEN) \
-	    --seed $(SEED) $(_HOTSPOT_ARGS) $(_MCAST_ARGS) \
-	    $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)))
-	$(if $(filter 1,$(DMA)),$(PYTHON3) $(GEN_DMA_JOBS) --topology $(TOPOLOGY) \
-	    --out $(STIM_ROOT) $(_DMA_JOB_ARGS))
 	@echo "running $(SIM_TAG) (mode=$(INJECTION_MODE) rate=$(INJECTION_RATE) count=$(INJECTION_COUNT) pattern=$(PATTERN))"
 	$(TBTOP_EXE) \
 	    "+stim_dir=$(STIM_ROOT)" \
@@ -347,3 +362,8 @@ hello:
 
 clean:
 	rm -rf $(VL_BUILD)/obj_dir_* output
+	# Generated stimulus goes; the tracked example stays. `clean` means "leave what
+	# git tracks", and -fdx is exactly that predicate -- an rm -rf here would delete
+	# the committed example, and leaving the directory alone is what put this
+	# Makefile in violation of the root's clean contract to begin with.
+	@git clean -fdxq $(STIM_BASE) 2>/dev/null || rm -rf $(STIM_BASE)

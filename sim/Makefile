@@ -10,7 +10,7 @@
 # Makefile includes ../build_config.mk by relative path and writes its logs to a
 # relative output/, so it has to run with verilator/ as its working directory.
 
-.PHONY: help sim build run sim-injection-sweep
+.PHONY: help sim build run gen sim-injection-sweep
 
 # `make -C sim TB=... PATTERN=...` carries no goal, so the default has to be the
 # run, not the first target in the file.
@@ -96,6 +96,15 @@ sim run:
 	$(MAKE) -C verilator $(if $(ELABORATE_ONLY),elaborate,run-directed) \
 	    TOPOLOGY=$(_TOPO) RUN_CLASS=directed \
 	    $(if $(filter run,$@),NO_BUILD=1) \
+	    PATTERN=$(PATTERN) SEED=$(_SEED) $(_INJ_ARGS) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT)) \
+	    $(if $(HOTSPOT_PERIPHERALS),HOTSPOT_PERIPHERALS=$(HOTSPOT_PERIPHERALS)) \
+	    $(if $(MCAST_SHAPE),MCAST_SHAPE=$(MCAST_SHAPE))
+
+# Stimulus generation alone: no build, no run. Writes test_patterns/<geometry>/<pattern>/.
+gen:
+	@echo ">>> gen TB=$(_TOPO) PATTERN=$(PATTERN) SEED=$(_SEED)"
+	$(MAKE) -C verilator gen-directed \
+	    TOPOLOGY=$(_TOPO) RUN_CLASS=directed \
 	    PATTERN=$(PATTERN) SEED=$(_SEED) $(_INJ_ARGS) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT)) \
 	    $(if $(HOTSPOT_PERIPHERALS),HOTSPOT_PERIPHERALS=$(HOTSPOT_PERIPHERALS)) \
 	    $(if $(MCAST_SHAPE),MCAST_SHAPE=$(MCAST_SHAPE))
