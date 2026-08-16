@@ -13,15 +13,15 @@ The fabric/tb split:
     user_node_endpoint (pulp axi_file_master + axi_delayer + axi_sim_mem +
     in-endpoint scoreboard + bw monitor) per node + exit logic.
 
-Generated artifacts: edit the generator or the topology YAML, never the emitted
+Generated artifacts: edit the generator or the config file, never the emitted
 .sv directly. tb_top_<topology>.sv includes the fabric (SV `include), resolved via
 the -I ref_model/top include path.
 
 Usage:
-    python3 gen_tb_top.py [--topology mesh_4x4_vc1] [--out sim/tb/test/tb_top_<topology>.sv]
+    python3 gen_tb_top.py [--topology mesh_4x4] [--out sim/tb/test/tb_top_<topology>.sv]
 
-Parameterised from topology YAML:
-    - nodes list [(x,y), ...] from x_dim x y_dim
+Parameterised from the FlooNoC-shaped config (sim/configs/*.yml):
+    - nodes list [(x,y), ...] from the router array
     - node_id = (y << X_WIDTH) | x  (coordinate-encoded; == linear index for 1-D)
     - per-node router/nmu/nsu ctx handles; TILE_BASE_ADDR / TILE_SIZE, each node's
       own tile-crossbar windows, from address_map.node_windows() (see
@@ -30,14 +30,13 @@ Parameterised from topology YAML:
     - PASS guard: all endpoints done (end_of_sim) AND every node non-vacuous
       (txn_cnt > 0)
 
-Constants kept as template (not derived from topology YAML):
+Constants kept as template (not derived from the config):
     - clk/rst timing (10 ns clock, 4-cycle reset); load-scaled watchdog
     - localparam width constants from ni_params_pkg, DPI signatures
     - perf instrumentation, FSDB block, DPI error poll structure
 """
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -50,21 +49,24 @@ ROOT = Path(__file__).resolve().parents[2]
 X_WIDTH = 4
 
 
-def _geometry_name(topology: str) -> str:
-    """Strip the _vc<N> suffix -- the same single substitution
-    sim/verilator/Makefile's _GEOMETRY sed performs for stimulus, so the
-    topology package and its stimulus key on the same name.
-    mesh_4x4_vc1/_vc8/_vc8_robless all reduce to mesh_4x4 and share one
-    topology_mesh_4x4_pkg."""
-    return re.sub(r"_vc[0-9]*", "", topology, count=1)
-
-
 def load_topology(name: str) -> dict:
     import yaml
-    path = ROOT / "sim" / "topologies" / f"{name}.yaml"
+    path = ROOT / "sim" / "configs" / f"{name}.yml"
     topo = yaml.safe_load(path.read_text())
     _check_flit_capacity(topo, path)
     return topo
+
+
+def num_vc() -> int:
+    """DAT virtual-channel count, from where the parameter is defined.
+
+    noc.DAT_NUM_VC in specgen/source/constants.yaml. The config files do not
+    carry it: it is a DUT parameter and does not vary with the geometry, so
+    changing it is an edit to that file and a rebuild.
+    """
+    import yaml
+    c = yaml.safe_load((ROOT / "specgen" / "source" / "constants.yaml").read_text())
+    return int(c["noc"]["DAT_NUM_VC"]["default"])
 
 
 # Y_WIDTH / VC_ID_WIDTH mirror the flit spec (ni_packet.json field_widths).
@@ -73,7 +75,7 @@ VC_ID_WIDTH = 3
 DST_ID_WIDTH = X_WIDTH + Y_WIDTH  # 8 bits → 256 max nodes
 
 
-def _check_flit_capacity(topo: dict, path) -> None:
+def _check_flit_capacity(cfg: dict, path) -> None:
     """Reject a topology whose mesh dims / num_vc exceed the flit field capacity,
     or whose mesh dims fall below the per-dimension minimum.
 
@@ -86,10 +88,12 @@ def _check_flit_capacity(topo: dict, path) -> None:
     a mesh communicating through NI + router needs at least 2x2. 1x1 and 1xN
     meshes are illegal (specgen/source/constants.yaml MESH_X_DIM/MESH_Y_DIM min).
     """
-    t = topo["topology"]
-    x_dim = int(t["x_dim"])
-    y_dim = int(t["y_dim"])
-    num_vc = int(t["num_vc"])
+    # Read straight off the router array rather than through
+    # address_map.router_array(): this is a second, independent reader, and its
+    # per-axis power-of-two report below is the stronger of the two checks.
+    array = cfg["routers"][0]["array"]
+    x_dim, y_dim = int(array[0]), int(array[1])
+    dat_num_vc = num_vc()
     cap_x = 1 << X_WIDTH
     cap_y = 1 << Y_WIDTH
     cap_nodes = 1 << DST_ID_WIDTH
@@ -113,8 +117,8 @@ def _check_flit_capacity(topo: dict, path) -> None:
         errors.append(f"y_dim={y_dim} > 2^Y_WIDTH={cap_y}")
     if x_dim * y_dim > cap_nodes:
         errors.append(f"x_dim*y_dim={x_dim * y_dim} > 2^DST_ID_WIDTH={cap_nodes}")
-    if num_vc > cap_vc:
-        errors.append(f"num_vc={num_vc} > 2^VC_ID_WIDTH={cap_vc}")
+    if dat_num_vc > cap_vc:
+        errors.append(f"num_vc={dat_num_vc} > 2^VC_ID_WIDTH={cap_vc}")
     if errors:
         raise SystemExit(
             f"gen_tb_top: flit-capacity violated in {path}:\n"
@@ -140,9 +144,7 @@ def _nodes(topo: dict):
     router's route coordinate IS its array position, and coord_id is the routing
     id built from it.
     """
-    t = topo["topology"]
-    x_dim = t["x_dim"]
-    y_dim = t["y_dim"]
+    x_dim, y_dim = address_map.router_array(topo)
     out = []
     idx = 0
     for y in range(y_dim):
@@ -152,58 +154,60 @@ def _nodes(topo: dict):
     return out, x_dim, y_dim
 
 
+# XYDirections (FlooNoC routing.py:245-252). EJECT is the LOCAL port a tile
+# owns; the four compass values are the boundary ports a peripheral hangs off.
+_EJECT = 4
+_DIR_NAME = {0: "NORTH", 1: "EAST", 2: "SOUTH", 3: "WEST"}
+
+
 def _peripherals(topo: dict):
-    """address_map.peripherals, in declaration order.
+    """Endpoints attached to a boundary port instead of EJECT, in member order.
 
     A peripheral has an NI and a test endpoint but no router. It SHARES its host
     router's coordinate and is told apart by the boundary port it hangs off:
-    face "x" is port 1, face "y" is port 2. Which direction that port is follows
-    from the router's own edge -- an x face on column 0 is WEST, on the last
-    column EAST -- so the face names the axis and the coordinate names the side.
+    EAST/WEST are port 1, NORTH/SOUTH port 2. dst_dir is read as that port and
+    never as a coordinate offset -- FlooNoC derives a non-router NI's coordinate
+    from it, which here would place the peripheral one step outside the mesh.
 
-    A corner router is legal: it has two free faces, and the face says which one
+    A corner router is legal: it has two free faces, and dst_dir says which one
     is meant.
 
-    Returns [{"x", "y", "cid", "port", "face", "router_idx", "dir"}, ...].
+    Returns [{"x", "y", "cid", "port", "router_idx", "dir"}, ...].
     Peripherals extend the ENDPOINT index space, not the node index space:
     nodes 0..N-1 stay the routers and peripheral p is endpoint N + p.
     """
-    t = topo["topology"]
-    x_dim, y_dim = int(t["x_dim"]), int(t["y_dim"])
+    x_dim, y_dim = address_map.router_array(topo)
     out = []
-    taken = {}
-    for per in (topo.get("address_map") or {}).get("peripherals") or []:
-        x, y, face = int(per["x"]), int(per["y"]), per["face"]
-        if face not in ("x", "y"):
-            raise SystemExit(
-                f"gen_tb_top: peripheral (x={x},y={y}) face {face!r} must be 'x' or 'y'")
-        if not (0 <= x < x_dim and 0 <= y < y_dim):
-            raise SystemExit(
-                f"gen_tb_top: peripheral (x={x},y={y}) is outside the {x_dim}x{y_dim} router "
-                f"array -- a peripheral shares a router's coordinate, it does not take one of "
-                f"its own")
-        # Same rule sam_yaml.hpp's loader applies, checked here because the
-        # generator is a second, independent reader of the same YAML: on an edge
-        # router the named face has no neighbour and the port is terminal, while
-        # on an interior router it carries a live inter-router link and hanging a
-        # peripheral off it closes a channel dependency cycle.
-        if face == "x":
-            direction = "WEST" if x == 0 else "EAST" if x == x_dim - 1 else None
-        else:
-            direction = "SOUTH" if y == 0 else "NORTH" if y == y_dim - 1 else None
-        if direction is None:
-            raise SystemExit(
-                f"gen_tb_top: peripheral (x={x},y={y}) face {face!r} names an edge this "
-                f"coordinate is not on -- an interior router's port carries a live "
-                f"inter-router link, and hanging a peripheral off it closes a channel "
-                f"dependency cycle")
-        if (x, y, face) in taken:
-            raise SystemExit(
-                f"gen_tb_top: two peripherals both claim (x={x},y={y}) face {face!r}")
-        taken[(x, y, face)] = True
-        out.append({"x": x, "y": y, "cid": _coord_id(x, y),
-                    "port": 1 if face == "x" else 2, "face": face,
-                    "router_idx": y * x_dim + x, "dir": direction})
+    taken = set()
+    for ep in topo["endpoints"]:
+        for a in address_map.attachments(topo, ep["name"], address_map.members(ep), x_dim):
+            if a["dir"] == _EJECT:
+                continue
+            x, y, direction = a["x"], a["y"], _DIR_NAME[a["dir"]]
+            if not (0 <= x < x_dim and 0 <= y < y_dim):
+                raise SystemExit(
+                    f"gen_tb_top: peripheral {ep['name']} at (x={x},y={y}) is outside the "
+                    f"{x_dim}x{y_dim} router array -- a peripheral shares a router's "
+                    f"coordinate, it does not take one of its own")
+            # Same rule sam_yaml.hpp's loader applies, checked here because the
+            # generator is a second, independent reader of the same config: on an
+            # edge router the named port has no neighbour and is terminal, while
+            # on an interior router it carries a live inter-router link and
+            # hanging a peripheral off it closes a channel dependency cycle.
+            on_edge = {"WEST": x == 0, "EAST": x == x_dim - 1,
+                       "SOUTH": y == 0, "NORTH": y == y_dim - 1}[direction]
+            if not on_edge:
+                raise SystemExit(
+                    f"gen_tb_top: peripheral {ep['name']} at (x={x},y={y}) hangs off the "
+                    f"{direction} port, an edge this coordinate is not on -- an interior "
+                    f"router's port carries a live inter-router link, and hanging a "
+                    f"peripheral off it closes a channel dependency cycle")
+            if (x, y, direction) in taken:
+                raise SystemExit(
+                    f"gen_tb_top: two peripherals both claim (x={x},y={y}) {direction}")
+            taken.add((x, y, direction))
+            out.append({"x": x, "y": y, "cid": _coord_id(x, y), "port": a["port"],
+                        "router_idx": y * x_dim + x, "dir": direction})
     return out
 
 
@@ -307,8 +311,7 @@ def tile_targets(topo: dict, endpoints):
 
     Returns ({endpoint_idx: [{"space", "base", "size"}, ...]}, noc_egress_base).
     """
-    t = topo["topology"]
-    _bases, entries = address_map.pack(topo.get("address_map"), int(t["x_dim"]), int(t["y_dim"]))
+    _bases, entries = address_map.pack_document(topo)
     out = {}
     for idx, _x, _y, cid, port in endpoints:
         windows = address_map.node_windows(entries, cid, port)
@@ -590,13 +593,13 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
                 jobs_per_node: int = _DMA_JOBS_PER_NODE,
                 job_bytes: int = _DMA_JOB_BYTES,
                 rw: str = _DMA_RW) -> str:
-    name = topo["topology"]["name"]
+    name = topo["name"]
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
     peripherals = _peripherals(topo)
     endpoints = _endpoints(nodes, peripherals)
     n_ep = len(endpoints)
-    num_vc = topo["topology"]["num_vc"]
+    dat_num_vc = num_vc()
     # Every loop that walks the initiators walks ENDPOINTS on a topology with a
     # peripheral: each one injects, each one can wedge, and each one has an NMU.
     exit_n = "NUM_ENDPOINTS" if peripherals else "NUM_NODES"
@@ -641,8 +644,8 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
     w("`timescale 1ns/1ps")
     w("")
     w("// AUTO-GENERATED by sim/tools/gen_tb_top.py")
-    w(f"// Topology: {name}  ({x_dim}x{y_dim}, dat_num_vc={num_vc})")
-    w("// DO NOT EDIT - modify the generator or sim/topologies/*.yaml instead.")
+    w(f"// Topology: {name}  ({x_dim}x{y_dim}, dat_num_vc={dat_num_vc})")
+    w("// DO NOT EDIT - modify the generator or sim/configs/*.yml instead.")
     w("//")
     w(f"// {n} nodes live inside noc_fabric (ni_wrap=NMU+NSU + REQ/RSP router per")
     w("// node, joined by directional links). tb_top creates the DPI handles, attaches a")
@@ -685,7 +688,8 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
     w("    localparam int unsigned ID_WIDTH      = ni_params_pkg::AXI_ID_WIDTH_DFLT;")
     w("    localparam int unsigned ADDR_WIDTH    = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;")
     w("    localparam int unsigned DATA_WIDTH    = ni_params_pkg::AXI_DATA_WIDTH_DFLT;")
-    w(f"    localparam int unsigned DAT_NUM_VC     = {num_vc};  // from topology YAML")
+    w(f"    localparam int unsigned DAT_NUM_VC     = {dat_num_vc};"
+      "  // specgen constants.yaml noc.DAT_NUM_VC")
     w("    // NMU read reorder buffer (READ_ROB): 1 = the reorder-buffer response path")
     w("    // docs/noc-target-spec.md section 3 describes, 0 = the RoBless bypass with")
     w("    // its per-id single-outstanding interlock. int unsigned, not bit: it goes")
@@ -1135,7 +1139,7 @@ def emit_topology_pkg(topo: dict) -> str:
     tile_base_addr = _rows("base")
     tile_size = _rows("size")
 
-    geom = _geometry_name(topo["topology"]["name"])
+    geom = topo["name"]
     pkg = f"topology_{geom}_pkg"
     guard = pkg.upper() + "_SVH"
     # Sized max(N_PERIPH, 1): a packed array cannot have zero elements
@@ -1154,7 +1158,7 @@ def emit_topology_pkg(topo: dict) -> str:
     w("")
     w("// AUTO-GENERATED by sim/tools/gen_tb_top.py --emit-topology-pkg")
     w(f"// Geometry: {geom}  ({x_dim}x{y_dim}, {len(peripherals)} peripheral(s))")
-    w("// DO NOT EDIT - modify the generator or sim/topologies/*.yaml instead.")
+    w("// DO NOT EDIT - modify the generator or sim/configs/*.yml instead.")
     w("//")
     w("// Address-map constants for every topology sharing this geometry (e.g.")
     w("// mesh_4x4_vc1/_vc8/_vc8_robless): TILE_BASE_ADDR / TILE_SIZE /")
@@ -1197,8 +1201,8 @@ def emit_topology_pkg(topo: dict) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Generate tb_top_<topology>.sv.")
-    ap.add_argument("--topology", default="mesh_4x4_vc1",
-                    help="Topology name (matches sim/topologies/<name>.yaml)")
+    ap.add_argument("--topology", default="mesh_4x4",
+                    help="Configuration name (matches sim/configs/<name>.yml)")
     ap.add_argument("--out", default=None,
                     help="Output tb_top.sv path (default: sim/tb/test/tb_top_<topology>.sv)")
     ap.add_argument("--read-rob", type=int, choices=(0, 1), default=1,
@@ -1220,25 +1224,26 @@ def main() -> int:
                     help="--dma only: direction for every job. Must match the "
                          "gen_dma_jobs.py run that wrote them.")
     ap.add_argument("--print-num-vc", action="store_true",
-                    help="Print the topology's num_vc and exit. sim/build_config.mk picks "
-                         "the per-VC noc_types_pkg with it, so that value is read where it "
-                         "is declared instead of parsed back out of the topology name.")
+                    help="Print noc.DAT_NUM_VC (specgen/source/constants.yaml) and exit. "
+                         "sim/build_config.mk picks the per-VC noc_types_pkg with it, so that "
+                         "value is read where it is declared instead of parsed back out of "
+                         "the topology name. The config is still loaded first, so the "
+                         "flit-capacity check runs on this branch too.")
     ap.add_argument("--emit-topology-pkg", action="store_true",
                     help="Emit the per-geometry address-map package instead of tb_top: "
                          "topology_<geometry>_pkg.sv, exporting the same TILE_BASE_ADDR / "
                          "TILE_SIZE / NOC_EGRESS_BASE / peripheral table tb_top stamps "
                          "inline, for a hand-written testbench to `import`. Default output "
                          "is sim/tb/test/topology_<geometry>_pkg.sv, one per geometry "
-                         "(--topology's name minus its _vc<N> suffix).")
+                         "(the config file's own name).")
     a = ap.parse_args()
 
     topo = load_topology(a.topology)
     if a.print_num_vc:
-        print(topo["topology"]["num_vc"])
+        print(num_vc())
         return 0
     if a.emit_topology_pkg:
-        geom = _geometry_name(a.topology)
-        default_out = ROOT / "sim" / "tb" / "test" / f"topology_{geom}_pkg.sv"
+        default_out = ROOT / "sim" / "tb" / "test" / f"topology_{a.topology}_pkg.sv"
         out_path = Path(a.out) if a.out is not None else default_out
         out_path.write_text(emit_topology_pkg(topo), encoding="utf-8")
         return 0
@@ -1253,13 +1258,13 @@ def main() -> int:
     # it. Not a zero-size window: addr_decode_dync reads a zero end_addr as the
     # END-OF-ADDRESS-SPACE WILDCARD, which is why the pad is a real
     # _PAD_BYTES range instead.
-    if a.dma and (topo.get("address_map") or {}).get("peripherals"):
+    if a.dma and _peripherals(topo):
         raise SystemExit(
-            f"gen_tb_top: --dma does not support topology {a.topology}, which declares "
-            f"address_map.peripherals -- gen_dma_jobs.job_table emits jobs for the router "
+            f"gen_tb_top: --dma does not support configuration {a.topology}, which attaches an "
+            f"endpoint to a boundary port -- gen_dma_jobs.job_table emits jobs for the router "
             f"array only, so a peripheral endpoint has no jobs.txt and its idma_job_driver "
-            f"$fatals on the missing file (docs/known-limitations.md). Use a topology with "
-            f"no peripherals block, or the directed top (no --dma)")
+            f"$fatals on the missing file (docs/known-limitations.md). Use a configuration "
+            f"whose endpoints are all on EJECT, or the directed top (no --dma)")
     tb_text = emit_tb_top(topo, bool(a.read_rob), a.dma, a.jobs_per_node, a.length, a.rw)
     default_out = ROOT / "sim" / "tb" / "soc" / f"tb_top_dma_{a.topology}.sv" if a.dma \
         else ROOT / "sim" / "tb" / "test" / f"tb_top_{a.topology}.sv"

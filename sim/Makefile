@@ -22,7 +22,7 @@ help:
 	@echo "  make sim-build TB=<topo>                    build only, no run"
 	@echo "  make sim-run TB=<topo> PATTERN=<p>          run only; errors if not built"
 	@echo "  make sim TB=mesh_4x4_vc1 PATTERN=neighbor"
-	@echo "  TB:      topology from topologies/"
+	@echo "  TB:      configuration from build_config.mk's table (its geometry is a sim/configs/*.yml)"
 	@echo "  PATTERN: $(_VALID_PATTERNS)"
 	@echo "  Vars: INJECTION_MODE=0|1|2 READ_ROB=0|1 INJECTION_RATE= INJECTION_COUNT= IDS_PER_INITIATOR= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT= HOTSPOT_PERIPHERALS=1; SEED unset draws + prints a random seed"
 	@echo "  Forensics: TIMEOUT_CYCLES=<n> fires the watchdog early, so a hang dumps per-node outstanding and last_progress without waiting out the formula"

@@ -107,9 +107,8 @@ $(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/tools/gen_filelist.py
 
 # tb_top_<TOPOLOGY>.sv is a generated artifact; regenerate
 # from the topology config before Verilating. Depends on the generator script, the
-# topology YAML, and a TOPOLOGY stamp. TB_TOP_SV comes from build_config.mk
+# config file, and a TOPOLOGY stamp. TB_TOP_SV comes from build_config.mk
 # (deferred = so TOPOLOGY expands correctly).
-TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY_YAML).yaml
 GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VL_BUILD)/.topology
 
@@ -120,7 +119,7 @@ VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 # TOPOLOGY stamp records the last-built topology name. The FORCE-driven rule
 # rewrites it ONLY when TOPOLOGY changed (content compare), bumping its mtime so
 # the tb_top_<TOPOLOGY>.sv prerequisite check re-emits on a topology switch even
-# if the YAML itself hasn't changed. READ_ROB joins it because it also changes
+# if the config file itself hasn't changed. READ_ROB joins it because it also changes
 # what the generator emits. Unchanged stamp leaves the file alone.
 .PHONY: FORCE
 FORCE:
@@ -139,8 +138,8 @@ GEN_DMA_JOBS := $(COSIM_ROOT)/tools/gen_dma_jobs.py
 # SOURCE file, and a rule with this recipe would overwrite it with generator
 # output the first time the stamp or the generator was newer.
 ifndef TB_HANDWRITTEN
-$(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_params_pkg.sv
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY_YAML) --read-rob $(READ_ROB) \
+$(TB_TOP_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_params_pkg.sv
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY_GEOMETRY) --read-rob $(READ_ROB) \
 	    $(if $(filter 1,$(DMA)),--dma $(_DMA_JOB_ARGS)) --out $(TB_TOP_SV)
 endif
 
@@ -148,10 +147,10 @@ endif
 # per-geometry address-map package tb_top's own TILE_BASE_ADDR / TILE_SIZE /
 # NOC_EGRESS_BASE / peripheral table are relocated from. No TOPO_STAMP, unlike
 # TB_TOP_SV above: the package doesn't vary with RUN_CLASS/READ_ROB/DMA, only
-# with the address map the topology YAML declares, so it rebuilds only when
-# that YAML or the generator changes.
-$(TOPOLOGY_PKG_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP)
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY_YAML) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
+# with the address map the config file declares, so it rebuilds only when
+# that file or the generator changes.
+$(TOPOLOGY_PKG_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY_GEOMETRY) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
 
 # Mirrors the root Makefile. Override via local.mk if needed.
 PYTHON3 ?= python3
@@ -300,12 +299,12 @@ _MCAST_ARGS    := $(if $(filter multicast,$(PATTERN)),--mcast-shape $(MCAST_SHAP
 .PHONY: gen-directed
 gen-directed:
 	@mkdir -p $(STIM_ROOT)
-	$(if $(filter 1,$(DMA)),,$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY_YAML) \
+	$(if $(filter 1,$(DMA)),,$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY_GEOMETRY) \
 	    --out $(STIM_ROOT) --pattern $(PATTERN) \
 	    --transactions-per-node $(INJECTION_COUNT) --size 5 --len $(BURST_LEN) \
 	    --seed $(SEED) $(_HOTSPOT_ARGS) $(_MCAST_ARGS) \
 	    $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)))
-	$(if $(filter 1,$(DMA)),$(PYTHON3) $(GEN_DMA_JOBS) --topology $(TOPOLOGY_YAML) \
+	$(if $(filter 1,$(DMA)),$(PYTHON3) $(GEN_DMA_JOBS) --topology $(TOPOLOGY_GEOMETRY) \
 	    --out $(STIM_ROOT) $(_DMA_JOB_ARGS))
 	@echo "stimulus: $(STIM_ROOT)"
 
@@ -342,7 +341,7 @@ run-directed: $(if $(NO_BUILD),check-built,$(TBTOP_EXE))
 	    $(if $(DECERR_FAULT),"+decerr_fault=$(DECERR_FAULT)") \
 	    $(if $(DECERR_FAULT_WR),"+decerr_fault_wr=$(DECERR_FAULT_WR)") \
 	    "+verilator+seed+$(SEED)" \
-	    "+sam_config=$(TB_TOP_TOPO)" \
+	    "+sam_config=$(TOPOLOGY_CONFIG)" \
 	    "+perf_out=output/$(SIM_TAG)/perf.json" \
 	    "+perf_scenario=$(SIM_TAG)" \
 	    > output/$(SIM_TAG)/run.log 2>&1; \
@@ -359,7 +358,7 @@ run-directed: $(if $(NO_BUILD),check-built,$(TBTOP_EXE))
 	    fi; \
 	    $(PYTHON3) $(EMIT_CSV) --log output/$(SIM_TAG)/run.log \
 	        --out output/$(SIM_TAG)/result.csv \
-	        --topology $(TOPOLOGY_YAML) --pattern $(PATTERN) \
+	        --topology $(TOPOLOGY) --pattern $(PATTERN) \
 	        --injection-mode $(INJECTION_MODE) --injection-rate $(INJECTION_RATE) \
 	        --injection-count $(INJECTION_COUNT) --seed $(SEED) \
 	        $(if $(MAX_UNIQUE_IDS),--max-unique-ids $(MAX_UNIQUE_IDS)) \

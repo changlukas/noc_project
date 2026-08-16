@@ -167,7 +167,7 @@ TEST(DatMergeWrap, IngressDemuxesByAxiCh) {
 // contending DataR land between them.
 TEST(DatMergeWrap, RealNmuSteeringKeepsAwWContiguousUnderNsuContention) {
     NmuWrap nmu;
-    nmu.init(TOPOLOGY_DIR "/mesh_2x2_vc1.yaml", /*src_id=*/0x01, /*port_id=*/0, /*dat_num_vc=*/1);
+    nmu.init(CONFIG_DIR "/mesh_2x2.yml", /*src_id=*/0x01, /*port_id=*/0, /*dat_num_vc=*/1);
     DatMergeWrap merge;
     merge.init(/*dat_num_vc=*/1);
 

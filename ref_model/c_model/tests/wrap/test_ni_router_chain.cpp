@@ -25,10 +25,10 @@ constexpr std::size_t LOCAL = 0, EAST = 2, WEST = 4;
 // NmuWrap::init takes a topology YAML, no default map. The chain runs on a
 // 2x2 mesh, so the shipped 2x2 is the map; tests needing a different shape
 // write their own YAML below.
-constexpr const char* kTopologyYaml = TOPOLOGY_DIR "/mesh_2x2_vc1.yaml";
+constexpr const char* kTopologyYaml = CONFIG_DIR "/mesh_2x2.yml";
 // Same 2x2 plus a peripherals block. Declares { x: 0, y: 0, face: x }, which is
 // port 1 at (0,0) -- the configuration a non-zero requester port needs.
-constexpr const char* kPeriphTopologyYaml = TOPOLOGY_DIR "/mesh_2x2_vc1_periph.yaml";
+constexpr const char* kPeriphTopologyYaml = CONFIG_DIR "/mesh_2x2_periph.yml";
 
 struct Node {
     NmuWrap nmu;

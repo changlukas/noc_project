@@ -21,23 +21,22 @@ target_include_directories(test_depacketize PRIVATE
 
 add_cmodel_test(test_addr_trans)
 target_link_libraries(test_addr_trans PRIVATE yaml-cpp::yaml-cpp)
-# The collective issuer cases load the shipped peripheral topology: a peripheral
+# The collective issuer cases load the shipped peripheral config: a peripheral
 # and its host router share a coordinate there, which is the case the issuer gate
 # has to tell apart and no hand-built fixture states.
 target_compile_definitions(test_addr_trans PRIVATE
-  TOPOLOGY_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../../sim/topologies")
+  CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../../sim/configs")
 
 add_cmodel_test(test_sam_table)
 
 add_cmodel_test(test_sam_yaml)
 target_link_libraries(test_sam_yaml PRIVATE yaml-cpp::yaml-cpp)
-# The test globs sim/topologies/ directly instead of a copy next to the binary:
-# `cmake -E copy_directory` mirrors additively, so a deleted topology YAML
-# lingers in the build tree forever (mesh_1x1_vc1 and mesh_2x2_nonuniform_vc1
-# both did) and a new one appears only when the test binary relinks. Reading the
-# source directory is also what the Python twin does.
+# The test globs sim/configs/ directly instead of a copy next to the binary:
+# a copy_directory mirror is additive, so a deleted config lingers in the build
+# tree forever and a new one appears only when the test binary relinks. Reading
+# the source directory is also what the Python twin does.
 target_compile_definitions(test_sam_yaml PRIVATE
-  TOPOLOGY_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../../sim/topologies")
+  CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../../sim/configs")
 
 add_cmodel_test(test_sam_config)
 target_link_libraries(test_sam_config PRIVATE yaml-cpp::yaml-cpp)

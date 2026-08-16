@@ -4,7 +4,7 @@
 // NMU read reorder buffer enabled.
 //
 // The geometry and the address map come from topology_mesh_2x2_periph_pkg,
-// generated from sim/topologies/mesh_2x2_vc1_periph.yaml. Everything below the
+// generated from sim/configs/mesh_2x2_periph.yml. Everything below the
 // module boundary is noc_tb_top, shared with every other configuration.
 //
 // NUM_ENDPOINTS is 6, not 4: a peripheral has an NI and an endpoint but no

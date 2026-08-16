@@ -83,13 +83,9 @@ endif
 # filename parsing -- a suffix like _robless is not a geometry, and a scrape
 # would have to learn every suffix.
 #
-# TB_TOPOLOGY_YAML names the topology YAML the configuration reads, for the one
-# entry whose name is not a YAML name (mesh_4x4_vc8_robless shares
-# mesh_4x4_vc8.yaml -- it differs in an NI parameter, not in a topology).
-# Everywhere else TOPOLOGY is its own YAML and the field is omitted.
-# TRANSITIONAL: once the YAMLs are renamed to geometry names (mesh_4x4_vc1/_vc2/
-# _vc4/_vc8 collapsing into one mesh_4x4.yaml), the YAML basename IS TB_GEOMETRY
-# and this field says nothing TB_GEOMETRY does not. Delete it in that stage.
+# TB_GEOMETRY doubles as the config file basename: sim/configs/<geometry>.yml is
+# the one file the configuration reads, so mesh_4x4_vc1/_vc2/_vc4/_vc8/
+# _vc8_robless all read sim/configs/mesh_4x4.yml.
 ifeq ($(TOPOLOGY),mesh_2x2_vc1)
 TB_HANDWRITTEN := 1
 TB_GEOMETRY    := mesh_2x2
@@ -129,11 +125,10 @@ TB_NUM_VC      := 8
 TB_READ_ROB    := 1
 endif
 ifeq ($(TOPOLOGY),mesh_4x4_vc8_robless)
-TB_HANDWRITTEN   := 1
-TB_GEOMETRY      := mesh_4x4
-TB_NUM_VC        := 8
-TB_READ_ROB      := 0
-TB_TOPOLOGY_YAML := mesh_4x4_vc8
+TB_HANDWRITTEN := 1
+TB_GEOMETRY    := mesh_4x4
+TB_NUM_VC      := 8
+TB_READ_ROB    := 0
 endif
 # Geometry is mesh_4x4_periph4, not mesh_4x4: the peripherals change the address
 # map and the endpoint count, so this configuration imports a package of its own.
@@ -144,11 +139,18 @@ TB_NUM_VC      := 1
 TB_READ_ROB    := 1
 endif
 
-# The YAML every topology query reads: the generator's --topology argument, the
-# SAM config passed at runtime, and the stimulus generators' --topology. Falls
-# back to TOPOLOGY, which is the YAML name for every configuration but the one
-# above.
-TOPOLOGY_YAML := $(if $(TB_TOPOLOGY_YAML),$(TB_TOPOLOGY_YAML),$(TOPOLOGY))
+# The config file every topology query reads: the generator's --topology
+# argument, the SAM config passed at runtime, and the stimulus generators'
+# --topology. Geometry = TOPOLOGY minus its _vc<N> suffix, so mesh_4x4_vc1/_vc8/
+# _vc8_robless share one sim/configs/mesh_4x4.yml and one topology_mesh_4x4_pkg.
+# It also keys the stimulus directory in sim/verilator/Makefile, which reads
+# this variable rather than repeating the sed.
+# A checked-in testbench names its geometry in the table above, for the same
+# reason it names its VC count: the package it imports is compiled in.
+# Kept on one line: a backslash continuation would fold the next line's leading
+# whitespace into the else branch, and the geometry is half a file name.
+TOPOLOGY_GEOMETRY := $(if $(TB_GEOMETRY),$(TB_GEOMETRY),$(shell echo $(TOPOLOGY) | sed 's/_vc[0-9]*//'))
+TOPOLOGY_CONFIG   := $(COSIM_ROOT)/configs/$(TOPOLOGY_GEOMETRY).yml
 
 # DMA=1 selects the iDMA top instead: a pulp iDMA backend on the master face of
 # every endpoint, on its own generated top (gen_tb_top.py --dma). Everything
@@ -266,51 +268,38 @@ ENDPOINT_SRC := $(if $(filter 1,$(DMA)),$(DMA_ENDPOINT_SRC),\
 # separately, otherwise an edit to it leaves the binary "up to date" and is
 # silently never compiled.
 NOC_FABRIC_SV = $(SRC_SV)/noc_fabric.sv
-# num_vc comes from the topology YAML, never from the topology NAME: a name
-# carries suffixes that are not the vc word (_periph), and reading a declared
-# value out of a filename needs a new strip per suffix. gen_tb_top.py already
-# loads and validates the YAML, so it answers rather than a second reader here.
+# num_vc is a DUT parameter, so it comes from where it is defined:
+# specgen/source/constants.yaml noc.DAT_NUM_VC. The config files do not carry it
+# and neither does the topology NAME -- a name carries suffixes that are not the
+# vc word (_periph), and reading a declared value out of a filename needs a new
+# strip per suffix. gen_tb_top.py answers, rather than a second reader here, and
+# loading the config first means this query also runs the flit-capacity check
+# once per make parse.
 # $(or ...) honours a local.mk PYTHON3 without defining one, which would
 # pre-empt each Makefile's own default.
-TOPOLOGY_NUM_VC := $(shell $(or $(PYTHON3),python3) \
-    $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY_YAML) --print-num-vc)
-# An empty result means the generator failed -- unknown TOPOLOGY, missing YAML,
+CONSTANTS_NUM_VC := $(shell $(or $(PYTHON3),python3) \
+    $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY_GEOMETRY) --print-num-vc)
+# An empty result means the generator failed -- unknown TOPOLOGY, missing config,
 # flit-capacity violation. Without this the symptom is a missing
 # noc_types_pkg_vc.sv instead of the generator's own message.
-$(if $(TOPOLOGY_NUM_VC),,$(error gen_tb_top.py --print-num-vc produced nothing for \
+$(if $(CONSTANTS_NUM_VC),,$(error gen_tb_top.py --print-num-vc produced nothing for \
 TOPOLOGY=$(TOPOLOGY); run it directly to see why))
-# A checked-in testbench states its VC count twice and derives neither from the
-# YAML: TB_NUM_VC above picks the flit package compiled in, DAT_NUM_VC in the
-# testbench source parameterizes the fabric and the NIs. Editing num_vc in the
-# YAML regenerates the address-map package and passes the flit-capacity check
-# while still compiling the old noc_types_pkg_vc<N> and building the NIs at the
-# old width -- a build that agrees with nothing, and silent. The query above
-# therefore runs for the hand-written topologies too, one interpreter start per
-# make parse, and the answer is compared rather than skipped.
-ifdef TB_NUM_VC
-ifneq ($(TB_NUM_VC),$(TOPOLOGY_NUM_VC))
-$(error TB_NUM_VC=$(TB_NUM_VC) for TOPOLOGY=$(TOPOLOGY) but \
-$(COSIM_ROOT)/topologies/$(TOPOLOGY_YAML).yaml declares num_vc=$(TOPOLOGY_NUM_VC). \
-Update the table above AND the DAT_NUM_VC localparam in \
-$(COSIM_ROOT)/tb/tb_$(TOPOLOGY).sv, or put the YAML back)
-endif
-endif
+# A checked-in testbench fixes DAT_NUM_VC in its own source, so its table entry
+# -- not constants.yaml -- picks the flit package it is compiled against; the
+# two would otherwise disagree, and the NIs would be built at one width against
+# a flit package of another. A GENERATED top takes DAT_NUM_VC from the query
+# above, so it and its flit package come from the same place. When the table
+# goes, every configuration takes the constants.yaml value and one source is
+# left.
+TOPOLOGY_NUM_VC := $(if $(TB_HANDWRITTEN),$(TB_NUM_VC),$(CONSTANTS_NUM_VC))
 TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_vc$(TOPOLOGY_NUM_VC).sv
 
 # Per-geometry address-map package (topology_<geometry>_pkg.sv): TILE_BASE_ADDR
 # / TILE_SIZE / NOC_EGRESS_BASE / the peripheral table, for a hand-written
 # testbench to `import`. Gitignored like FlooNoC's generated/ -- derived from a
-# tracked YAML, rebuilt only when it or the generator changes. Geometry =
-# TOPOLOGY minus its _vc<N> suffix, so mesh_4x4_vc1/_vc8/_vc8_robless share one
-# topology_mesh_4x4_pkg. It also keys the stimulus directory in
-# sim/verilator/Makefile, which reads this variable rather than repeating the sed.
+# tracked config file, rebuilt only when it or the generator changes.
 # Naming only -- the WRITE is a file-target recipe in each simulator Makefile
 # (mirrors the $(TB_TOP_SV) rule there), not a parse-time side effect here.
-# A checked-in testbench names its geometry in the table above, for the same
-# reason it names its VC count: the package it imports is compiled in.
-# Kept on one line: a backslash continuation would fold the next line's leading
-# whitespace into the else branch, and the geometry is half a file name.
-TOPOLOGY_GEOMETRY := $(if $(TB_GEOMETRY),$(TB_GEOMETRY),$(shell echo $(TOPOLOGY) | sed 's/_vc[0-9]*//'))
 TOPOLOGY_PKG_SV := $(COSIM_ROOT)/tb/test/topology_$(TOPOLOGY_GEOMETRY)_pkg.sv
 
 TB_TOP_SV_SRC := \

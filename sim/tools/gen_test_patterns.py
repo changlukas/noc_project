@@ -864,23 +864,22 @@ def _load_topology(name):
     (peripheral p is endpoint len(nodes) + p), in the order gen_tb_top.py's
     _peripherals walks.
 
-    `name` is either a topology name resolved against sim/topologies/<name>.yaml, or
-    a direct path to a topology yaml (ends in .yaml or names an existing file).  The
-    path form lets callers point at a temp topology without writing into the live tree.
+    `name` is either a configuration name resolved against sim/configs/<name>.yml, or
+    a direct path to a config file (ends in .yml/.yaml or names an existing file).  The
+    path form lets callers point at a temp config without writing into the live tree.
     """
-    if name.endswith(".yaml") or os.path.isfile(name):
+    if name.endswith((".yml", ".yaml")) or os.path.isfile(name):
         topo_path = name
     else:
         here = os.path.dirname(os.path.abspath(__file__))
-        topo_path = os.path.join(here, "..", "topologies", f"{name}.yaml")
+        topo_path = os.path.join(here, "..", "configs", f"{name}.yml")
     with open(topo_path) as f:
         topo = yaml.safe_load(f)
-    x_dim = topo["topology"]["x_dim"]
-    y_dim = topo["topology"]["y_dim"]
     # The router array IS the route coordinate space: a peripheral shares its
     # host router's coordinate and takes none of its own, so a tile's array
     # position is its coordinate.
-    bases, entries = address_map.pack(topo.get("address_map"), x_dim, y_dim)
+    x_dim, y_dim = address_map.router_array(topo)
+    bases, entries = address_map.pack_document(topo)
     config_bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "config"}
     sizes = {
         "memory": {e["dst_id"]: e["size"] for e in entries if e["space"] == "memory"},
@@ -1038,9 +1037,9 @@ def main(argv=None):
                     help="Multicast mask shape (multicast pattern only). One shape "
                          "per run: concurrent multicast trees must be pairwise "
                          "disjoint (restriction R1)")
-    ap.add_argument("--topology", default="mesh_4x4_vc1",
-                    help="Topology name (matches sim/topologies/<name>.yaml) or a "
-                         "direct path to a topology yaml")
+    ap.add_argument("--topology", default="mesh_4x4",
+                    help="Configuration name (matches sim/configs/<name>.yml) or a "
+                         "direct path to a config file")
     ap.add_argument("--out", required=True,
                     help="Output directory; writes <out>/node<i>/{write,read}.txt")
     # Per-packet random pattern options

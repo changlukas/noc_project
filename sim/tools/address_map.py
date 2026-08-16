@@ -232,7 +232,27 @@ def pack(address_map, x_dim, y_dim):
 _PORT_OF_DST_DIR = {0: 2, 1: 1, 2: 2, 3: 1, 4: 0}
 
 
-def _members(endpoint):
+def router_array(cfg):
+    """The single router array's (x_dim, y_dim).
+
+    The router array IS the route coordinate space: a peripheral shares its host
+    router's coordinate and takes none of its own, so this is also the tile count
+    per axis. x must be a power of two -- the array index packs x into x_bits, so
+    a non-power-of-two x leaves gaps in it.
+    """
+    routers = cfg["routers"]
+    if len(routers) != 1:
+        raise ValueError("config.routers: expected exactly one router array")
+    x_dim, y_dim = int(routers[0]["array"][0]), int(routers[0]["array"][1])
+    x_bits = _clog2(x_dim)
+    if (1 << x_bits) != x_dim:
+        raise ValueError(
+            f"config: router array x {x_dim} must be a power of two -- the array index packs x "
+            f"into {x_bits} bits, so a non-power-of-two x leaves gaps in it")
+    return x_dim, y_dim
+
+
+def members(endpoint):
     """Endpoint member count. Authored num wins; otherwise the array product."""
     if endpoint.get("num") is not None:
         return int(endpoint["num"])
@@ -245,8 +265,8 @@ def _members(endpoint):
     return n
 
 
-def _attachments(cfg, name, num, x_dim):
-    """Member index -> (x, y, port), read off the connections naming this endpoint.
+def attachments(cfg, name, num, x_dim):
+    """Member index -> {"x", "y", "port", "dir"}, off the connections naming this endpoint.
 
     Two forms. src_idx/dst_idx list the pairing explicitly. src_range/dst_range
     pair the two arrays element for element, which this reader accepts only when
@@ -258,7 +278,8 @@ def _attachments(cfg, name, num, x_dim):
     for c in cfg.get("connections") or []:
         if c.get("src") != name:
             continue
-        port = _PORT_OF_DST_DIR.get(int(c["dst_dir"]))
+        direction = int(c["dst_dir"])
+        port = _PORT_OF_DST_DIR.get(direction)
         if port is None:
             raise ValueError(
                 f"connection {name}: dst_dir {c['dst_dir']} is not an XYDirections value")
@@ -272,7 +293,8 @@ def _attachments(cfg, name, num, x_dim):
             pairs = [(k, k) for k in range(num)]
         for src, dst in pairs:
             dst = int(dst)
-            out[int(src)] = (dst & (x_dim - 1), dst >> x_bits, port)
+            out[int(src)] = {"x": dst & (x_dim - 1), "y": dst >> x_bits, "port": port,
+                             "dir": direction}
     for k, a in enumerate(out):
         if a is None:
             raise ValueError(f"endpoint {name}: member {k} has no connection")
@@ -292,30 +314,25 @@ def pack_config(cfg):
     which is the order the topology YAML lists its tiles in, so the two shapes of
     the same map expand to the same list.
     """
-    routers = cfg["routers"]
-    if len(routers) != 1:
-        raise ValueError("config.routers: expected exactly one router array")
-    x_dim, y_dim = int(routers[0]["array"][0]), int(routers[0]["array"][1])
-    x_bits = _clog2(x_dim)
-    if (1 << x_bits) != x_dim:
-        raise ValueError(
-            f"config: router array x {x_dim} must be a power of two -- the array index packs x "
-            f"into {x_bits} bits, so a non-power-of-two x leaves gaps in it")
+    x_dim, y_dim = router_array(cfg)
     entries = []
     for ep in cfg["endpoints"]:
         if ep.get("sbr_port_protocol") is None:
             continue
-        num = _members(ep)
-        attach = _attachments(cfg, ep["name"], num, x_dim)
+        num = members(ep)
+        attach = attachments(cfg, ep["name"], num, x_dim)
         for r in ep["addr_range"]:
             base, size = int(r["base"]), int(r["size"])
             stride = int(r["stride"]) if r.get("stride") is not None else size
             space = r.get("space", "memory")
-            if space not in SPACE_ORDER:
+            # Spelled out rather than tested against SPACE_ORDER: that constant
+            # is the tile crossbar's TARGET order, and reordering the targets
+            # must not change which spaces a range may declare.
+            if space not in ("config", "memory", "peripheral"):
                 raise ValueError(
-                    f"endpoint {ep['name']}: space {space!r} is not one of {SPACE_ORDER}")
+                    f"endpoint {ep['name']}: space {space!r} is not a declared space")
             for k in range(num):
-                x, y, port = attach[k]
+                x, y, port = attach[k]["x"], attach[k]["y"], attach[k]["port"]
                 if not (x < x_dim and y < y_dim):
                     raise ValueError(
                         f"endpoint {ep['name']}: member {k} outside mesh {x_dim}x{y_dim}")

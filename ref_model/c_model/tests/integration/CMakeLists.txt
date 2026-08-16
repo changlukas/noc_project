@@ -16,9 +16,9 @@ add_cmodel_test(test_narrow_class_smoke)
 target_link_libraries(test_narrow_class_smoke PRIVATE yaml-cpp::yaml-cpp)
 target_include_directories(test_narrow_class_smoke PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
-# The test reads sim/topologies/ directly, same as test_sam_yaml: a copy next
-# to the binary is mirrored additively by `cmake -E copy_directory`, so a
-# deleted or renamed topology YAML lingers in the build tree and the test keeps
+# The test reads sim/configs/ directly, same as test_sam_yaml: a copy next
+# to the binary is mirrored additively by copy_directory, so a
+# deleted or renamed config lingers in the build tree and the test keeps
 # passing against a file the source tree no longer has.
 target_compile_definitions(test_narrow_class_smoke PRIVATE
-  TOPOLOGY_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../../sim/topologies")
+  CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../../sim/configs")

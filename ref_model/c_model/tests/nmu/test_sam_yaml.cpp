@@ -90,65 +90,66 @@ TEST(SamYaml, MeshDimBelowMinimumRejected) {
     EXPECT_DEATH(load_sam_table(path_y), "mesh dimensions must be >= 2");
 }
 
-// Guards the real topology configs. TOPOLOGY_DIR is sim/topologies/ itself
-// (CMakeLists.txt), globbed rather than listed, so a new topology YAML cannot
-// fall out of coverage.
+// Guards the real shipped configs. CONFIG_DIR is sim/configs/ itself
+// (CMakeLists.txt), globbed rather than listed, so a new config cannot fall out
+// of coverage.
 //
-// The claim is the packing formula, base = ((y << clog2(x_dim)) | x) *
-// block_size + offset[space], spelled out here from the YAML keys instead of
+// The claim is the packing formula, base = range.base + range.stride *
+// ((y << clog2(x_dim)) | x), spelled out here from the config keys instead of
 // read back from SamTable::packed(). This is one half of the bit-identity with
 // sim/tools/address_map.py that the model and the stimulus generator both
 // depend on: this test holds SamTable::packed() to the formula, and the Python
-// twin (test_address_map_pack_real_topologies_at_the_coordinate_formula in
-// sim/tools/test_gen_test_patterns_filemaster.py) holds pack() to it over the
-// same files. Both passing is what makes the two sides identical. List-order
-// accumulation (base += size) agrees with the formula only where every entry
-// in a space is one slot, which is true of every topology shipped today and not
-// of a map whose spaces differ in size.
-TEST(SamYaml, RealTopologiesPackedAtTheCoordinateFormula) {
+// twin (test_address_map_pack_real_configs_at_the_coordinate_formula in
+// sim/tools/test_gen_test_patterns_filemaster.py) holds pack_document() to it
+// over the same files. Both passing is what makes the two sides identical.
+// The member index is X-fast, which is this repo's node numbering and not
+// FlooNoC's Y-fast one -- on a square mesh the two produce the same SET of
+// bases and transpose every coordinate, so a set comparison would say nothing.
+TEST(SamYaml, RealConfigsPackedAtTheCoordinateFormula) {
     std::vector<std::string> files;
-    for (const auto& entry : std::filesystem::directory_iterator(TOPOLOGY_DIR)) {
-        if (entry.path().extension() == ".yaml") files.push_back(entry.path().string());
+    for (const auto& entry : std::filesystem::directory_iterator(CONFIG_DIR)) {
+        if (entry.path().extension() == ".yml") files.push_back(entry.path().string());
     }
     std::sort(files.begin(), files.end());
     // Same floor the Python twin asserts. It guards the scan, not the inventory:
     // an empty or unreachable directory must fail rather than pass vacuously.
-    // A count tied to how many topologies ship would have to be edited every time
+    // A count tied to how many configs ship would have to be edited every time
     // one is added or removed, which is exactly what the glob exists to avoid.
-    ASSERT_FALSE(files.empty()) << "expected the real topology YAMLs in " TOPOLOGY_DIR;
+    ASSERT_FALSE(files.empty()) << "expected the real configs in " CONFIG_DIR;
     for (const auto& file : files) {
         SCOPED_TRACE(file);
         YAML::Node root = YAML::LoadFile(file);
-        YAML::Node topo = root["topology"];
-        const unsigned x_dim = topo["x_dim"].as<unsigned>();
-        // Slot per space: the largest size declared in it, bounding the
-        // aperture. block_size is the declared node stride.
-        uint64_t memory_slot = 0;
-        uint64_t config_slot = 0;
-        for (const auto& tile : root["address_map"]["tiles"]) {
-            const bool is_config = tile["space"] && tile["space"].as<std::string>() == "config";
-            uint64_t& slot = is_config ? config_slot : memory_slot;
-            slot = std::max(slot, tile["size"].as<uint64_t>());
-        }
+        const unsigned x_dim = root["routers"][0]["array"][0].as<unsigned>();
         const unsigned x_bits = ni::cmodel::address_map::clog2(x_dim);
-        const uint64_t block = root["address_map"]["block_size"].as<uint64_t>();
-        // Spaces sit inside a node's block, memory first at 0.
-        const uint64_t config_offset =
-            ((memory_slot + config_slot - 1) / config_slot) * config_slot;
+        // The tile endpoint's two declared ranges, by space. A peripheral
+        // endpoint is skipped: its members are placed by their own connections,
+        // so the tile coordinate formula says nothing about them.
+        uint64_t base[2] = {0, 0};
+        uint64_t stride[2] = {0, 0};
+        for (const auto& ep : root["endpoints"]) {
+            if (!ep["array"]) continue;  // the tile array is the only array endpoint
+            for (const auto& r : ep["addr_range"]) {
+                const bool is_config = r["space"] && r["space"].as<std::string>() == "config";
+                base[is_config] = r["base"].as<uint64_t>();
+                stride[is_config] =
+                    r["stride"] ? r["stride"].as<uint64_t>() : r["size"].as<uint64_t>();
+            }
+        }
+        ASSERT_NE(stride[0], 0u) << "no memory range on the tile endpoint";
 
         auto sam = load_sam_table(file);
         ASSERT_FALSE(sam.entries().empty());
         for (const auto& e : sam.entries()) {
-            // The tile spaces only. A peripheral region is placed in declaration
-            // order above the tile array, so the coordinate formula says nothing
-            // about it -- it shares its host router's coordinate, which the
-            // router's own tile already packs at.
+            // The tile spaces only. A peripheral region is placed by its own
+            // connection above the tile array, so the coordinate formula says
+            // nothing about it -- it shares its host router's coordinate, which
+            // the router's own tile already packs at.
             if (e.space == axi::Space::Peripheral) continue;
             const unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
             const unsigned y = e.dst_id >> ni::width::X_WIDTH;
             const bool is_config = e.cls == axi::AxiClass::Narrow;
             const uint64_t expected =
-                ((uint64_t{(y << x_bits) | x}) * block) + (is_config ? config_offset : 0);
+                base[is_config] + stride[is_config] * ((uint64_t{y} << x_bits) | x);
             EXPECT_EQ(e.base, expected) << "dst_id " << std::hex << unsigned{e.dst_id};
         }
     }
@@ -187,7 +188,7 @@ TEST(SamYamlDeath, ANonPowerOfTwoMeshDimensionIsRejected) {
 }
 
 TEST(SamYaml, TileMajorPacksEachNodeIntoOneBlock) {
-    const SamTable t = load_sam_table(TOPOLOGY_DIR "/mesh_2x2_vc1.yaml");
+    const SamTable t = load_sam_table(CONFIG_DIR "/mesh_2x2.yml");
     constexpr uint64_t kBlock = 0x100000000ull;
     for (unsigned idx = 0; idx < 4; ++idx) {
         const SamEntry* mem = t.lookup(idx * kBlock);
@@ -203,11 +204,11 @@ TEST(SamYaml, TileMajorPacksEachNodeIntoOneBlock) {
     }
 }
 
-// SAM class selection from the topology YAML's tile.space attribute
-// (docs/noc-target-spec.md §5). mesh_2x2_vc1.yaml gives every node both a
+// SAM class selection from the config's addr_range space attribute
+// (docs/noc-target-spec.md §5). mesh_2x2.yml gives every node both a
 // memory tile (default space) and a config tile.
 TEST(SamYaml, SpaceAttributeSelectsClass) {
-    auto sam = load_sam_table(TOPOLOGY_DIR "/mesh_2x2_vc1.yaml");
+    auto sam = load_sam_table(CONFIG_DIR "/mesh_2x2.yml");
     // Node (0,0)'s memory tile is [0, 0x2000000), inside its own
     // 0x100000000 block.
     auto memory = sam.translate(0x1000);
@@ -232,16 +233,16 @@ TEST(SamYaml, SpaceAttributeSelectsClass) {
     EXPECT_NE(memory.cls, config.cls);
 }
 
-// The ranges the loader derives from the shipped YAMLs, spelled out.
-// Tile-major packing gives every space the same node stride (block_size,
-// 4 GiB in every shipped topology), so both spaces' offsets are 32; the
-// lengths are clog2 of the mesh dimension.
+// The ranges the loader derives from the shipped configs, spelled out.
+// Tile-major packing gives every space the same node stride (the declared
+// range stride, 4 GiB in every shipped config), so both spaces' offsets are 32;
+// the lengths are clog2 of the mesh dimension.
 //
 // declare_space_coords (sam_yaml.hpp) RETURNS FALSE rather than aborting when
 // a space stops being collective-eligible, so a regression there would surface
 // only as a multicast refused at the source, nothing at build time. The
-// ASSERT_NE below is what stands in for that missing abort. mesh_4x4_vc4 adds the
-// third shipped topology to the walk; the y_range cross-space EXPECT_EQ is
+// ASSERT_NE below is what stands in for that missing abort. All four shipped
+// configs are walked; the y_range cross-space EXPECT_EQ is
 // the field-identity offset decode requires (spec §5.1) and that offset == 32
 // alone does not pin, since both spaces could each be internally offset-32
 // with a mismatched y term.
@@ -249,10 +250,13 @@ TEST(SamYaml, CoordRangesDerivedFromTheBlockStride) {
     struct Row {
         const char* file;
         unsigned dim_bits;
-    } rows[] = {{"/mesh_2x2_vc1.yaml", 1}, {"/mesh_4x4_vc1.yaml", 2}, {"/mesh_4x4_vc4.yaml", 2}};
+    } rows[] = {{"/mesh_2x2.yml", 1},
+                {"/mesh_2x2_periph.yml", 1},
+                {"/mesh_4x4.yml", 2},
+                {"/mesh_4x4_periph4.yml", 2}};
     for (const auto& row : rows) {
         SCOPED_TRACE(row.file);
-        auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + row.file);
+        auto sam = load_sam_table(std::string(CONFIG_DIR) + row.file);
         const auto* memory = sam.collective_coords(axi::Space::Memory);
         ASSERT_NE(memory, nullptr) << "memory space is not a collective target";
         EXPECT_EQ(memory->x_range.offset, 32u);  // log2(block_size, 4 GiB)
@@ -271,17 +275,17 @@ TEST(SamYaml, CoordRangesDerivedFromTheBlockStride) {
     }
 }
 
-// Every shipped topology that declares peripherals, so a four-face map is held
+// Every shipped config that declares peripherals, so a four-face map is held
 // to the policy the one-peripheral map states.
 TEST(SamYaml, PeripheralSpaceIsNotACollectiveTarget) {
     // The loader declares only the tile spaces. A peripheral space's bases are
     // assigned in declaration order at arbitrary sizes, so there is no uniform
     // power-of-two stride to read a coordinate field from -- the declaration is
     // not attempted, rather than attempted and failed.
-    const char* files[] = {"/mesh_2x2_vc1_periph.yaml", "/mesh_4x4_vc1_periph4.yaml"};
+    const char* files[] = {"/mesh_2x2_periph.yml", "/mesh_4x4_periph4.yml"};
     for (const char* file : files) {
         SCOPED_TRACE(file);
-        auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + file);
+        auto sam = load_sam_table(std::string(CONFIG_DIR) + file);
         EXPECT_NE(sam.collective_coords(axi::Space::Memory), nullptr);
         EXPECT_NE(sam.collective_coords(axi::Space::Config), nullptr);
         EXPECT_EQ(sam.collective_coords(axi::Space::Peripheral), nullptr)
@@ -290,10 +294,11 @@ TEST(SamYaml, PeripheralSpaceIsNotACollectiveTarget) {
 }
 
 TEST(SamYaml, APeripheralRegionIsReachableAndCarriesItsPortAndSpace) {
-    // The block's first entry: (0, 0) face x, so port 1, sharing router (0, 0)'s
+    // The first peripheral member: router (0, 0)'s WEST port, so port 1, sharing
+    // that router's coordinate.
     // coordinate. Its region sits above the tile array -- 2x2 tiles at a
     // 0x100000000 block stride put the top of the array at 0x400000000.
-    auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + "/mesh_2x2_vc1_periph.yaml");
+    auto sam = load_sam_table(std::string(CONFIG_DIR) + "/mesh_2x2_periph.yml");
     const auto t = sam.translate(0x400000000ull);
     EXPECT_EQ(t.space, axi::Space::Peripheral);
     EXPECT_EQ(t.port, 1u);
@@ -343,7 +348,7 @@ TEST(SamYaml, MemorySpaceStaysACollectiveTargetAlongsideAPeripheral) {
     // The regression this task exists to prevent: keyed on class, a peripheral
     // carrying the Data class joins the memory space's tile walk, the walk's
     // count check fails, and the memory space silently loses eligibility.
-    auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + "/mesh_2x2_vc1_periph.yaml");
+    auto sam = load_sam_table(std::string(CONFIG_DIR) + "/mesh_2x2_periph.yml");
     const auto* memory = sam.collective_coords(axi::Space::Memory);
     ASSERT_NE(memory, nullptr);
     EXPECT_EQ(memory->x_range.offset, 32u);  // log2(block_size, 4 GiB)
@@ -388,11 +393,11 @@ uint8_t enumerated_node_mask(const ni::cmodel::nmu::addr_trans::SamTable& sam, u
 // coordinates that exist, so nothing is filtered out.
 TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
     std::vector<std::string> files;
-    for (const auto& entry : std::filesystem::directory_iterator(TOPOLOGY_DIR)) {
-        if (entry.path().extension() == ".yaml") files.push_back(entry.path().string());
+    for (const auto& entry : std::filesystem::directory_iterator(CONFIG_DIR)) {
+        if (entry.path().extension() == ".yml") files.push_back(entry.path().string());
     }
     std::sort(files.begin(), files.end());
-    ASSERT_FALSE(files.empty()) << "expected the real topology YAMLs in " TOPOLOGY_DIR;
+    ASSERT_FALSE(files.empty()) << "expected the real configs in " CONFIG_DIR;
 
     unsigned compared = 0;
     unsigned expected = 0;

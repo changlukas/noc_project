@@ -27,7 +27,7 @@ using ni::cmodel::wrap::NmuWrap;
 // NmuWrap::init takes a topology YAML, no default map. The handshake tests
 // below care only that the stimulus address resolves, so the smallest shipped
 // mesh serves; the SAM-specific tests write their own YAML.
-constexpr const char* kTopologyYaml = TOPOLOGY_DIR "/mesh_2x2_vc1.yaml";
+constexpr const char* kTopologyYaml = CONFIG_DIR "/mesh_2x2.yml";
 
 TEST(NmuWrap, idle_adapter_keeps_readys_low) {
     NmuWrap adapter;
@@ -301,7 +301,7 @@ TEST(NmuWrap, init_with_reserved_port_id_throws) {
 // no error anywhere. The fault injections below are the three ways to get it
 // wrong on a topology that DOES declare peripherals.
 TEST(NmuWrap, init_with_a_port_id_no_endpoint_declares_throws) {
-    constexpr const char* periph = TOPOLOGY_DIR "/mesh_2x2_vc1_periph.yaml";
+    constexpr const char* periph = CONFIG_DIR "/mesh_2x2_periph.yml";
     // mesh_2x2_vc1_periph declares an x-face peripheral (port 1) at (0,0) and
     // at (0,1), and no y-face peripheral anywhere.
     constexpr uint8_t kNode00 = 0;  // (x=0, y=0)
@@ -331,7 +331,7 @@ TEST(NmuWrap, init_with_a_port_id_no_endpoint_declares_throws) {
 // check throws the same exception type and would stand in for it everywhere. The
 // four-face topology is the one that puts a y-face peripheral behind port 2.
 TEST(NmuWrap, init_accepts_a_y_face_peripheral_port) {
-    constexpr const char* periph4 = TOPOLOGY_DIR "/mesh_4x4_vc1_periph4.yaml";
+    constexpr const char* periph4 = CONFIG_DIR "/mesh_4x4_periph4.yml";
     // dst_id = (y << 4) | x. The y-face peripherals are at (1,0) south and (2,3) north.
     constexpr uint8_t kSouth = 0x01;  // (x=1, y=0)
     constexpr uint8_t kNorth = 0x32;  // (x=2, y=3)

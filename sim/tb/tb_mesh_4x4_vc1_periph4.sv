@@ -4,7 +4,7 @@
 // reorder buffer enabled.
 //
 // The geometry and the address map come from topology_mesh_4x4_periph4_pkg,
-// generated from sim/topologies/mesh_4x4_vc1_periph4.yaml. Everything below the
+// generated from sim/configs/mesh_4x4_periph4.yml. Everything below the
 // module boundary is noc_tb_top, shared with every other configuration.
 //
 // NUM_ENDPOINTS is 20, not 16: a peripheral has an NI and an endpoint but no

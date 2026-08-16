@@ -28,8 +28,8 @@ def test_every_job_addresses_a_real_sam_region(tmp_path):
     knowledge of this map, which is why the emitter is written here rather
     than ported."""
     out = tmp_path / "jobs"
-    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out), "--jobs-per-node", "4"])
-    _bases, entries = address_map.pack(_topology("mesh_2x2_vc1")["address_map"], 2, 2)
+    g.main(["--topology", "mesh_2x2", "--out", str(out), "--jobs-per-node", "4"])
+    _bases, entries = address_map.pack_document(_topology("mesh_2x2"))
     windows = [(e["base"], e["base"] + e["size"]) for e in entries]
 
     def _owner(addr):
@@ -58,11 +58,11 @@ def test_direction_crosses_the_fabric(tmp_path, rw):
 
     At the SHIPPED geometry -- the one the gate builds, not a larger one."""
     n = gen_tb_top._DMA_JOBS_PER_NODE
-    topo = _topology("mesh_2x2_vc1")
+    topo = _topology("mesh_2x2")
     out = tmp_path / "jobs"
-    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out), "--jobs-per-node", str(n),
+    g.main(["--topology", "mesh_2x2", "--out", str(out), "--jobs-per-node", str(n),
             "--rw", rw])
-    bases, entries = address_map.pack(topo["address_map"], 2, 2)
+    bases, entries = address_map.pack_document(topo)
     sizes = {e["dst_id"]: e["size"] for e in entries if e["space"] == "memory"}
     nodes, _x_dim, _y_dim = gen_tb_top._nodes(topo)
 
@@ -82,9 +82,9 @@ def test_read_write_swap_src_dst(tmp_path):
     n = gen_tb_top._DMA_JOBS_PER_NODE
     out_read = tmp_path / "read"
     out_write = tmp_path / "write"
-    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out_read),
+    g.main(["--topology", "mesh_2x2", "--out", str(out_read),
             "--jobs-per-node", str(n), "--rw", "read"])
-    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out_write),
+    g.main(["--topology", "mesh_2x2", "--out", str(out_write),
             "--jobs-per-node", str(n), "--rw", "write"])
     for idx in range(4):
         reads = _parse_jobs(out_read / f"node{idx}" / "jobs.txt")
@@ -101,7 +101,7 @@ def test_burst_bound_is_a_log_length(tmp_path):
     3'(16) are both 0, which asks for 1-beat bursts -- so idma_job_driver.sv
     rejects anything above 8 and this pins the emitter to the same range."""
     out = tmp_path / "jobs"
-    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out)])
+    g.main(["--topology", "mesh_2x2", "--out", str(out)])
     for job in _parse_jobs(out / "node0" / "jobs.txt"):
         # Equality, not a range: 0 is inside the field and means reduce_len = 1
         # with page_addr_width = OffsetWidth, i.e. one-beat bursts -- the exact
@@ -123,7 +123,7 @@ def test_every_job_carries_one_axi_id(tmp_path):
     jobs wrote each other's payload byte for byte. The constraint is pinned here
     rather than left to be rediscovered."""
     out = tmp_path / "jobs"
-    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out),
+    g.main(["--topology", "mesh_2x2", "--out", str(out),
             "--jobs-per-node", str(gen_tb_top._DMA_JOBS_PER_NODE)])
     ids = {job["axi_id"] for i in range(4)
            for job in _parse_jobs(out / f"node{i}" / "jobs.txt")}

@@ -31,16 +31,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 CONFIG_DIR = ROOT / "sim" / "configs"
 GOLDEN = CONFIG_DIR / "sam_rules.golden"
 
-# Each new config replaces this topology YAML. The old shape is still the one
-# the build and the runtime use; both must describe the same map.
-REPLACES = {
-    "mesh_2x2": "mesh_2x2_vc1",
-    "mesh_2x2_periph": "mesh_2x2_vc1_periph",
-    "mesh_4x4": "mesh_4x4_vc1",
-    "mesh_4x4_periph4": "mesh_4x4_vc1_periph4",
-}
-
-
 def configs():
     files = sorted(CONFIG_DIR.glob("*.yml"))
     assert files, f"expected the FlooNoC-shaped configs in {CONFIG_DIR}"
@@ -81,17 +71,3 @@ def write_golden():
 
 def test_python_expansion_matches_the_golden():
     assert rule_lines() == golden_lines()
-
-
-def test_each_config_expands_to_the_map_of_the_topology_yaml_it_replaces():
-    """The new shape and the old one describe the same map, rule for rule.
-
-    Independent of the golden: it compares the two readers' *input* formats
-    through one reader, where the golden compares one format through two readers.
-    """
-    for path in configs():
-        old = ROOT / "sim" / "topologies" / f"{REPLACES[path.stem]}.yaml"
-        _b, new_entries = address_map.pack_document(yaml.safe_load(path.read_text()))
-        _b, old_entries = address_map.pack_document(yaml.safe_load(old.read_text()))
-        assert ([rule_line(path.stem, e) for e in new_entries]
-                == [rule_line(path.stem, e) for e in old_entries]), path.stem

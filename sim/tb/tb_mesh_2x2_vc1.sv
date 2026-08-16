@@ -3,7 +3,7 @@
 // Configuration: 2x2 mesh, 1 DAT VC, NMU read reorder buffer enabled.
 //
 // The geometry and the address map come from topology_mesh_2x2_pkg, generated
-// from sim/topologies/mesh_2x2_vc1.yaml. Everything below the module boundary is
+// from sim/configs/mesh_2x2.yml. Everything below the module boundary is
 // noc_tb_top, shared with every other configuration.
 //
 // The module is named tb_top so --top-module needs no per-configuration value.

@@ -54,7 +54,7 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     // === NMU multi-instance independence ===
 
     // Case: create 2 NMU adapters — distinct void* + both validate as live.
-    const char* topology = TOPOLOGY_DIR "/mesh_2x2_vc1.yaml";
+    const char* topology = CONFIG_DIR "/mesh_2x2.yml";
     unsigned long long nmu_a = cmodel_nmu_create("nmu_a", 0, /*num_vc=*/1, topology);
     unsigned long long nmu_b = cmodel_nmu_create("nmu_b", 0, /*num_vc=*/1, topology);
     ASSERT_NE(nmu_a, 0ull);
