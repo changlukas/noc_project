@@ -161,7 +161,7 @@ in-order read, Disabled     8 bursts x 64 beats         =   512 cycles
 out-of-order read         8 KB reorder buffer / 64 B    =   128 cycles
 ```
 
-`RobMode::Disabled` (`READ_ROB=0`) replaces the per-ID order-list depth with a per-ID
+`RobMode::Disabled` (`nmu.READ_ROB_ENABLED: 0`) replaces the per-ID order-list depth with a per-ID
 single-outstanding read interlock, so its in-order read window is 1 x 8 IDs rather than 32 x 8.
 
 Write and in-order read coverage sits far beyond any zero-load round trip, so those streams

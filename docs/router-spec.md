@@ -424,7 +424,7 @@ and its `SimpleRouterForkWedge` twin, and by the co-sim `multicast` pattern
 
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
-| `DAT_NUM_VC` | `ni_params_pkg::NOC_DAT_NUM_VC_DFLT` = 1 | 1..8 (= 2^VC_ID_WIDTH) | VCs on the DAT link. REQ/RSP are fixed single-VC. Topology YAML overrides per run. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != DAT_NUM_VC`. |
+| `DAT_NUM_VC` | `ni_params_pkg::NOC_DAT_NUM_VC_DFLT` = 1 | 1..8 (= 2^VC_ID_WIDTH) | VCs on the DAT link. REQ/RSP are fixed single-VC. Set in `specgen/source/constants.yaml` (`noc.DAT_NUM_VC`), not a run knob. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != DAT_NUM_VC`. |
 | `REQ_FLIT_WIDTH` | 136 | 64..1024 | REQ flit bus width, bits |
 | `RSP_FLIT_WIDTH` | 126 | 64..1024 | RSP flit bus width, bits |
 | `DAT_FLIT_WIDTH` | 633 | 64..1024 | DAT flit bus width, bits |
