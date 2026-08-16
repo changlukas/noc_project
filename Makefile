@@ -117,7 +117,7 @@ $(CMODEL_BUILD)/CMakeCache.txt:
 	@$(CMAKE) -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS) $(CMAKE_EXTRA)
 
 # Default topology for standalone build-verilator.
-# sim/Makefile overrides this by passing TOPOLOGY=$(TB) explicitly.
+# sim/Makefile overrides this by passing TOPOLOGY=$(CONFIG) explicitly.
 TOPOLOGY  ?= mesh_4x4
 RUN_CLASS ?= directed
 
@@ -153,7 +153,7 @@ pytest:
 check: test pytest
 
 # Simulation runs from sim/, whose Makefiles reach tools/ and output/ by
-# relative path, so these forward with -C rather than include. TB, PATTERN and
+# relative path, so these forward with -C rather than include. CONFIG, PATTERN and
 # the rest reach the sub-make on their own: make passes command-line variables
 # down through MAKEFLAGS. .PHONY is what stops `sim` matching the directory of
 # the same name and answering "'sim' is up to date" without running anything.

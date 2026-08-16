@@ -96,6 +96,15 @@ all: $(TBTOP_EXE)
 $(FILELIST_F): ../build_config.mk $(SPECGEN_CONSTANTS) $(COSIM_ROOT)/tools/gen_filelist.py
 	$(PYTHON3) $(COSIM_ROOT)/tools/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
 
+# The generated parameter files, from the source both they and build_config.mk's
+# --print-num-vc read. Without this an edit to constants.yaml left the testbench
+# elaborating at the previous DAT_NUM_VC / READ_ROB_ENABLED while the filelist
+# already named the new VC width. Duplicated in sim/vcs/Makefile, as FILELIST_F.
+$(NI_PARAMS_SV): $(SPECGEN_CONSTANTS) $(CODEGEN)
+	$(PYTHON3) $(CODEGEN) --target sv --domain params
+$(NI_PARAMS_H): $(SPECGEN_CONSTANTS) $(CODEGEN)
+	$(PYTHON3) $(CODEGEN) --target cpp --domain params
+
 # tb_top_<TOPOLOGY>.sv is a generated artifact; regenerate
 # from the topology config before Verilating. Depends on the generator script, the
 # config file, and a TOPOLOGY stamp. TB_TOP_SV comes from build_config.mk
@@ -128,7 +137,7 @@ GEN_DMA_JOBS := $(COSIM_ROOT)/tools/gen_dma_jobs.py
 # file, and a rule with this recipe would overwrite it with generator output the
 # first time the stamp or the generator was newer.
 ifeq ($(DMA),1)
-$(TB_TOP_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_params_pkg.sv
+$(TB_TOP_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP) $(NI_PARAMS_SV)
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --dma $(_DMA_JOB_ARGS) --out $(TB_TOP_SV)
 endif
 
@@ -136,7 +145,7 @@ endif
 # tb_noc_mesh.sv imports. TOPO_STAMP is a prerequisite because the file name is
 # fixed: switching CONFIG must rewrite it, and the newly selected config file is
 # not necessarily newer than the package the last build wrote.
-$(TOPOLOGY_PKG_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP) $(TOPO_STAMP)
+$(TOPOLOGY_PKG_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP)
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
 
 # Mirrors the root Makefile. Override via local.mk if needed.

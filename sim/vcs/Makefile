@@ -1,7 +1,8 @@
 # VCS build for the cosim testbenches. Source lists are shared with the
 # Verilator flow via sim/build_config.mk; everything VCS-specific lives here.
-# Topology used to generate tb_top_<TOPOLOGY>.sv. Override to switch topologies.
-TOPOLOGY ?= mesh_4x4_vc1
+# Configuration: sim/configs/<TOPOLOGY>.yml. Override to switch configurations.
+# sim/Makefile spells it CONFIG= and forwards it here.
+TOPOLOGY ?= mesh_4x4
 # Run class (mirrors sim/verilator/Makefile): directed only.
 RUN_CLASS ?= directed
 ifeq ($(filter $(RUN_CLASS),directed),)
@@ -90,6 +91,15 @@ check-yamlcpp:
 $(FILELIST_F): ../build_config.mk $(SPECGEN_CONSTANTS) $(COSIM_ROOT)/tools/gen_filelist.py
 	$(PYTHON3) $(COSIM_ROOT)/tools/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
 
+# The generated parameter files, from the source both they and build_config.mk's
+# --print-num-vc read. Without this an edit to constants.yaml left the testbench
+# elaborating at the previous DAT_NUM_VC / READ_ROB_ENABLED while the filelist
+# already named the new VC width. Duplicated in sim/vcs/Makefile, as FILELIST_F.
+$(NI_PARAMS_SV): $(SPECGEN_CONSTANTS) $(CODEGEN)
+	$(PYTHON3) $(CODEGEN) --target sv --domain params
+$(NI_PARAMS_H): $(SPECGEN_CONSTANTS) $(CODEGEN)
+	$(PYTHON3) $(CODEGEN) --target cpp --domain params
+
 # tb_top_dma_<CONFIG>.sv is a generated artifact; regenerate from the config
 # file before building. TB_TOP_SV comes from build_config.mk (deferred = so
 # CONFIG expands correctly).
@@ -112,7 +122,7 @@ $(TOPO_STAMP): FORCE
 # sim/tb/tb_noc_mesh.sv, a SOURCE file, and a rule with this recipe would
 # overwrite it with generator output.
 ifeq ($(DMA),1)
-$(TB_TOP_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP) $(TOPO_STAMP)
+$(TB_TOP_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP)
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --dma $(_DMA_JOB_ARGS) --out $(TB_TOP_SV)
 endif
 
@@ -120,7 +130,7 @@ endif
 # sim/verilator/Makefile (intentionally, same convention as FILELIST_F above),
 # TOPO_STAMP included: the file name is fixed, so switching CONFIG must rewrite
 # it even when the newly selected config file is older than the last build.
-$(TOPOLOGY_PKG_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP) $(TOPO_STAMP)
+$(TOPOLOGY_PKG_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP)
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
 
 # DPI C++ is compiled and linked into simv by VCS itself; pass include dirs

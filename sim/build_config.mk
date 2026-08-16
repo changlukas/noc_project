@@ -188,6 +188,20 @@ NOC_FABRIC_SV = $(SRC_SV)/noc_fabric.sv
 # edit would keep naming the previous width, and the build would come out
 # with the NIs at one width against a flit package of another.
 SPECGEN_CONSTANTS := $(PROJ_ROOT)/specgen/source/constants.yaml
+# constants.yaml is read TWICE at different freshness: build_config.mk reads
+# the source directly (--print-num-vc below), the testbench reads the
+# GENERATED ni_params_pkg.sv. Only the c_model CMake build gated regeneration,
+# so an unregenerated edit put the two out of step -- silently for the RoB
+# mode, which has no width assertion behind it. Each simulator Makefile carries
+# a rule making the generated files depend on the source; the recipe lives
+# there rather than here so it never becomes an includer's default goal.
+CODEGEN           := $(PROJ_ROOT)/specgen/tools/codegen.py
+NI_PARAMS_SV      := $(SPECGEN_SV_INC)/ni_params_pkg.sv
+NI_PARAMS_H       := $(SPECGEN_INC)/ni_params.h
+# gen_tb_top.py imports address_map, whose router_array / pack_document /
+# noc_egress_base produce what topology_pkg.sv and the DMA top contain, so it
+# is a prerequisite of both wherever the generator is.
+GEN_TB_TOP_DEPS   := $(COSIM_ROOT)/tools/gen_tb_top.py $(COSIM_ROOT)/tools/address_map.py
 
 TOPOLOGY_NUM_VC := $(shell $(or $(PYTHON3),python3) \
     $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY) --print-num-vc)
