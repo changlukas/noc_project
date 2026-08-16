@@ -32,7 +32,11 @@ sim/*/output/
 # Generated stimulus: per-run-tag write.txt/read.txt, derived from the topology
 # YAML by sim/tools/gen_test_patterns.py. Lives beside output/ rather than under
 # BUILD_ROOT -- it is text, and only linked artifacts need the native filesystem.
-sim/*/test_patterns/
+sim/*/test_patterns/*
+!sim/*/test_patterns/README.md
+!sim/*/test_patterns/mesh_2x2/
+sim/*/test_patterns/mesh_2x2/*
+!sim/*/test_patterns/mesh_2x2/neighbor/
 # Legacy run-output location
 sim/output/
 # Stray generated perf summary (canonical copy lives under sim/*/output/)
