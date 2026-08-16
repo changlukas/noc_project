@@ -94,7 +94,7 @@ all: $(TBTOP_EXE)
 $(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/tools/gen_filelist.py
 	$(PYTHON3) $(COSIM_ROOT)/tools/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
 
-# tb_top_<TOPOLOGY>.sv + noc_fabric_<topo>.sv are generated artifacts; regenerate
+# tb_top_<TOPOLOGY>.sv is a generated artifact; regenerate
 # from the topology config before Verilating. Depends on the generator script, the
 # topology YAML, and a TOPOLOGY stamp. TB_TOP_SV comes from build_config.mk
 # (deferred = so TOPOLOGY expands correctly).
@@ -102,8 +102,8 @@ TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml
 GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VL_BUILD)/.topology
 
-# tb_top_<TOPOLOGY>.sv does `include "noc_fabric_<topo>.sv"` (bare filename);
-# the fabric is emitted into ref_model/top/, already implied by -I$(SRC_SV) above.
+# tb_top_<TOPOLOGY>.sv does `include "noc_fabric.sv"` (bare filename); the
+# fabric lives in ref_model/top/, already implied by -I$(SRC_SV) above.
 VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 
 # TOPOLOGY stamp records the last-built topology name. The FORCE-driven rule
@@ -127,11 +127,6 @@ GEN_DMA_JOBS := $(COSIM_ROOT)/tools/gen_dma_jobs.py
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_params_pkg.sv
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) \
 	    $(if $(filter 1,$(DMA)),--dma $(_DMA_JOB_ARGS)) --out $(TB_TOP_SV)
-
-# The same generator run writes the fabric; the empty recipe just tells make the
-# file is up to date once tb_top has been made (it is a prerequisite of the
-# binary below so a hand-edited fabric actually rebuilds).
-$(NOC_FABRIC_SV): $(TB_TOP_SV) ;
 
 # Mirrors the root Makefile. Override via local.mk if needed.
 PYTHON3 ?= python3

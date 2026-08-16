@@ -167,7 +167,7 @@ sim-gen:
 # three files that are deliberately per-host and gitignored: local.mk,
 # docs/backlog.md and .vscode/. Anything else surviving is a bug in here.
 #
-# The generated SV matters most. tb_top_<topo>.sv, noc_fabric_<topo>.sv and
+# The generated SV matters most. tb_top_<topo>.sv and
 # filelist_<topo>.f used to survive clean, which is why every co-sim script
 # carried its own `rm -f` preamble: a stale filelist holding paths from another
 # host, or a tb_top from another topology, silently builds the wrong thing.
@@ -181,7 +181,7 @@ clean-cmodel:
 
 # Generated sources and stimulus, plus every __pycache__ the generators leave.
 clean-generated:
-	rm -f sim/tb/test/tb_top_*.sv sim/tb/soc/tb_top_dma_*.sv ref_model/top/noc_fabric_*.sv sim/filelist_*.f
+	rm -f sim/tb/test/tb_top_*.sv sim/tb/soc/tb_top_dma_*.sv sim/filelist_*.f
 	rm -f sim/tools/injection_sweep.csv sim/tools/injection_sweep.png
 	rm -f sim/verilator/hs_trace_node*.log
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

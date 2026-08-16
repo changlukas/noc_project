@@ -90,7 +90,7 @@ check-yamlcpp:
 $(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/tools/gen_filelist.py
 	$(PYTHON3) $(COSIM_ROOT)/tools/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
 
-# tb_top_<TOPOLOGY>.sv + noc_fabric_<topo>.sv are generated artifacts; regenerate
+# tb_top_<TOPOLOGY>.sv is a generated artifact; regenerate
 # from the topology config before building. TB_TOP_SV comes from build_config.mk
 # (deferred = so TOPOLOGY expands correctly).
 TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml
@@ -113,11 +113,6 @@ $(TOPO_STAMP): FORCE
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP)
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) \
 	    $(if $(filter 1,$(DMA)),--dma $(_DMA_JOB_ARGS)) --out $(TB_TOP_SV)
-
-# The same generator run writes the fabric; the empty recipe just tells make the
-# file is up to date once tb_top has been made (it is a prerequisite of simv
-# below so a hand-edited fabric actually rebuilds).
-$(NOC_FABRIC_SV): $(TB_TOP_SV) ;
 
 # DPI C++ is compiled and linked into simv by VCS itself; pass include dirs
 # through -CFLAGS and the yaml-cpp static archive directly on the link line.

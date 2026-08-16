@@ -163,12 +163,12 @@ DMA_ENDPOINT_SRC := \
 ENDPOINT_SRC := $(if $(filter 1,$(DMA)),$(DMA_ENDPOINT_SRC),\
     $(COSIM_ROOT)/tb/test/user_node_endpoint.sv)
 
-# noc_fabric_<topo>.sv is emitted alongside tb_top by gen_tb_top.py and `include`d
-# BY tb_top, so it must never enter TB_TOP_SV_SRC (that would define the module
+# noc_fabric.sv is one parameterized module for every topology, `include`d BY
+# tb_top, so it must never enter TB_TOP_SV_SRC (that would define the module
 # twice). It is still a real compile input: each simulator's binary rule lists it
-# separately, otherwise a hand-edit (e.g. a debug probe) leaves the binary "up to
-# date" and the edit is silently never compiled.
-NOC_FABRIC_SV = $(SRC_SV)/noc_fabric_$(TOPOLOGY).sv
+# separately, otherwise an edit to it leaves the binary "up to date" and is
+# silently never compiled.
+NOC_FABRIC_SV = $(SRC_SV)/noc_fabric.sv
 # num_vc comes from the topology YAML, never from the topology NAME: a name
 # carries suffixes that are not the vc word (_periph), and reading a declared
 # value out of a filename needs a new strip per suffix. gen_tb_top.py already
