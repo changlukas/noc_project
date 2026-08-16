@@ -78,13 +78,15 @@ endif
 # TB_TOP_SV is the generated top file; per-topology so multiple tbs coexist
 # (tb_top_<TOPOLOGY>.sv). Use deferred = so TOPOLOGY expansion is lazy.
 #
-# One line per checked-in testbench: which geometry package it imports and
-# which VC-count flit package it needs. No filename parsing -- a suffix like
-# _robless is not a geometry, and a scrape would have to learn every suffix.
+# One line per checked-in testbench: which geometry package it imports, which
+# VC-count flit package it needs, and which READ_ROB mode its source fixes. No
+# filename parsing -- a suffix like _robless is not a geometry, and a scrape
+# would have to learn every suffix.
 ifeq ($(TOPOLOGY),mesh_2x2_vc1)
 TB_HANDWRITTEN := 1
 TB_GEOMETRY    := mesh_2x2
 TB_NUM_VC      := 1
+TB_READ_ROB    := 1
 endif
 
 # DMA=1 selects the iDMA top instead: a pulp iDMA backend on the master face of
@@ -102,6 +104,23 @@ TB_TOP_SV = $(COSIM_ROOT)/tb/tb_$(TOPOLOGY).sv
 else
 TB_TOP_SV = $(COSIM_ROOT)/tb/test/tb_top_$(TOPOLOGY).sv
 endif
+
+# READ_ROB reaches the GENERATED path only: it is a gen_tb_top.py argument. A
+# checked-in testbench states READ_ROB_ENABLED in its own source, so a
+# non-matching READ_ROB would build the mode the source names while keying
+# OBJ_DIR and the run tag with the mode the command line named -- a rob0
+# directory and a rob0 log holding a RoB-enabled result. An error, not a
+# warning: the failure it prevents is a mislabelled result, which survives
+# longer than a scrolled-past line. Placed after the DMA branch above, which
+# clears TB_HANDWRITTEN, so a DMA build still honours READ_ROB.
+ifdef TB_HANDWRITTEN
+ifneq ($(filter-out $(TB_READ_ROB),$(READ_ROB)),)
+$(error READ_ROB=$(READ_ROB) is not honoured by TOPOLOGY=$(TOPOLOGY): its \
+testbench $(COSIM_ROOT)/tb/tb_$(TOPOLOGY).sv fixes READ_ROB_ENABLED=$(TB_READ_ROB) \
+in its own source. Drop READ_ROB, or use a topology whose testbench names the \
+mode you want)
+endif
+endif
 # DMA job geometry. One pair of values feeds BOTH the job files gen_dma_jobs.py
 # writes and the memory preload / region compare gen_tb_top.py stamps into the
 # DMA top, so it lives here rather than in one simulator's Makefile -- a top
@@ -113,7 +132,9 @@ DMA_RW            ?= read
 _DMA_JOB_ARGS     := --jobs-per-node $(DMA_JOBS_PER_NODE) --length $(DMA_LENGTH) --rw $(DMA_RW)
 # NMU read reorder buffer. 1 (the default, and what docs/noc-target-spec.md
 # section 3 describes) emits the reorder-buffer response path; 0 emits the
-# RoBless bypass. Reaches the tb as its READ_ROB_ENABLED localparam.
+# RoBless bypass. A gen_tb_top.py argument, so it reaches the GENERATED tops
+# only, as their READ_ROB_ENABLED localparam; a checked-in testbench fixes the
+# mode in its own source and the guard above rejects a READ_ROB that disagrees.
 READ_ROB ?= 1
 # pulp AXI crossbar subset (sim/dv/README.md): the tile decoder and the memory
 # behind it in user_node_endpoint.sv. Taken at v0.39.7 / v1.37.0, the versions

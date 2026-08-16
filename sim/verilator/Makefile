@@ -26,6 +26,9 @@ VL_BUILD := $(BUILD_ROOT)/verilator
 # Per-topology, per-run-class, per-READ_ROB obj dir: building one flavor must
 # not clobber another. READ_ROB is in the name because it changes the emitted
 # tb_top, so two READ_ROB values are two different builds of the same topology.
+# That holds on the GENERATED path; a checked-in testbench fixes the mode in its
+# own source, and build_config.mk's TB_READ_ROB guard rejects a READ_ROB that
+# disagrees rather than let it name a directory it did not build.
 # DMA joins it for the same reason -- it swaps the endpoint and the top.
 OBJ_DIR := $(VL_BUILD)/obj_dir_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(if $(filter 1,$(DMA)),_dma)
 
