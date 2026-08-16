@@ -226,10 +226,16 @@ _PATTERN_TAG   := $(PATTERN)$(if $(filter multicast,$(PATTERN)),_$(MCAST_SHAPE))
 # DMA=1 replaces the pattern stimulus with iDMA job files, so its stimulus and
 # its run tag key on the job geometry rather than on PATTERN / INJECTION_COUNT,
 # neither of which a DMA run reads.
+#
+# Stimulus is plain text and sits in the tree, beside the run logs it pairs with
+# (test_patterns/<tag>/ next to output/<tag>/). Only linked artifacts have to
+# live under $(BUILD_ROOT): the Linux linker rejects a yaml-cpp built on a /mnt
+# mount, which is a constraint on object files and binaries, not on text.
+STIM_BASE      ?= test_patterns
 ifeq ($(DMA),1)
-STIM_ROOT      ?= $(BUILD_ROOT)/test_patterns/dma_$(TOPOLOGY)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
+STIM_ROOT      ?= $(STIM_BASE)/dma_$(TOPOLOGY)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
 else
-STIM_ROOT      ?= $(BUILD_ROOT)/test_patterns/stim_$(TOPOLOGY)_$(_PATTERN_TAG)_n$(INJECTION_COUNT)
+STIM_ROOT      ?= $(STIM_BASE)/stim_$(TOPOLOGY)_$(_PATTERN_TAG)_n$(INJECTION_COUNT)
 endif
 # READ_ROB joins the run tag, not STIM_ROOT: it changes what the NI does with a
 # response, not the stimulus, so two READ_ROB values share generated patterns and

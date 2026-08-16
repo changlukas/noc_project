@@ -29,6 +29,10 @@ w_beats_received_
 
 # Per-simulator run outputs (sim/verilator/output, sim/vcs/output)
 sim/*/output/
+# Generated stimulus: per-run-tag write.txt/read.txt, derived from the topology
+# YAML by sim/tools/gen_test_patterns.py. Lives beside output/ rather than under
+# BUILD_ROOT -- it is text, and only linked artifacts need the native filesystem.
+sim/*/test_patterns/
 # Legacy run-output location
 sim/output/
 # Stray generated perf summary (canonical copy lives under sim/*/output/)
