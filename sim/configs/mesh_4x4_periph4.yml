@@ -1,0 +1,82 @@
+name: mesh_4x4_periph4
+description: "4x4 mesh of tiles with one peripheral per face"
+network_type: "axi"
+
+routing:
+  route_algo: "XY"
+  use_id_table: true
+  rob_idx_bits: 8
+  port_id_bits: 2
+  num_vc_id_bits: 3           # header field width; the VC COUNT is in constants.yaml
+  collective:
+    en_narrow_multicast: true
+    en_wide_multicast: true
+
+endpoints:
+  # Array member k holds coordinate (x, y) with k = (y << clog2(x_dim)) | x --
+  # x is the fast axis, which is the order the packed SAM base uses.
+  - name: "tile"
+    array: [4, 4]
+    mgr_port_protocol: ["axi"]           # presence marker: no protocols: block to resolve against
+    sbr_port_protocol: ["axi"]           # required: is_sbr() gates SAM participation
+    addr_range:
+      - base: 0x0
+        size: 0x2000000
+        stride: 0x100000000              # node block stride, not the aperture
+        space: memory
+        en_collective: true
+      - base: 0x2000000
+        size: 0x1000
+        stride: 0x100000000
+        space: config
+        en_collective: true
+  # Above the whole tile array: 4 * 4 * 0x100000000.
+  # size is what the stimulus generator aims at a peripheral, which is what
+  # gen_test_patterns.py's footprint guard checks: 0x80000 is the first size
+  # clearing this config's largest multicast extent (0x42A00), 0x100000 doubles
+  # it because the window costs nothing (axi_sim_mem is sparse).
+  - name: "peripheral"
+    num: 4
+    sbr_port_protocol: ["axi"]
+    addr_range:
+      - base: 0x1000000000
+        size: 0x100000
+        stride: 0x100000
+        space: peripheral
+        # no en_collective: peripherals are unicast destinations only
+
+routers:
+  - name: "router"
+    array: [4, 4]
+    degree: 5
+    # auto_connect defaults true: N/E/S/W inter-router links are implicit
+
+connections:
+  - src: "tile"
+    dst: "router"
+    src_range: [[0, 3], [0, 3]]
+    dst_range: [[0, 3], [0, 3]]
+    dst_dir: 4                           # XYDirections.EJECT
+  # A peripheral shares its host router's coordinate; dst_dir is the port it
+  # hangs off, not a coordinate offset. One per face, so one connection each.
+  # Peripheral order is address order: member k sits at base + stride * k.
+  - src: "peripheral"
+    dst: "router"
+    src_idx: [0]
+    dst_idx: [4]                         # router (0,1)
+    dst_dir: 3                           # XYDirections.WEST
+  - src: "peripheral"
+    dst: "router"
+    src_idx: [1]
+    dst_idx: [11]                        # router (3,2)
+    dst_dir: 1                           # XYDirections.EAST
+  - src: "peripheral"
+    dst: "router"
+    src_idx: [2]
+    dst_idx: [1]                         # router (1,0)
+    dst_dir: 2                           # XYDirections.SOUTH
+  - src: "peripheral"
+    dst: "router"
+    src_idx: [3]
+    dst_idx: [14]                        # router (2,3)
+    dst_dir: 0                           # XYDirections.NORTH
