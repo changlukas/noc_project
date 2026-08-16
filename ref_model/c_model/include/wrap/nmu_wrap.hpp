@@ -115,8 +115,8 @@ class NmuWrap {
             throw std::invalid_argument(
                 "NmuWrap::init: no endpoint at this (src_id, port_id) in " +
                 std::string(config_path) +
-                " -- port 0 is the tile at src_id, a non-zero port is a peripheral the "
-                "address_map.peripherals block must declare at that coordinate and face");
+                " -- port 0 is the tile at src_id, a non-zero port is a peripheral an "
+                "endpoints entry must attach to that coordinate and face");
         }
         // REQ/RSP fixed single-VC (S1 Q2); DAT keeps the topology's VC count.
         cfg.num_vc = 1;
