@@ -414,6 +414,17 @@ def test_pack_rejects_a_non_power_of_two_row():
             {"base": 0x0, "size": 0x100000, "stride": 0x200000, "space": "memory"}]))
 
 
+@pytest.mark.parametrize("size", [0, -0x1000, 0x1234])
+def test_pack_rejects_a_size_that_is_not_a_positive_4k_multiple(size):
+    """Zero and misaligned sizes are what SamTable::validate asserts on at
+    simulation load; a negative one reaches that assert only through the
+    base+size overflow check beside it, so pack_config refuses all three where
+    the config is read."""
+    with pytest.raises(ValueError, match="must be positive and 4 KB aligned"):
+        address_map.pack_config(_config_doc(2, 2, ranges=[
+            {"base": 0x0, "size": size, "stride": 0x200000, "space": "memory"}]))
+
+
 def test_node_windows_are_that_node_s_own_regions():
     """The tile crossbar decodes on THIS node's windows, so a local initiator's
     address that belongs to another node misses both rules and falls through to

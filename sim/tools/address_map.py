@@ -160,6 +160,14 @@ def pack_config(cfg):
             if space not in ("config", "memory", "peripheral"):
                 raise ValueError(
                     f"endpoint {ep['name']}: space {space!r} is not a declared space")
+            # Same rule as SamTable::validate (addr_trans.hpp): a zero or
+            # misaligned size aborts at simulation load, but a NEGATIVE one only
+            # trips there by accident, through the base+size overflow assert.
+            # Refused here so the generators reject the config they packed from.
+            if size <= 0 or size % 0x1000 != 0:
+                raise ValueError(
+                    f"endpoint {ep['name']}: range size {size:#x} must be positive "
+                    f"and 4 KB aligned")
             for k in range(num):
                 x, y, port = attach[k]["x"], attach[k]["y"], attach[k]["port"]
                 if not (x < x_dim and y < y_dim):
