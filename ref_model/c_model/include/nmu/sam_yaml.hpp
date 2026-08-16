@@ -75,7 +75,9 @@ inline bool space_present(const SamTable& table, axi::Space space) {
     return false;
 }
 
-// address_map.decode: "table" | "offset", default "table" (spec §5.1).
+// What offset decode requires of a map (spec §5.1). The mode itself is named
+// address_map.decode in the topology YAML and routing.use_id_table in the
+// FlooNoC-shaped config; both reach this one check.
 //
 // Table decode holds the coordinate ranges per address-map entry, offset decode
 // one pair global to the map (upstream RouteCfg.XYAddrOffsetX/Y, floo_pkg.sv).
@@ -89,14 +91,7 @@ inline bool space_present(const SamTable& table, axi::Space space) {
 // than how an address is read, and the model validates it here instead of
 // carrying a second lookup that would return the same answer. The 2N range
 // compares a table decoder costs against one slice is a hardware difference.
-inline void check_decode_mode(const YAML::Node& am, const SamTable& table) {
-    if (!am["decode"]) return;
-    const std::string mode = am["decode"].as<std::string>();
-    if (mode == "table") return;
-    if (mode != "offset") {
-        assert(false && "address_map: decode must be 'table' or 'offset'");
-        std::abort();
-    }
+inline void check_offset_ranges(const SamTable& table) {
     const SpaceCoords* first = nullptr;
     // The tile spaces only. Offset decode is a claim about where a node stride
     // puts the node index, and a peripheral region has no node stride -- it is
@@ -116,6 +111,19 @@ inline void check_decode_mode(const YAML::Node& am, const SamTable& table) {
                "address_map: decode 'offset' holds one range pair for the whole map, so "
                "every space must use the same node stride");
     }
+}
+
+// address_map.decode: "table" | "offset", default "table". The FlooNoC-shaped
+// config spells the same two modes routing.use_id_table (true = table).
+inline void check_decode_mode(const YAML::Node& am, const SamTable& table) {
+    if (!am["decode"]) return;
+    const std::string mode = am["decode"].as<std::string>();
+    if (mode == "table") return;
+    if (mode != "offset") {
+        assert(false && "address_map: decode must be 'table' or 'offset'");
+        std::abort();
+    }
+    check_offset_ranges(table);
 }
 
 // address_map.tiles: ordered list of { x, y, size, space? }; base(x, y) is
@@ -144,8 +152,172 @@ inline uint64_t default_block_size(const std::vector<PackedTile>& tiles) {
     return p;
 }
 
+// --- FlooNoC-shaped config (sim/configs/*.yml) ---------------------------
+//
+// Twin of sim/tools/address_map.py's pack_config(). The two expansions must
+// agree rule for rule: this one runs at simulation time through +sam_config
+// while the Python one runs at generate time, so a divergence leaves the
+// generated package and the generated stimulus agreeing with each other and
+// disagreeing with the runtime translator. Held to that by
+// tests/nmu/test_sam_config.cpp and sim/tools/test_sam_config_parity.py, which
+// compare both against sim/configs/sam_rules.golden.
+
+// addr_range.space: "config" | "memory" | "peripheral". A range names its own
+// space here, where the topology YAML keeps peripherals in a separate list.
+inline axi::Space parse_range_space(const YAML::Node& range) {
+    if (range["space"] && range["space"].as<std::string>() == "peripheral") {
+        return axi::Space::Peripheral;
+    }
+    return parse_tile_space(range);
+}
+
+// XYDirections (upstream routing.py:245-252) -> the router port an endpoint
+// hangs off. EJECT is the LOCAL port the tile owns; EAST/WEST are the x face
+// and NORTH/SOUTH the y face, which is what address_map.peripherals spells
+// "face". dst_dir is read as a port and nothing else: a peripheral shares its
+// host router's coordinate, so upstream's coordinate derivation for a
+// non-router NI must NOT be applied -- it would place the peripheral one step
+// outside the mesh.
+inline uint8_t port_of_dst_dir(unsigned dir) {
+    switch (dir) {
+        case 4:
+            return 0;  // EJECT
+        case 1:
+        case 3:
+            return 1;  // EAST / WEST -- the x face
+        case 0:
+        case 2:
+            return 2;  // NORTH / SOUTH -- the y face
+        default:
+            break;
+    }
+    assert(false && "connection: dst_dir must be an XYDirections value 0..4");
+    std::abort();
+}
+
+// Endpoint member count. num is authored in our configs; upstream derives it
+// from array (endpoint.py:73-84), so an absent num falls back to that product.
+inline std::size_t endpoint_members(const YAML::Node& ep) {
+    if (ep["num"]) return ep["num"].as<std::size_t>();
+    if (!ep["array"]) return 1;
+    std::size_t n = 1;
+    for (const auto& d : ep["array"]) n *= d.as<std::size_t>();
+    return n;
+}
+
+// Where each member of an endpoint attaches: the host router's array index and
+// the port. The index is X-fast, idx = (y << clog2(x_dim)) | x, which is this
+// repo's node numbering -- and not the array index's own value as a dst_id,
+// which packs x into X_WIDTH bits instead.
+struct Attachment {
+    unsigned idx;
+    uint8_t port;
+};
+
+inline std::vector<Attachment> endpoint_attachments(const YAML::Node& root, const std::string& name,
+                                                    std::size_t num) {
+    constexpr unsigned kUnattached = ~0u;
+    std::vector<Attachment> out(num, Attachment{kUnattached, 0});
+    for (const auto& c : root["connections"]) {
+        if (c["src"].as<std::string>() != name) continue;
+        const uint8_t port = port_of_dst_dir(c["dst_dir"].as<unsigned>());
+        if (c["src_idx"]) {
+            const auto src = c["src_idx"].as<std::vector<unsigned>>();
+            const auto dst = c["dst_idx"].as<std::vector<unsigned>>();
+            assert(src.size() == dst.size() && "connection: src_idx and dst_idx differ in length");
+            for (std::size_t i = 0; i < src.size(); ++i) {
+                assert(src[i] < num && "connection: src_idx names a member this endpoint has not");
+                out[src[i]] = {dst[i], port};
+            }
+        } else {
+            // src_range/dst_range pair the two arrays element for element. This
+            // reader accepts that only when the two ranges are identical: every
+            // shipped config connects a tile array to the router array it sits
+            // on, and a general range remap has no caller to be checked by.
+            assert(c["src_range"] && c["dst_range"] &&
+                   "connection: needs either src_idx/dst_idx or src_range/dst_range");
+            assert(c["src_range"].as<std::vector<std::vector<unsigned>>>() ==
+                       c["dst_range"].as<std::vector<std::vector<unsigned>>>() &&
+                   "connection: src_range and dst_range differ -- this reader pairs the two "
+                   "arrays element for element and has no range remap");
+            for (unsigned k = 0; k < num; ++k) out[k] = {k, port};
+        }
+    }
+    for (const auto& a : out) {
+        assert(a.idx != kUnattached && "endpoint: a member has no connection");
+    }
+    return out;
+}
+
+inline SamTable load_config_table(const YAML::Node& root) {
+    YAML::Node routers = root["routers"];
+    assert(routers && routers.size() == 1 && "config.routers: expected exactly one router array");
+    const auto array = routers[0]["array"].as<std::vector<unsigned>>();
+    assert(array.size() == 2 && "config.routers: array must be [x, y]");
+    const unsigned x_dim = array[0];
+    const unsigned y_dim = array[1];
+    // Same two mesh constraints the topology YAML carries: a mesh communicating
+    // through NI + router needs at least 2x2, and the collective coordinate
+    // field is clog2(dim) bits wide, so a non-power-of-two dimension leaves a
+    // wildcard address naming a coordinate with no router.
+    assert(x_dim >= 2 && y_dim >= 2 &&
+           "config.routers: mesh dimensions must be >= 2 per dimension (1x1/1xN mesh illegal)");
+    assert((x_dim & (x_dim - 1)) == 0 && (y_dim & (y_dim - 1)) == 0 &&
+           "config.routers: mesh dimensions must be powers of two");
+    const unsigned x_bits = clog2(x_dim);
+
+    std::vector<SamEntry> es;
+    for (const auto& ep : root["endpoints"]) {
+        // mgr_port_protocol / sbr_port_protocol are presence markers this reader
+        // ignores. The protocols: block they would resolve against upstream is
+        // omitted by design decision 2 -- the four AXI widths do not vary per
+        // configuration and live in specgen/source/constants.yaml -- so only the
+        // presence of sbr_port_protocol is read: is_sbr() is what gates an
+        // endpoint's participation in the SAM (endpoint.py:87-89).
+        if (!ep["sbr_port_protocol"]) continue;
+        const std::size_t num = endpoint_members(ep);
+        const auto attach = endpoint_attachments(root, ep["name"].as<std::string>(), num);
+        // Range-major: every member of a range, then the next range. Same order
+        // the topology YAML lists its tiles in, so the two shapes of one map
+        // expand to the same list.
+        for (const auto& r : ep["addr_range"]) {
+            const axi::Space space = parse_range_space(r);
+            const uint64_t base = r["base"].as<uint64_t>();
+            const uint64_t size = r["size"].as<uint64_t>();
+            // Absent stride means stride == size, which is upstream's own
+            // expansion (routing.py:449). Ours differs because a node's two
+            // apertures sit at different offsets inside one block stride.
+            const uint64_t stride = r["stride"] ? r["stride"].as<uint64_t>() : size;
+            for (std::size_t k = 0; k < num; ++k) {
+                const unsigned x = attach[k].idx & (x_dim - 1);
+                const unsigned y = attach[k].idx >> x_bits;
+                es.push_back({base + stride * k, size,
+                              static_cast<uint8_t>((y << ni::width::X_WIDTH) | x),
+                              axi::class_of(space), attach[k].port, space});
+            }
+        }
+    }
+
+    SamTable table(std::move(es));
+    table.validate(x_dim, y_dim);
+    declare_space_coords(table, x_dim, y_dim);
+    // routing.use_id_table names the two decode modes: true (the default) is
+    // table decode, false is the address-offset slice, whose validation is ours
+    // and not upstream's -- upstream's non-table path is a bit-slice and
+    // nothing more.
+    YAML::Node routing = root["routing"];
+    const bool use_id_table =
+        !routing || !routing["use_id_table"] || routing["use_id_table"].as<bool>();
+    if (!use_id_table) check_offset_ranges(table);
+    return table;
+}
+
 inline SamTable load_sam_table(const std::string& yaml_path) {
     YAML::Node root = YAML::LoadFile(yaml_path);
+    // Dispatch on the file's shape, not on a flag. endpoints: is the
+    // FlooNoC-shaped config; topology: + address_map: is the topology YAML it
+    // replaces, still what the build and +sam_config load today.
+    if (root["endpoints"]) return load_config_table(root);
     YAML::Node topo = root["topology"];
     unsigned x_dim = topo["x_dim"].as<unsigned>();
     unsigned y_dim = topo["y_dim"].as<unsigned>();

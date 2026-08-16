@@ -39,6 +39,15 @@ target_link_libraries(test_sam_yaml PRIVATE yaml-cpp::yaml-cpp)
 target_compile_definitions(test_sam_yaml PRIVATE
   TOPOLOGY_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../../sim/topologies")
 
+add_cmodel_test(test_sam_config)
+target_link_libraries(test_sam_config PRIVATE yaml-cpp::yaml-cpp)
+# The C++ half of the two-reader parity gate: it expands sim/configs/*.yml and
+# compares against sim/configs/sam_rules.golden, which the Python half
+# (sim/tools/test_sam_config_parity.py) is held to as well. Source directory,
+# not a copy next to the binary -- same reason as test_sam_yaml above.
+target_compile_definitions(test_sam_config PRIVATE
+  CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../../sim/configs")
+
 add_cmodel_test(test_rob)
 # Pick up the shared loopback fixtures from tests/common/ via
 # "common/loopback_*.hpp".
