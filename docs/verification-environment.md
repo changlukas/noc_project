@@ -214,7 +214,7 @@ same address.
 - `tb_top` counts AW/AR handshakes per node (`txn_cnt_o`). `PASS` requires
   `txn_cnt_o > 0` on every node, so a run where a node completed zero
   transactions cannot report clean.
-- `DIRECTED PASS` (the `make -C sim` console line) additionally requires the
+- `DIRECTED PASS` (the `make sim` console line) additionally requires the
   scoreboard to report zero mismatches: the run log must reach `PASS: all N
   nodes done, non-vacuous` and carry no scoreboard-mismatch or protocol-error
   string.
@@ -382,14 +382,14 @@ the flit field capacity (`X_WIDTH`/`Y_WIDTH`/`VC_ID_WIDTH` from the flit spec)
 before emitting anything. `sim/verilator/Makefile` regenerates
 `topology_pkg.sv` whenever the config file, the generator, or the `CONFIG` make
 variable changes. Adding a geometry needs only a new file under `sim/configs/`;
-`make -C sim CONFIG=<name> PATTERN=<p>` picks it up with no other change. The VC
+`make sim CONFIG=<name> PATTERN=<p>` picks it up with no other change. The VC
 count and the NMU read RoB mode are not configuration: they are
 `noc.DAT_NUM_VC` and `nmu.READ_ROB_ENABLED` in `specgen/source/constants.yaml`,
 and changing either is an edit and a rebuild.
 
 ## Seed handling
 
-`make -C sim gen` and `make -C sim sim` each accept `SEED=<n>`. Left unset,
+`make sim-gen` and `make sim` each accept `SEED=<n>`. Left unset,
 each draws its own random 30-bit seed (`RANDOM*32768+RANDOM`, under
 Verilator's `+verilator+seed+` int32 ceiling) and prints it:
 
@@ -411,7 +411,7 @@ supplied to each rather than drawn once and shared.
 | SAM failure mode | `translate()` miss and a config file without an `endpoints:` block fail via bare `assert`: fail-loud in a debug build, undefined under `NDEBUG`. Model policy only; a real interconnect returns DECERR on a decode miss, which the NI does not model. |
 | Unswept sizing | `NMU_MAX_TXNS_PER_ID` = 32 (per-ID order-list depth) is the one depth that was swept: 32 down to 1, every point a non-vacuous PASS. At four ids the run peaked at 30 of the then-32-entry shared pool against a deepest per-ID list of 12, which is what identified the pool rather than the per-ID depth as the binding limit. No throughput figure was taken at any point of the sweep. `NMU_ROB_B_DEPTH`/`NMU_ROB_R_DEPTH` default to 128 (S2) and are expressible up to 256 (the full `ordering_tag` space) via `B_ROB_DEPTH`/`R_ROB_DEPTH`; a burst whose beats (len+1) exceed the RoB depth fails loud (`Rob::push_ar` assert) instead of wedging. Equally unswept at every setting. |
 | RoB physical shape unmodelled | no SRAM/flip-flop distinction, no allocator timing (the model's linear scan stands in for a combinational leading-zero count), no area reporting. |
-| Verification framework gaps | no covergroups, no wire-side SVA framework, no standing co-sim regression harness (fabric coverage relies on manual `make -C sim` runs), no slave-latency sweep axis. The retired constrained-random axis is covered under Checkers. |
+| Verification framework gaps | no covergroups, no wire-side SVA framework, no standing co-sim regression harness (fabric coverage relies on manual `make sim` runs), no slave-latency sweep axis. The retired constrained-random axis is covered under Checkers. |
 | Meta buffer storage | the 8-bucket array is kept under both `max_unique_ids` settings; the FIFO-vs-ID-queue cost difference is not modelled. |
 | AXI-side perf instrumentation absent | `perf.json` carries only the NoC section (dumped at the end of every run, all injection modes); no AXI-side per-transaction hooks exist, so nothing cross-checks `axi_bw_monitor` from the model side. |
 | VCS flow | build-only; no directed run target, never executed on a real VCS install. |

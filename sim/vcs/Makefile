@@ -1,8 +1,8 @@
 # VCS build for the cosim testbenches. Source lists are shared with the
 # Verilator flow via sim/build_config.mk; everything VCS-specific lives here.
-# Configuration: sim/configs/<TOPOLOGY>.yml. Override to switch configurations.
-# sim/Makefile spells it CONFIG= and forwards it here.
-TOPOLOGY ?= mesh_4x4
+# CONFIG names the one file the build reads: sim/configs/<CONFIG>.yml, a
+# geometry and its address map.
+CONFIG ?= mesh_4x4
 # Run class (mirrors sim/verilator/Makefile): directed only.
 RUN_CLASS ?= directed
 ifeq ($(filter $(RUN_CLASS),directed),)
@@ -52,7 +52,7 @@ include ../build_config.mk
 
 VCS_BUILD := $(BUILD_ROOT)/vcs
 
-# FILELIST_F / FILELIST_GEN_ARGS come from build_config.mk. sim/filelist_<TOPOLOGY>.f
+# FILELIST_F / FILELIST_GEN_ARGS come from build_config.mk. sim/filelist_<CONFIG>.f
 # is a generated artifact (gitignored): VCS regenerates it itself (recipe below) so
 # a standalone `cd sim/vcs && make` works on a fresh clone where the .f is absent.
 
@@ -88,8 +88,8 @@ check-yamlcpp:
 # Duplicated from sim/verilator/Makefile (intentionally) so a standalone
 # `cd sim/vcs && make` regenerates filelist.f on a fresh clone where it is
 # absent; gen_filelist.py + FILELIST_GEN_ARGS keep the two recipes in sync.
-$(FILELIST_F): ../build_config.mk $(SPECGEN_CONSTANTS) $(COSIM_ROOT)/tools/gen_filelist.py
-	$(PYTHON3) $(COSIM_ROOT)/tools/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
+$(FILELIST_F): ../build_config.mk $(SPECGEN_CONSTANTS) $(SIM_ROOT)/tools/gen_filelist.py
+	$(PYTHON3) $(SIM_ROOT)/tools/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
 
 # The generated parameter files, from the source both they and build_config.mk's
 # --print-num-vc read. Without this an edit to constants.yaml left the testbench
@@ -103,7 +103,7 @@ $(NI_PARAMS_H): $(SPECGEN_CONSTANTS) $(CODEGEN)
 # tb_top_dma_<CONFIG>.sv is a generated artifact; regenerate from the config
 # file before building. TB_TOP_SV comes from build_config.mk (deferred = so
 # CONFIG expands correctly).
-GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
+GEN_TB_TOP    := $(SIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VCS_BUILD)/.topology
 
 # CONFIG stamp records the last-built configuration. The FORCE-driven rule
@@ -114,8 +114,8 @@ TOPO_STAMP    := $(VCS_BUILD)/.topology
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VCS_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" ]; then \
-	    echo "$(TOPOLOGY)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(CONFIG)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" ]; then \
+	    echo "$(CONFIG)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" > $@; \
 	fi
 
 # DMA only, as in sim/verilator/Makefile: on the directed path TB_TOP_SV is
@@ -123,7 +123,7 @@ $(TOPO_STAMP): FORCE
 # overwrite it with generator output.
 ifeq ($(DMA),1)
 $(TB_TOP_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP) $(NI_PARAMS_SV)
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --dma $(_DMA_JOB_ARGS) --out $(TB_TOP_SV)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(CONFIG) --dma $(_DMA_JOB_ARGS) --out $(TB_TOP_SV)
 endif
 
 # topology_pkg.sv (build_config.mk's TOPOLOGY_PKG_SV). Duplicated from
@@ -131,7 +131,7 @@ endif
 # TOPO_STAMP included: the file name is fixed, so switching CONFIG must rewrite
 # it even when the newly selected config file is older than the last build.
 $(TOPOLOGY_PKG_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP)
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(CONFIG) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
 
 # DPI C++ is compiled and linked into simv by VCS itself; pass include dirs
 # through -CFLAGS and the yaml-cpp static archive directly on the link line.
@@ -139,7 +139,7 @@ VCS_COMMON_FLAGS := \
     -full64 -sverilog \
     -timescale=1ns/1ps \
     -assert svaext \
-    +incdir+$(COSIM_ROOT)/tb \
+    +incdir+$(SIM_ROOT)/tb \
     +incdir+$(SRC_SV) \
     +incdir+$(SPECGEN_SV_INC) \
     +incdir+$(DV_ROOT)/axi-0.39.7/include \
@@ -161,12 +161,12 @@ PYTHON3    ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 # isolation): building one flavor must not clobber another's binary. The VC
 # count and the RoB mode do not key it -- both are specgen constants, and the
 # regenerated ni_params_pkg.sv is a prerequisite of the binary below.
-SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top_$(TOPOLOGY)_$(RUN_CLASS)$(if $(filter 1,$(DMA)),_dma)$(FSDB_SUFFIX)
+SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top_$(CONFIG)_$(RUN_CLASS)$(if $(filter 1,$(DMA)),_dma)$(FSDB_SUFFIX)
 
 $(SIMV_TB_TOP): $(FILELIST_F) $(TB_TOP_SV_SRC) $(NOC_FABRIC_SV) $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VCS_BUILD)
 	$(VCS) $(VCS_COMMON_FLAGS) \
-	    -Mdir=$(VCS_BUILD)/csrc_tb_top_$(TOPOLOGY)_$(RUN_CLASS)$(if $(filter 1,$(DMA)),_dma)$(FSDB_SUFFIX) \
+	    -Mdir=$(VCS_BUILD)/csrc_tb_top_$(CONFIG)_$(RUN_CLASS)$(if $(filter 1,$(DMA)),_dma)$(FSDB_SUFFIX) \
 	    -top tb_top \
 	    -f $(FILELIST_F) $(DPI_C_SRC) $(YAMLCPP_LIB) \
 	    -o $(SIMV_TB_TOP)

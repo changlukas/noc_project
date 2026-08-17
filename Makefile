@@ -1,6 +1,7 @@
 # Top-level Makefile — build and test gates. Run these targets from repo root.
 #
-# Simulation is not here: `make sim CONFIG=... PATTERN=...`, see sim/Makefile.
+# Simulation is not here: `make sim CONFIG=... PATTERN=...`, see
+# sim/verilator/Makefile.
 # Run logs land in sim/verilator/output/<scenario>/run.log.
 #
 # All build artifacts live under the top-level build/ tree (gitignored):
@@ -14,8 +15,8 @@ BUILD_ROOT      := build
 # local.mk` below (e.g. $(HOME)/noc_build on WSL), and CMODEL_BUILD must pick up
 # that override rather than freezing the pre-include `build` value.
 CMODEL_BUILD     = $(BUILD_ROOT)/cmodel
-COSIM_VERILATOR := sim/verilator
-COSIM_VCS       := sim/vcs
+SIM_VERILATOR := sim/verilator
+SIM_VCS       := sim/vcs
 
 .PHONY: help build build-cmodel build-yamlcpp build-verilator test \
         pytest check \
@@ -33,7 +34,7 @@ help:
 	@echo "  make sim-build CONFIG=<config>                   build only, no run"
 	@echo "  make sim-run CONFIG=<config> PATTERN=<p>         run only; errors if not built"
 	@echo "  CONFIG is a sim/configs/*.yml basename: mesh_2x2 mesh_2x2_periph mesh_4x4 mesh_4x4_periph4"
-	@echo "  make -C sim help                                 every simulation variable"
+	@echo "  make -C sim/verilator help                       every simulation variable"
 	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
@@ -118,13 +119,13 @@ build-yamlcpp: $(CMODEL_BUILD)/CMakeCache.txt
 $(CMODEL_BUILD)/CMakeCache.txt:
 	@$(CMAKE) -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS) $(CMAKE_EXTRA)
 
-# Default topology for standalone build-verilator.
-# sim/Makefile overrides this by passing TOPOLOGY=$(CONFIG) explicitly.
-TOPOLOGY  ?= mesh_4x4
+# Default configuration for standalone build-verilator. `build` and not the
+# default goal: sim/verilator/Makefile defaults to running.
+CONFIG    ?= mesh_4x4
 RUN_CLASS ?= directed
 
 build-verilator: build-yamlcpp
-	@$(MAKE) -C $(COSIM_VERILATOR) TOPOLOGY=$(TOPOLOGY) RUN_CLASS=$(RUN_CLASS)
+	@$(MAKE) -C $(SIM_VERILATOR) build CONFIG=$(CONFIG) RUN_CLASS=$(RUN_CLASS)
 
 # --- test ---
 
@@ -154,23 +155,24 @@ pytest:
 # together, leaves pytest green, and shows up in ctest alone.
 check: test pytest
 
-# Simulation runs from sim/, whose Makefiles reach tools/ and output/ by
-# relative path, so these forward with -C rather than include. CONFIG, PATTERN and
-# the rest reach the sub-make on their own: make passes command-line variables
-# down through MAKEFLAGS. .PHONY is what stops `sim` matching the directory of
-# the same name and answering "'sim' is up to date" without running anything.
+# Simulation runs from sim/verilator, whose Makefile reaches output/ by relative
+# path, so these forward with -C rather than include. CONFIG, PATTERN and the
+# rest reach the sub-make on their own: make passes command-line variables down
+# through MAKEFLAGS. .PHONY is what stops `sim` matching the directory of the
+# same name and answering "'sim' is up to date" without running anything.
+# The VCS flow will land beside these as sim-vcs-* against sim/vcs.
 .PHONY: sim sim-build sim-run sim-gen sim-injection-sweep
 sim sim-injection-sweep:
-	@$(MAKE) -C sim $@
+	@$(MAKE) -C $(SIM_VERILATOR) $@
 
 sim-build:
-	@$(MAKE) -C sim build
+	@$(MAKE) -C $(SIM_VERILATOR) build
 
 sim-run:
-	@$(MAKE) -C sim run
+	@$(MAKE) -C $(SIM_VERILATOR) run
 
 sim-gen:
-	@$(MAKE) -C sim gen
+	@$(MAKE) -C $(SIM_VERILATOR) gen
 
 # --- clean ---
 
@@ -200,8 +202,8 @@ clean-generated:
 	find . -type d -name .pytest_cache -prune -exec rm -rf {} +
 
 clean-verilator:
-	$(MAKE) -C $(COSIM_VERILATOR) clean
+	$(MAKE) -C $(SIM_VERILATOR) clean
 
 clean-vcs:
-	$(MAKE) -C sim/vcs clean
+	$(MAKE) -C $(SIM_VCS) clean
 

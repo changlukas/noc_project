@@ -5,10 +5,10 @@
 # TB_TOP_SV_SRC below); both Makefiles use -f filelist_<CONFIG>.f for the
 # tb_top verilate/compile step.
 #
-# COSIM_ROOT is derived from this file's own location so any includer depth
+# SIM_ROOT is derived from this file's own location so any includer depth
 # works.
-COSIM_ROOT  := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
-PROJ_ROOT   := $(patsubst %/,%,$(dir $(COSIM_ROOT)))
+SIM_ROOT  := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+PROJ_ROOT   := $(patsubst %/,%,$(dir $(SIM_ROOT)))
 
 # Per-host overrides (gitignored, repo-root local.mk) — same file the root
 # Makefile reads, so sim runs pick up host knobs (e.g. DPI_CXX, VCS,
@@ -32,7 +32,7 @@ SRC_SV         := $(PROJ_ROOT)/ref_model/top
 SRC_DPI        := $(PROJ_ROOT)/ref_model/dpi
 # Imported DV/VIP source set (pulp axi + common_verification + FlooNoC monitors).
 # NEVER edit files under $(DV_ROOT) — they are vendored verbatim.
-DV_ROOT        := $(COSIM_ROOT)/dv
+DV_ROOT        := $(SIM_ROOT)/dv
 
 # yaml-cpp HEADERS: online builds clone the source into the build tree; offline
 # (DEPS_SRC) builds use the pre-fetched source IN PLACE, so the headers live
@@ -73,7 +73,7 @@ endif
 
 # --- tb_top sim ---
 # TB_TOP_SV_SRC is consumed by the filelist_<CONFIG>.f generation recipe below
-# and by VCS (via -f filelist_<CONFIG>.f). Paths are relative to COSIM_ROOT so
+# and by VCS (via -f filelist_<CONFIG>.f). Paths are relative to SIM_ROOT so
 # the variable stays readable; gen_filelist.py absolutizes them.
 # TB_TOP_SV is the top file; per-configuration on the DMA path
 # (tb_top_dma_<CONFIG>.sv). Use deferred = so CONFIG expansion is lazy.
@@ -84,16 +84,16 @@ endif
 # sim/verilator/Makefile. There is no table between the name and the file: the
 # two parameters that used to turn one geometry into several configurations --
 # the VC count and the RoB mode -- are specgen constants now.
-TOPOLOGY_CONFIG   := $(COSIM_ROOT)/configs/$(TOPOLOGY).yml
+TOPOLOGY_CONFIG   := $(SIM_ROOT)/configs/$(CONFIG).yml
 
 # DMA=1 selects the iDMA top instead: a pulp iDMA backend on the master face of
 # every endpoint, on its own generated top (gen_tb_top.py --dma). Everything
 # below the endpoint -- the fabric, the NI wraps, the tile crossbar sources --
 # is the same build, so the two tops differ only in who generates the traffic.
 ifeq ($(DMA),1)
-TB_TOP_SV = $(COSIM_ROOT)/tb/soc/tb_top_dma_$(TOPOLOGY).sv
+TB_TOP_SV = $(SIM_ROOT)/tb/soc/tb_top_dma_$(CONFIG).sv
 else
-TB_TOP_SV = $(COSIM_ROOT)/tb/tb_noc_mesh.sv
+TB_TOP_SV = $(SIM_ROOT)/tb/tb_noc_mesh.sv
 endif
 
 # DMA job geometry. One pair of values feeds BOTH the job files gen_dma_jobs.py
@@ -162,11 +162,11 @@ DMA_ENDPOINT_SRC := \
     $(IDMA_SRC)/idma_channel_coupler.sv \
     $(IDMA_SRC)/idma_error_handler.sv \
     $(IDMA_SRC)/idma_backend_rw_axi.sv \
-    $(COSIM_ROOT)/tb/soc/idma_types_pkg.sv \
-    $(COSIM_ROOT)/tb/soc/idma_job_driver.sv \
-    $(COSIM_ROOT)/tb/soc/dma_node_endpoint.sv
+    $(SIM_ROOT)/tb/soc/idma_types_pkg.sv \
+    $(SIM_ROOT)/tb/soc/idma_job_driver.sv \
+    $(SIM_ROOT)/tb/soc/dma_node_endpoint.sv
 ENDPOINT_SRC := $(if $(filter 1,$(DMA)),$(DMA_ENDPOINT_SRC),\
-    $(COSIM_ROOT)/tb/test/user_node_endpoint.sv)
+    $(SIM_ROOT)/tb/test/user_node_endpoint.sv)
 
 # noc_fabric.sv is one parameterized module for every topology, `include`d BY
 # tb_top, so it must never enter TB_TOP_SV_SRC (that would define the module
@@ -201,15 +201,15 @@ NI_PARAMS_H       := $(SPECGEN_INC)/ni_params.h
 # gen_tb_top.py imports address_map, whose router_array / pack_config /
 # noc_egress_base produce what topology_pkg.sv and the DMA top contain, so it
 # is a prerequisite of both wherever the generator is.
-GEN_TB_TOP_DEPS   := $(COSIM_ROOT)/tools/gen_tb_top.py $(COSIM_ROOT)/tools/address_map.py
+GEN_TB_TOP_DEPS   := $(SIM_ROOT)/tools/gen_tb_top.py $(SIM_ROOT)/tools/address_map.py
 
 TOPOLOGY_NUM_VC := $(shell $(or $(PYTHON3),python3) \
-    $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY) --print-num-vc)
+    $(SIM_ROOT)/tools/gen_tb_top.py --topology $(CONFIG) --print-num-vc)
 # An empty result means the generator failed -- unknown CONFIG, missing config
 # file, flit-capacity violation. Without this the symptom is a missing
 # noc_types_pkg_vc.sv instead of the generator's own message.
 $(if $(TOPOLOGY_NUM_VC),,$(error gen_tb_top.py --print-num-vc produced nothing for \
-CONFIG=$(TOPOLOGY); run it directly to see why))
+CONFIG=$(CONFIG); run it directly to see why))
 TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_vc$(TOPOLOGY_NUM_VC).sv
 
 # Address-map package (topology_pkg.sv): TILE_BASE_ADDR / TILE_SIZE /
@@ -221,7 +221,7 @@ TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_vc$(TOPOLOGY_NUM_VC).sv
 # newer than the one the last build wrote.
 # Naming only -- the WRITE is a file-target recipe in each simulator Makefile
 # (mirrors the $(TB_TOP_SV) rule there), not a parse-time side effect here.
-TOPOLOGY_PKG_SV := $(COSIM_ROOT)/tb/test/topology_pkg.sv
+TOPOLOGY_PKG_SV := $(SIM_ROOT)/tb/test/topology_pkg.sv
 
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
@@ -238,14 +238,14 @@ TB_TOP_SV_SRC := \
     $(DV_ROOT)/axi-0.39.7/src/axi_test.sv \
     $(DV_ROOT)/floonoc-test/axi_bw_monitor.sv \
     $(XBAR_SRC) \
-    $(COSIM_ROOT)/tb/axi_vip_types_pkg.sv \
+    $(SIM_ROOT)/tb/axi_vip_types_pkg.sv \
     $(SRC_SV)/nmu_wrap.sv \
     $(SRC_SV)/router_wrap.sv \
     $(SRC_SV)/nsu_wrap.sv \
     $(SRC_SV)/ni_wrap.sv \
     $(ENDPOINT_SRC) \
-    $(COSIM_ROOT)/tb/link_perf_monitor.sv \
-    $(if $(filter 1,$(DMA)),,$(COSIM_ROOT)/tb/noc_tb_top.sv) \
+    $(SIM_ROOT)/tb/link_perf_monitor.sv \
+    $(if $(filter 1,$(DMA)),,$(SIM_ROOT)/tb/noc_tb_top.sv) \
     $(TB_TOP_SV)
 
 # sim/filelist_<CONFIG>.f is a GENERATED build artifact (gitignored), not
@@ -256,11 +256,11 @@ TB_TOP_SV_SRC := \
 # bits so the two recipes stay in sync.
 # Per-flavor as well as per-config: the two endpoints compile different source
 # sets, and a stale list from the other flavor would build the wrong one.
-FILELIST_F = $(COSIM_ROOT)/filelist_$(TOPOLOGY)$(if $(filter 1,$(DMA)),_dma).f
+FILELIST_F = $(SIM_ROOT)/filelist_$(CONFIG)$(if $(filter 1,$(DMA)),_dma).f
 # gen_filelist.py args: <out> <incdir...> -- <src...>. The incdirs mirror the
 # -I/+incdir+ the simulators already pass; listing them in the .f makes it
 # self-contained for tool-native -f consumption.
-FILELIST_GEN_ARGS = $(SPECGEN_SV_INC) $(COSIM_ROOT)/tb $(SRC_SV) \
+FILELIST_GEN_ARGS = $(SPECGEN_SV_INC) $(SIM_ROOT)/tb $(SRC_SV) \
     $(DV_ROOT)/axi-0.39.7/include $(DV_ROOT)/common_cells-1.37.0/include \
     $(if $(filter 1,$(DMA)),$(DV_ROOT)/idma-0.6.5/include) -- $(TB_TOP_SV_SRC)
 
