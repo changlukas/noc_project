@@ -2,7 +2,10 @@
 `timescale 1ns / 1ps
 `default_nettype none
 
-module tb_common_primitives;
+module tb_common_primitives #(
+    parameter int unsigned NOC_FIFO_DEPTH = 4,
+    parameter int unsigned AXI_FIFO_DEPTH = 4
+);
 
     logic clk_i = 1'b0;
     logic src_clk_i = 1'b0;
@@ -46,7 +49,7 @@ module tb_common_primitives;
 
     noc_sync_fifo #(
         .T              ( logic [7:0] ),
-        .NOC_FIFO_DEPTH ( 4            )
+        .NOC_FIFO_DEPTH ( NOC_FIFO_DEPTH )
     ) i_noc_sync_fifo (
         .clk_i,
         .rst_ni,
@@ -60,7 +63,7 @@ module tb_common_primitives;
 
     axi_async_fifo #(
         .T              ( logic [7:0] ),
-        .AXI_FIFO_DEPTH ( 4            )
+        .AXI_FIFO_DEPTH ( AXI_FIFO_DEPTH )
     ) i_axi_async_fifo (
         .src_clk_i,
         .src_rst_ni  ( rst_ni      ),
@@ -120,6 +123,13 @@ module tb_common_primitives;
     always #4ns src_clk_i <= ~src_clk_i;
     always #7ns dst_clk_i <= ~dst_clk_i;
 
+    function automatic logic [7:0] sequence_data(
+        input logic [7:0] base,
+        input int unsigned index
+    );
+        sequence_data = base + 8'(index);
+    endfunction
+
     task automatic sync_send(input logic [7:0] data);
         begin
             @(negedge clk_i);
@@ -172,31 +182,27 @@ module tb_common_primitives;
         repeat (3) @(posedge clk_i);
         rst_ni = 1'b1;
 
-        // The synchronous FIFO is non-fall-through and preserves all four entries.
-        sync_send(8'h10);
-        sync_send(8'h11);
-        sync_send(8'h12);
-        sync_send(8'h13);
+        // The synchronous FIFO is non-fall-through and preserves every entry.
+        for (int unsigned index = 0; index < NOC_FIFO_DEPTH; index++) begin
+            sync_send(sequence_data(8'h10, index));
+        end
         assert (!sync_s_ready) else $fatal(1, "Synchronous FIFO did not become full");
         sync_m_ready = 1'b1;
-        wait (sync_m_valid && sync_m_data == 8'h10); @(posedge clk_i);
-        wait (sync_m_valid && sync_m_data == 8'h11); @(posedge clk_i);
-        wait (sync_m_valid && sync_m_data == 8'h12); @(posedge clk_i);
-        wait (sync_m_valid && sync_m_data == 8'h13); @(posedge clk_i);
+        for (int unsigned index = 0; index < NOC_FIFO_DEPTH; index++) begin
+            wait (sync_m_valid && sync_m_data == sequence_data(8'h10, index)); @(posedge clk_i);
+        end
         @(negedge clk_i);
         sync_m_ready = 1'b0;
         assert (!sync_m_valid) else $fatal(1, "Synchronous FIFO did not drain");
 
         // The Gray-pointer FIFO crosses unrelated clocks without reordering.
-        cdc_send(8'h20);
-        cdc_send(8'h21);
-        cdc_send(8'h22);
-        cdc_send(8'h23);
+        for (int unsigned index = 0; index < AXI_FIFO_DEPTH; index++) begin
+            cdc_send(sequence_data(8'h20, index));
+        end
         cdc_m_ready = 1'b1;
-        cdc_receive(8'h20);
-        cdc_receive(8'h21);
-        cdc_receive(8'h22);
-        cdc_receive(8'h23);
+        for (int unsigned index = 0; index < AXI_FIFO_DEPTH; index++) begin
+            cdc_receive(sequence_data(8'h20, index));
+        end
         @(negedge dst_clk_i);
         cdc_m_ready = 1'b0;
 

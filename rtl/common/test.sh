@@ -46,9 +46,15 @@ case "$task_mode" in
         ;;
     test)
         "${task_verilator[@]}" --lint-only "${task_sources[@]}"
-        "${task_verilator[@]}" --binary --Mdir "$task_tmp/obj_dir" -o common_primitives_tb \
-            "${task_sources[@]}"
-        "$task_tmp/obj_dir/common_primitives_tb"
+        for task_depth in 4 8 16; do
+            task_obj_dir="$task_tmp/obj_dir_$task_depth"
+            "${task_verilator[@]}" \
+                -GNOC_FIFO_DEPTH="$task_depth" \
+                -GAXI_FIFO_DEPTH="$task_depth" \
+                --binary --Mdir "$task_obj_dir" -o common_primitives_tb \
+                "${task_sources[@]}"
+            "$task_obj_dir/common_primitives_tb"
+        done
         ;;
     *)
         echo "usage: $0 [lint|test]" >&2
