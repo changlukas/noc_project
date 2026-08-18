@@ -49,6 +49,9 @@ module tb_common_primitives #(
     logic       skid_m_ready;
     logic [7:0] skid_m_data;
 
+    int unsigned cdc_src_lfsr = 32'h1;
+    int unsigned cdc_dst_lfsr = 32'h2;
+
     noc_sync_fifo #(
         .T              ( logic [7:0] ),
         .NOC_FIFO_DEPTH ( NOC_FIFO_DEPTH )
@@ -137,6 +140,10 @@ module tb_common_primitives #(
         sequence_data = base + 8'(index);
     endfunction
 
+    function automatic int unsigned lfsr_next(input int unsigned state);
+        lfsr_next = state * 32'd1_664_525 + 32'd1_013_904_223;
+    endfunction
+
     task automatic sync_send(input logic [7:0] data);
         begin
             @(negedge clk_i);
@@ -148,24 +155,79 @@ module tb_common_primitives #(
         end
     endtask
 
-    task automatic cdc_send(input logic [7:0] data);
+    task automatic sync_fill_and_drain(input logic [7:0] base);
         begin
-            @(negedge src_clk_i);
-            cdc_s_data = data;
-            cdc_s_valid = 1'b1;
-            do @(posedge src_clk_i); while (!cdc_s_ready);
-            @(negedge src_clk_i);
-            cdc_s_valid = 1'b0;
+            for (int unsigned index = 0; index < NOC_FIFO_DEPTH; index++) begin
+                sync_send(sequence_data(base, index));
+            end
+            assert (!sync_s_ready) else $fatal(1, "Synchronous FIFO did not become full");
+            repeat (3) begin
+                assert (sync_m_valid && sync_m_data == base)
+                    else $fatal(1, "Synchronous FIFO changed its stalled head transaction");
+                @(posedge clk_i);
+                #1ps;
+            end
+            sync_m_ready = 1'b1;
+            for (int unsigned index = 0; index < NOC_FIFO_DEPTH; index++) begin
+                sync_receive(sequence_data(base, index));
+            end
+            @(negedge clk_i);
+            sync_m_ready = 1'b0;
+            assert (!sync_m_valid) else $fatal(1, "Synchronous FIFO did not drain");
         end
     endtask
 
-    task automatic cdc_receive(input logic [7:0] expected);
+    task automatic cdc_send_stream(
+        input logic [7:0] base,
+        input int unsigned count
+    );
         begin
-            wait (cdc_m_valid);
-            assert (cdc_m_data == expected)
-                else $fatal(1, "CDC FIFO expected %0h, got %0h", expected, cdc_m_data);
-            @(posedge dst_clk_i);
-            #1ps;
+            for (int unsigned index = 0; index < count; index++) begin
+                cdc_src_lfsr = lfsr_next(cdc_src_lfsr);
+                repeat (int'(cdc_src_lfsr[1:0])) @(negedge src_clk_i);
+                @(negedge src_clk_i);
+                cdc_s_data = sequence_data(base, index);
+                cdc_s_valid = 1'b1;
+                do @(posedge src_clk_i); while (!cdc_s_ready);
+                @(negedge src_clk_i);
+                cdc_s_valid = 1'b0;
+            end
+        end
+    endtask
+
+    task automatic cdc_receive_stream(
+        input logic [7:0] base,
+        input int unsigned count
+    );
+        int unsigned received;
+        logic        stalled;
+        logic [7:0]  stalled_data;
+        begin
+            received = 0;
+            stalled = 1'b0;
+            cdc_m_ready = 1'b0;
+            while (received < count) begin
+                @(negedge dst_clk_i);
+                cdc_dst_lfsr = lfsr_next(cdc_dst_lfsr);
+                cdc_m_ready = cdc_dst_lfsr[0];
+                @(posedge dst_clk_i);
+                if (stalled) begin
+                    assert (cdc_m_valid && cdc_m_data == stalled_data)
+                        else $fatal(1, "CDC FIFO changed its stalled head transaction");
+                end
+                if (cdc_m_valid && cdc_m_ready) begin
+                    assert (cdc_m_data == sequence_data(base, received))
+                        else $fatal(1, "CDC FIFO expected %0h, got %0h",
+                                    sequence_data(base, received), cdc_m_data);
+                    received++;
+                end
+                stalled = cdc_m_valid && !cdc_m_ready;
+                if (stalled) begin
+                    stalled_data = cdc_m_data;
+                end
+            end
+            @(negedge dst_clk_i);
+            cdc_m_ready = 1'b0;
         end
     endtask
 
@@ -209,42 +271,33 @@ module tb_common_primitives #(
         assert (!sync_m_valid && !cdc_m_valid && !simple_m_valid && !skid_m_valid)
             else $fatal(1, "Primitive output valid was not cleared by reset");
 
-        // The synchronous FIFO is non-fall-through and preserves every entry.
-        for (int unsigned index = 0; index < NOC_FIFO_DEPTH; index++) begin
-            sync_send(sequence_data(8'h10, index));
-        end
-        assert (!sync_s_ready) else $fatal(1, "Synchronous FIFO did not become full");
-        repeat (3) begin
-            assert (sync_m_valid && sync_m_data == 8'h10)
-                else $fatal(1, "Synchronous FIFO changed its stalled head transaction");
-            @(posedge clk_i);
-            #1ps;
-        end
+        // Two complete fill/drain passes exercise FIFO pointer wraparound.
+        sync_fill_and_drain(8'h10);
+        sync_fill_and_drain(8'h20);
+
+        // A partial FIFO accepts one push while retiring its current head.
+        sync_send(8'h30);
+        @(negedge clk_i);
+        sync_s_data = 8'h31;
+        sync_s_valid = 1'b1;
         sync_m_ready = 1'b1;
-        for (int unsigned index = 0; index < NOC_FIFO_DEPTH; index++) begin
-            sync_receive(sequence_data(8'h10, index));
-        end
+        @(posedge clk_i);
+        assert (sync_m_valid && sync_m_data == 8'h30)
+            else $fatal(1, "Synchronous FIFO did not retain the simultaneous-pop head");
+        @(negedge clk_i);
+        sync_s_valid = 1'b0;
+        assert (sync_m_valid && sync_m_data == 8'h31)
+            else $fatal(1, "Synchronous FIFO lost the simultaneous-push transaction");
+        @(posedge clk_i);
         @(negedge clk_i);
         sync_m_ready = 1'b0;
-        assert (!sync_m_valid) else $fatal(1, "Synchronous FIFO did not drain");
+        assert (!sync_m_valid) else $fatal(1, "Synchronous FIFO did not drain after simultaneous push/pop");
 
-        // The Gray-pointer FIFO crosses unrelated clocks without reordering.
-        for (int unsigned index = 0; index < AXI_FIFO_DEPTH; index++) begin
-            cdc_send(sequence_data(8'h20, index));
-        end
-        wait (cdc_m_valid);
-        repeat (3) begin
-            assert (cdc_m_valid && cdc_m_data == 8'h20)
-                else $fatal(1, "CDC FIFO changed its stalled head transaction");
-            @(posedge dst_clk_i);
-            #1ps;
-        end
-        cdc_m_ready = 1'b1;
-        for (int unsigned index = 0; index < AXI_FIFO_DEPTH; index++) begin
-            cdc_receive(sequence_data(8'h20, index));
-        end
-        @(negedge dst_clk_i);
-        cdc_m_ready = 1'b0;
+        // Unrelated clocks plus randomized stalls preserve every CDC transaction in order.
+        fork
+            cdc_send_stream(8'h40, 3 * AXI_FIFO_DEPTH);
+            cdc_receive_stream(8'h40, 3 * AXI_FIFO_DEPTH);
+        join
 
         // Bypass has no storage or added latency.
         bypass_m_ready = 1'b1;
@@ -287,8 +340,11 @@ module tb_common_primitives #(
         @(posedge clk_i);
         @(negedge clk_i);
         skid_s_valid = 1'b0;
-        assert (skid_m_valid && skid_m_data == 8'h50)
-            else $fatal(1, "Skid buffer did not retain its first transaction");
+        repeat (3) begin
+            assert (skid_m_valid && skid_m_data == 8'h50)
+                else $fatal(1, "Skid buffer did not retain its first transaction");
+            @(posedge clk_i);
+        end
         skid_m_ready = 1'b1;
         @(posedge clk_i);
         wait (skid_m_valid && skid_m_data == 8'h51);
@@ -296,6 +352,31 @@ module tb_common_primitives #(
         @(negedge clk_i);
         skid_m_ready = 1'b0;
         assert (!skid_m_valid) else $fatal(1, "Skid buffer did not drain");
+
+        // Reset asserts together, then each clock domain resumes independently.
+        @(negedge clk_i);
+        rst_ni = 1'b0;
+        src_rst_ni = 1'b0;
+        dst_rst_ni = 1'b0;
+        #1ps;
+        assert (!sync_m_valid && !cdc_m_valid && !simple_m_valid && !skid_m_valid)
+            else $fatal(1, "Primitive output valid was not cleared by coordinated reset assertion");
+        repeat (2) @(posedge clk_i);
+        #1ps;
+        rst_ni = 1'b1;
+        repeat (2) @(posedge src_clk_i);
+        #1ps;
+        src_rst_ni = 1'b1;
+        repeat (3) @(posedge dst_clk_i);
+        #1ps;
+        dst_rst_ni = 1'b1;
+        assert (!sync_m_valid && !cdc_m_valid && !simple_m_valid && !skid_m_valid)
+            else $fatal(1, "Primitive output valid was not cleared by independent reset release");
+
+        fork
+            cdc_send_stream(8'h80, 2 * AXI_FIFO_DEPTH);
+            cdc_receive_stream(8'h80, 2 * AXI_FIFO_DEPTH);
+        join
 
         $display("PASS: common primitive adapters");
         $finish;

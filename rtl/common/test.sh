@@ -32,6 +32,7 @@ task_sources=(
     "$task_root/rtl/common/axi_async_fifo.sv"
     "$task_root/rtl/common/noc_reg_slice.sv"
     "$task_root/rtl/common/tests/tb_common_primitives.sv"
+    "$task_root/rtl/common/tests/tb_common_primitive_guards.sv"
 )
 
 task_verilator=(
@@ -54,6 +55,18 @@ case "$task_mode" in
                 --binary --Mdir "$task_obj_dir" -o common_primitives_tb \
                 "${task_sources[@]}"
             "$task_obj_dir/common_primitives_tb"
+        done
+        for task_case in 0 1 2; do
+            task_obj_dir="$task_tmp/obj_dir_invalid_$task_case"
+            "${task_verilator[@]}" \
+                --top-module tb_common_primitive_guards \
+                -GINVALID_CASE="$task_case" \
+                --binary --Mdir "$task_obj_dir" -o common_primitive_guards_tb \
+                "${task_sources[@]}"
+            if "$task_obj_dir/common_primitive_guards_tb" >/dev/null 2>&1; then
+                echo "adapter parameter guard $task_case did not fail" >&2
+                exit 1
+            fi
         done
         ;;
     *)
