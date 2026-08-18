@@ -95,6 +95,28 @@ directed driver --> master_dv --> NMU --> routers --> NSU --> slave_dv --> tile-
 Every node carries the same endpoint layout; the fabric and the NI wraps
 (`ni_wrap`, `router_wrap`) hold no verification code.
 
+### Hybrid block co-simulation
+
+RTL block signoff does not wait for a complete RTL mesh. The verification composition selects the
+NMU, NSU and Router implementations independently. A model selection instantiates the existing DPI
+wrapper and consumes its `ctx` handle; an RTL selection instantiates the synthesizable block with the
+same functional ports and has no DPI handle.
+
+The NI hybrid tests use a zero-hop test link. RTL NMU connects to the reference NSU, and reference
+NMU connects to RTL NSU. REQ and RSP use their ready/valid contracts directly. Where the current
+model's symmetric DAT credit port differs from the target Router-to-NI ready/valid contract, a
+verification-only adapter translates flow control without changing the flit, adding routing, or
+modeling a Router pipeline. This verifies AXI-to-flit, flit-to-AXI, ordering, backpressure and
+response behavior without requiring any Router or mesh.
+
+Router block signoff uses identical flit, ready and credit stimulus against RTL and reference Router
+instances and compares outputs only inside the approved conformance matrix. Documented intentional
+cycle differences, including the current model's optimistic collective multi-output behavior, are
+excluded explicitly rather than hidden by loose scoreboarding.
+
+The acceptance order is unit DV, hybrid block co-sim, full-RTL `2x2 verify`, then the full-RTL
+`4x4 verify` milestone. Every ready/valid hybrid boundary receives randomized stall injection.
+
 ## VIP set
 
 All four components are vendored under `sim/dv/` and run unmodified except

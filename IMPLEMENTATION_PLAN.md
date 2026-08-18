@@ -5,8 +5,8 @@ merges follow implementation dependencies from verified leaf units back to each 
 issue IDs and readiness are maintained in the campaign issue graph; this file records stage gates.
 
 ## Stage 1: Top-Level Contract
-Goal: Freeze the NMU, NSU, and Router hierarchy, interfaces, clock/reset ownership, canonical RTL parameters, and model/RTL DUT selection.
-Success Criteria: The three block contracts are reviewed against their specs and wrappers; parameter names, defaults, and legal ranges have one canonical source; `codegen.py --check` passes; no placeholder RTL is committed.
+Goal: Freeze the NMU, NSU, and Router hierarchy, interfaces, clock/reset ownership, canonical RTL parameters, and independent per-block model/RTL DUT selection.
+Success Criteria: The three block contracts are reviewed against their specs and wrappers; NMU, NSU, and Router can each select model or RTL without exposing DPI handles to production RTL; parameter names, defaults, and legal ranges have one canonical source; `codegen.py --check` passes; no placeholder RTL is committed.
 Status: Not Started
 
 ## Stage 2: Shared Foundation And DV Plans
@@ -16,7 +16,7 @@ Status: Not Started
 
 ## Stage 3: Block RTL
 Goal: Implement and verify Router, NMU, and NSU through independently reviewable work packages.
-Success Criteria: Every DE package has its paired DV evidence; focused tests pass from a clean tree; Router, NMU, and NSU elaborate through the wrapper-facing RTL contract; reference reuse is classified and license-compliant.
+Success Criteria: Every DE package has its paired DV evidence; focused tests pass from a clean tree; RTL NMU passes zero-hop co-sim with the reference NSU; RTL NSU passes zero-hop co-sim with the reference NMU; any model/target DAT flow-control mismatch is isolated in a verification-only adapter with no packet transformation; RTL Router passes its reference-driven differential harness within the documented conformance scope; Router, NMU, and NSU elaborate through the wrapper-facing RTL contract; reference reuse is classified and license-compliant.
 Status: Not Started
 
 ## Stage 4: 2x2 Integration
