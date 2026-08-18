@@ -49,10 +49,10 @@ latency is not compared unless a later approved specification adds a target-RTL 
 | Required behavior | Planned evidence |
 |---|---|
 | AW/W/AR reconstruction and Narrow/Data request scheduling | S0-REQ-01 through S0-REQ-09 |
-| Response Queue lifetime and legal downstream-ID mapping | S0-RQ-01 through S0-RQ-10, NSU-A04 through NSU-A06 |
+| Response Queue lifetime and legal downstream-ID mapping | S0-RQ-01 through S0-RQ-11, NSU-A04 through NSU-A06 |
 | independent AXI channels | S0-REQ-07, S1-AXI-01/02, S1-CDC-02 |
 | concurrent B/R scheduling and independent RSP/DAT progress | S0-RQ-09, S1-RSP-01 through S1-RSP-04 |
-| credit-gated DataR | S1-DAT-01 through S1-DAT-06, NSU-A09 |
+| credit-gated DataR | S1-DAT-01 through S1-DAT-07, NSU-A09 |
 | CDC and coordinated reset | S1-CDC-01 through S1-CDC-05, NSU-A10 |
 | illegal parameters | Section 6 elaboration-positive and expected-fail matrix |
 | behavior under backpressure and response interleaving | Sections 4, 5, and the two sustained scenarios in Section 8 |
@@ -90,7 +90,7 @@ but reaching the watchdog or simply running for a fixed cycle count cannot produ
 | S0-REQ-01 | one Narrow AW/W burst on REQ; vary legal address, ID, burst fields, strobes, WLAST, ordering, source/port, and collective context | AXI AW and every W beat are bit-accurate; unicast address is unchanged, while multicast replaces only the class-selected coordinate field and never subtracts a region base; the Response Queue write entry contains the complete context |
 | S0-REQ-02 | one Narrow AR on REQ, including unaligned narrow-lane cases | AXI AR is bit-accurate and its unicast address remains unchanged; the read entry retains address/burst context needed to select every returned narrow lane |
 | S0-REQ-03 | Data AW/W on DAT and Data AR on REQ | all three AXI channels reconstruct bit-accurately; class affects NoC response selection but not the downstream AXI ordering domain |
-| S0-REQ-04 | REQ and DAT present admissible AWs in the same cycle, then continuously replenish both | the first simultaneous tie follows reset state; grants alternate while both remain admissible; either class wins immediately when it is the only admissible class |
+| S0-REQ-04 | REQ and DAT present admissible AWs in the same cycle, then continuously replenish both; repeat after both have waited behind full write-admission state | the first simultaneous tie follows reset state; grants alternate on accepted simultaneous-class AWs; rejected/stalled attempts do not rotate priority; either class wins immediately when it is the only admissible class |
 | S0-REQ-05 | accept several AWs from alternating classes before completing earlier W bursts | AW continues independently; the W-order FIFO records `{class, burst_beats}` in accepted-AW order |
 | S0-REQ-06 | with the W-order head belonging to one class, delay that class's next W while the other class has W available | the later class does not bypass; W resumes from the head class and changes class only after the exact final beat |
 | S0-REQ-07 | hold each of AWREADY, WREADY, and ARREADY low separately and in combinations while other channels remain ready | the blocked channel holds valid and fields stable; unrelated channels continue until their own capacity limit |
@@ -115,6 +115,7 @@ both classes are continuously eligible.
 | S0-RQ-08 | stall the RSP or DAT Read class FIFO during B, non-last R, and RLAST packetization | lookup state is non-destructive while stalled; B/last-R commit occurs only on class-FIFO acceptance, never on AXI acceptance or attempted NoC enqueue |
 | S0-RQ-09 | accept B and R in the same cycle, including equal numeric BID/RID | separate direction tables return both contexts without collision or implicit priority |
 | S0-RQ-10 | inject an unmapped BID/RID, an R beat after retirement, and reference-count underflow in checker-negative configurations | each violation is detected; no default or stale context can form a response packet |
+| S0-RQ-11 | fill the approved Response Queue entry capacity in one direction using repeated and distinct live keys, then complete one transaction | every further AW or AR allocation in the exhausted direction stalls; no live entry is overwritten; W and the opposite direction continue; one accepted B or RLAST response-packet enqueue frees exactly one entry and releases a mapping only when its reference count reaches zero |
 
 The mapping predictor is key-based and must not reuse the C++ `MetaBuffer` implementation until the
 alignment gate closes. This keeps a shared implementation bug from appearing in both DUT and
@@ -148,6 +149,7 @@ waits for an unrelated channel handshake.
 | S1-DAT-04 | hold all eligible DataR credits at zero until the DAT Read FIFO fills, while B/NarrowR traffic continues | no zero-credit DAT send occurs; pressure reaches AXI RREADY through the finite buffers; RSP continues to make progress |
 | S1-DAT-05 | return credits after a witnessed zero-credit interval | the exact blocked sequence drains without loss, duplication, counter overflow, or permanent stall |
 | S1-DAT-06 | run `SHARED` across legal VC counts and `READ_WRITE_SPLIT` across its legal even counts | DataR uses all VCs in `SHARED` and only the upper-half mask in split mode; mode changes neither packet fields nor response ordering |
+| S1-DAT-07 | continuously offer DataR while its required VCs remain credited and the DAT output is otherwise free; add simultaneous RSP load in a second phase | after pipeline fill, DAT accepts one flit per `noc_clk` cycle with no avoidable bubble; independent RSP progress neither inserts a DAT bubble nor consumes DAT credit |
 
 The current C++ model implements only `SHARED`. `READ_WRITE_SPLIT` is therefore checked against the
 approved mask/hash rules, not by differential model output. A staged implementation that supports
@@ -182,7 +184,7 @@ A timeout or unrelated compile error is not a passing guard test.
 | `AXI_FIFO_DEPTH` | 4, 8, 16 | representative non-member values below, between, and above the legal set |
 | `NOC_FIFO_DEPTH` | 4, 8, 16 | representative non-member values below, between, and above the legal set |
 | `NOC_ROUTER_VC_DEPTH` | 1, default, 16 | 0 and 17 |
-| Response Queue mapping parameters | boundary and capacity-consistency cases after their canonical defaults/ranges are approved | zero/unrepresentable capacity and out-of-range widths after approval; `[TBD]` until then |
+| Response Queue mapping and entry-capacity parameters | boundary and capacity-consistency cases after their canonical defaults/ranges are approved | zero/unrepresentable capacity and out-of-range widths after approval; `[TBD]` until then |
 
 The test records the instance path and expected diagnostic for each guard. This prevents an
 unrelated fatal in another generated block from satisfying the test.
@@ -201,10 +203,10 @@ requires it. Every checker must have a fault-injection or illegal-stimulus test 
 | NSU-A03 | request scheduler | no W transfers without an accepted AW-order entry; beat count is `AWLEN + 1`; WLAST is exact; non-head class cannot transfer |
 | NSU-A04 | Response Queue | no read/write allocation overwrites a live record; lookup is live and direction-correct; commit cannot underflow |
 | NSU-A05 | ID mapper | live keys map one-to-one to downstream IDs within each direction; reference count is nonzero for a live mapping; full-table admission blocks only a new key |
-| NSU-A06 | response path | every accepted BID/RID has a live matching entry; only B or accepted RLAST response-packet enqueue retires one transaction |
+| NSU-A06 | response path | every accepted BID/RID has a live matching entry; only B or accepted RLAST response-packet enqueue retires one transaction; every emitted B/R flit has `flit_tail=1` |
 | NSU-A07 | class FIFOs | occupancy remains in range; accepted input minus accepted output equals occupancy; no full overwrite or empty read |
-| NSU-A08 | response schedulers | at most one RSP and one DAT flit transfer per cycle; B/NarrowR arbitration is bounded-fair while both remain continuously eligible |
-| NSU-A09 | DAT assigner | selected VC is mode-eligible and equals the required DataR hash; `fixed_vc=1`; zero-credit send is impossible; credit count stays within `[0, NOC_ROUTER_VC_DEPTH]` |
+| NSU-A08 | response schedulers | at most one RSP and one DAT flit transfer per cycle; B/NarrowR arbitration is work-conserving and bounded-fair while both remain continuously eligible |
+| NSU-A09 | DAT assigner | selected VC is mode-eligible and equals the required DataR hash; `fixed_vc=1`; zero-credit send is impossible; an eligible head transfers whenever its required VC has credit and the output can accept; credit count stays within `[0, NOC_ROUTER_VC_DEPTH]` |
 | NSU-A10 | CDC/reset | no output valid escapes reset; no transfer occurs from stale pre-reset state; each local state element is controlled by its documented domain reset |
 
 In addition to temporal assertions, build/source-list review checks that production NSU source
@@ -224,6 +226,7 @@ inventing a percentage target:
 - B and R concurrent acceptance × RSP and DAT concurrent transmission;
 - B/NarrowR RSP contention × grant × downstream stall;
 - DataR VC × mode × credit zero/nonzero × credit return × burst position;
+- continuously eligible credited DataR × DAT transfer/no-transfer × simultaneous RSP progress;
 - each AXI channel stall × each unrelated channel progress;
 - clock relationship × randomized phase × CDC direction × FIFO near-full;
 - reset with state nonempty × release order × first post-reset channel.
@@ -249,7 +252,7 @@ FIFO internals or an arbitrary production pipeline.
 |---|---|---|
 | Response tracking | `MetaBuffer` has per-ID FIFOs and correct peek/commit behavior, but keys by ID only | replace or front it with source-aware read/write Response Queue behavior, complete `response_entry_t` context, reference counts, identity-preferred/lowest-free mapping, and commit on accepted response-class enqueue |
 | Downstream ID width | current beat types and collapse/pass-through tests assume the fixed model ID width and only two `max_unique_ids` modes | parameterize the compared downstream ID behavior after the canonical Response Queue parameters are approved; add collision, fallback, reuse, full-table, and legal/illegal-width tests |
-| Narrow/Data request scheduler | current depacketizer already has independent ingress, round-robin AW selection, `w_order_`, and blocked-head W behavior | retain behavior; add direct simultaneous-AW fairness, sole-eligible work conservation, multiple-AW outstanding, and blocked-head W tests before differential S0 scheduling claims |
+| Narrow/Data request scheduler | current depacketizer has independent ingress, round-robin AW selection, `w_order_`, and blocked-head W behavior, but `Depacketize::pop_aw` rotates `aw_prefer_data_` before rejecting a full write pool | preserve the accepted scheduling policy, but advance round-robin state only on an accepted simultaneous-class AW; add direct simultaneous-AW fairness under admission stalls, sole-eligible work conservation, multiple-AW outstanding, and blocked-head W tests before differential S0 scheduling claims |
 | B/R and RSP/DAT scheduling | current packetizer has separate B/R staging and class selection; current tests prove selected fields but not all simultaneous pressure cases | expose accepted events to the checker and add concurrent B/R plus independent RSP/DAT pressure tests; compare order/content, not internal tick count |
 | Target NI buffering | current `VcAllocator` owns per-VC pending queues and DAT receive uses model-side credit | for target-conformance comparison, model four bounded class FIFOs and head-only credit gating with no NI per-VC storage; keep the F0 adapter for the model/target DAT receive mismatch |
 | CDC/reset | model is single-clock | do not emulate pointer synchronizers or compare CDC latency in C++; use RTL primitive and NSU integration assertions/scoreboards |
