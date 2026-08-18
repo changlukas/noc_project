@@ -41,6 +41,12 @@ task_verilator=(
     -I"$task_common_cells/include" --top-module tb_common_primitives
 )
 
+task_guard_messages=(
+    "NOC_FIFO_DEPTH must be 4, 8, or 16"
+    "AXI_FIFO_DEPTH must be 4, 8, or 16"
+    "REG_TYPE must be 0, 1, or 2"
+)
+
 case "$task_mode" in
     lint)
         "${task_verilator[@]}" --lint-only "${task_sources[@]}"
@@ -58,13 +64,19 @@ case "$task_mode" in
         done
         for task_case in 0 1 2; do
             task_obj_dir="$task_tmp/obj_dir_invalid_$task_case"
+            task_log="$task_tmp/guard_$task_case.log"
             "${task_verilator[@]}" \
                 --top-module tb_common_primitive_guards \
                 -GINVALID_CASE="$task_case" \
                 --binary --Mdir "$task_obj_dir" -o common_primitive_guards_tb \
                 "${task_sources[@]}"
-            if "$task_obj_dir/common_primitive_guards_tb" >/dev/null 2>&1; then
+            if "$task_obj_dir/common_primitive_guards_tb" >"$task_log" 2>&1; then
                 echo "adapter parameter guard $task_case did not fail" >&2
+                exit 1
+            fi
+            if ! grep -Fq "${task_guard_messages[$task_case]}" "$task_log"; then
+                cat "$task_log" >&2
+                echo "adapter parameter guard $task_case failed for an unexpected reason" >&2
                 exit 1
             fi
         done

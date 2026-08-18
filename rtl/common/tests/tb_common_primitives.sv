@@ -226,6 +226,9 @@ module tb_common_primitives #(
                     stalled_data = cdc_m_data;
                 end
             end
+            @(posedge dst_clk_i);
+            assert (!cdc_m_valid)
+                else $fatal(1, "CDC FIFO produced an extra transaction %0h", cdc_m_data);
             @(negedge dst_clk_i);
             cdc_m_ready = 1'b0;
         end
@@ -352,6 +355,48 @@ module tb_common_primitives #(
         @(negedge clk_i);
         skid_m_ready = 1'b0;
         assert (!skid_m_valid) else $fatal(1, "Skid buffer did not drain");
+
+        // Load every stateful adapter so reset checks cannot pass from an already-empty state.
+        @(negedge clk_i);
+        sync_m_ready = 1'b0;
+        simple_m_ready = 1'b0;
+        skid_m_ready = 1'b0;
+        @(negedge dst_clk_i);
+        cdc_m_ready = 1'b0;
+
+        sync_send(8'ha0);
+        wait (sync_m_valid);
+        assert (sync_m_data == 8'ha0)
+            else $fatal(1, "Reset precondition lost the synchronous FIFO transaction");
+
+        cdc_send_stream(8'ha1, 1);
+        wait (cdc_m_valid);
+        assert (cdc_m_data == 8'ha1)
+            else $fatal(1, "Reset precondition lost the CDC FIFO transaction");
+
+        @(negedge clk_i);
+        simple_s_data = 8'ha2;
+        simple_s_valid = 1'b1;
+        do @(posedge clk_i); while (!simple_s_ready);
+        @(negedge clk_i);
+        simple_s_valid = 1'b0;
+        wait (simple_m_valid);
+        assert (simple_m_data == 8'ha2)
+            else $fatal(1, "Reset precondition lost the simple-register transaction");
+
+        @(negedge clk_i);
+        skid_s_data = 8'ha3;
+        skid_s_valid = 1'b1;
+        do @(posedge clk_i); while (!skid_s_ready);
+        @(negedge clk_i);
+        skid_s_valid = 1'b0;
+        wait (skid_m_valid);
+        assert (skid_m_data == 8'ha3)
+            else $fatal(1, "Reset precondition lost the skid-buffer transaction");
+
+        assert (sync_m_valid && cdc_m_valid && simple_m_valid && skid_m_valid)
+            else $fatal(1, "Reset precondition valid state is sync=%0b cdc=%0b simple=%0b skid=%0b",
+                        sync_m_valid, cdc_m_valid, simple_m_valid, skid_m_valid);
 
         // Reset asserts together, then each clock domain resumes independently.
         @(negedge clk_i);
