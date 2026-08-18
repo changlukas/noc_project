@@ -414,6 +414,14 @@ def test_pack_rejects_a_non_power_of_two_row():
             {"base": 0x0, "size": 0x100000, "stride": 0x200000, "space": "memory"}]))
 
 
+def test_pack_rejects_offset_decode():
+    doc = _config_doc(2, 2, ranges=[
+        {"base": 0x0, "size": 0x100000, "stride": 0x200000, "space": "memory"}])
+    doc["routing"] = {"use_id_table": False}
+    with pytest.raises(ValueError, match="use_id_table must be true"):
+        address_map.pack_config(doc)
+
+
 @pytest.mark.parametrize("size", [0, -0x1000, 0x1234])
 def test_pack_rejects_a_size_that_is_not_a_positive_4k_multiple(size):
     """Zero and misaligned sizes are what SamTable::validate asserts on at

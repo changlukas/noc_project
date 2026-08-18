@@ -1,12 +1,26 @@
+# Verilator simulation. The VCS flow is sim/vcs/Makefile: same shape, its own
+# file, sharing sim/build_config.mk for everything simulator-neutral.
+#
+#   make -C sim/verilator sim CONFIG=<config> PATTERN=<p> [SEED=<n>]
+#
+# Run logs land in output/<scenario>/run.log.
+
+##########
+# Common #
+##########
+
 VERILATOR     := verilator
 TOP           := tb_top
 # bash for `set -o pipefail` in run recipes (dash, a common /bin/sh on
 # Linux, lacks it).
 SHELL         := bash
 
-# Configuration: sim/configs/<TOPOLOGY>.yml. Override to switch configurations.
-# sim/Makefile spells it CONFIG= and forwards it here.
-TOPOLOGY ?= mesh_4x4
+# Mirrors the root Makefile. Override via local.mk if needed.
+PYTHON3 ?= python3
+
+# CONFIG names the one file the build reads: sim/configs/<CONFIG>.yml, a
+# geometry and its address map.
+CONFIG ?= mesh_4x4
 
 # Run class selects the endpoint/checking flavor compiled into the binary:
 #   directed (only) : file_master + scoreboard, INCR two-phase.
@@ -22,6 +36,50 @@ endif
 # artifacts land under $(BUILD_ROOT)/verilator/, run logs under ./output/.
 include ../build_config.mk
 
+# `make -C sim/verilator CONFIG=... PATTERN=...` carries no goal, so the default
+# has to be the run, not the first target in the file.
+.DEFAULT_GOAL := sim
+
+########
+# Help #
+########
+
+# Listed, not enforced: a wrong name fails at the file the build then cannot
+# find. The lists exist so `make help` can print them.
+_CONFIGS  := $(patsubst ../configs/%.yml,%,$(wildcard ../configs/*.yml))
+_PATTERNS := neighbor transpose uniform_random all_to_all hotspot multicast \
+             bit_complement bit_reverse shuffle bit_rotation tornado
+
+.PHONY: help
+help:
+	@echo "Simulate (from the repo root, prefix these with sim-: make sim-gen, make sim-build, ...):"
+	@echo "  make gen   CONFIG=<config> PATTERN=<p>          stimulus only; a run needs this first"
+	@echo "  make sim   CONFIG=<config> PATTERN=<p> [SEED=<n>]   build, then run"
+	@echo "  make build CONFIG=<config>                      build only, no run"
+	@echo "  make run   CONFIG=<config> PATTERN=<p>          run only; errors if not built"
+	@echo "  make gen CONFIG=mesh_4x4 PATTERN=neighbor && make sim CONFIG=mesh_4x4 PATTERN=neighbor"
+	@echo "  CONFIG:  a sim/configs/*.yml basename: $(_CONFIGS)"
+	@echo "  PATTERN: $(_PATTERNS)"
+	@echo "  The DAT VC count (noc.DAT_NUM_VC) and the NMU read RoB mode"
+	@echo "  (nmu.READ_ROB_ENABLED) are specgen constants: edit"
+	@echo "  specgen/source/constants.yaml and rebuild, they are not run knobs."
+	@echo "  Vars: INJECTION_MODE=0|1|2 INJECTION_RATE= INJECTION_COUNT= IDS_PER_INITIATOR= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT= HOTSPOT_PERIPHERALS=1; SEED unset draws + prints a random seed"
+	@echo "  Forensics: TIMEOUT_CYCLES=<n> fires the watchdog early, so a hang dumps per-node outstanding and last_progress without waiting out the formula"
+	@echo ""
+	@echo "  make sim CONFIG=mesh_2x2 DMA=1               pulp iDMA on every master face"
+	@echo "  DMA=1 ignores PATTERN: stimulus is gen_dma_jobs.py's per-node job files, and"
+	@echo "  the run ends when every DMA has retired every job and every destination"
+	@echo "  region matches its source. Vars: DMA_JOBS_PER_NODE= DMA_LENGTH= DMA_RW=read|write"
+	@echo "  (all three feed the job files AND the top's compare) DECERR_FAULT=1 DECERR_FAULT_WR=1"
+	@echo ""
+	@echo "  make sim-injection-sweep PATTERN=<p>         saturation sweep, long"
+	@echo ""
+	@echo "Build and test gates stay at the repo root: make build / make test / make pytest"
+
+#########
+# Build #
+#########
+
 VL_BUILD := $(BUILD_ROOT)/verilator
 
 # Per-config, per-run-class obj dir: building one flavor must not clobber
@@ -29,7 +87,7 @@ VL_BUILD := $(BUILD_ROOT)/verilator
 # The VC count and the RoB mode do NOT: both are specgen constants, so changing
 # one is an edit to specgen/source/constants.yaml, and the regenerated
 # ni_params_pkg.sv is a prerequisite of the binary below.
-OBJ_DIR := $(VL_BUILD)/obj_dir_$(TOPOLOGY)_$(RUN_CLASS)$(if $(filter 1,$(DMA)),_dma)
+OBJ_DIR := $(VL_BUILD)/obj_dir_$(CONFIG)_$(RUN_CLASS)$(if $(filter 1,$(DMA)),_dma)
 
 # FILELIST_F / FILELIST_GEN_ARGS come from build_config.mk. sim/filelist_<CONFIG>.f
 # is a generated artifact (gitignored): regenerated below from TB_TOP_SV_SRC with
@@ -41,14 +99,14 @@ OBJ_DIR := $(VL_BUILD)/obj_dir_$(TOPOLOGY)_$(RUN_CLASS)$(if $(filter 1,$(DMA)),_
 # owns time and the DPI .cpp is the only C++ source.
 C_SRC := \
     $(DPI_C_SRC) \
-    $(COSIM_ROOT)/verilator/main.cpp
+    $(SIM_ROOT)/verilator/main.cpp
 
 # c_model is header-only: no -l flag needed; include paths suffice.
 # yaml-cpp is a static archive built by CMake FetchContent; link via full path.
 VERILATOR_COMMON_FLAGS := \
     --cc --exe \
     --assert \
-    -I$(COSIM_ROOT)/tb \
+    -I$(SIM_ROOT)/tb \
     -I$(SRC_SV) \
     -I$(SPECGEN_SV_INC) \
     -I$(DV_ROOT)/axi-0.39.7/include \
@@ -87,14 +145,12 @@ VERILATOR_FLAGS += $(VERILATOR_EXTRA_FLAGS)
 # Name the real artifact, not a phony: a wrong-name target rebuilds always.
 TBTOP_EXE := $(OBJ_DIR)/V$(TOP)
 
-all: $(TBTOP_EXE)
-
-# filelist.f recipe: placed after `all:` so it is not the default goal.
+# filelist.f recipe: a file rule, so it is never a goal on its own.
 # gen_filelist.py absolutizes the relative paths build_config.mk carries.
 # Duplicated (intentionally) in sim/vcs/Makefile so a standalone `cd sim/vcs &&
 # make` regenerates it too; gen_filelist.py + FILELIST_GEN_ARGS keep them in sync.
-$(FILELIST_F): ../build_config.mk $(SPECGEN_CONSTANTS) $(COSIM_ROOT)/tools/gen_filelist.py
-	$(PYTHON3) $(COSIM_ROOT)/tools/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
+$(FILELIST_F): ../build_config.mk $(SPECGEN_CONSTANTS) $(SIM_ROOT)/tools/gen_filelist.py
+	$(PYTHON3) $(SIM_ROOT)/tools/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
 
 # The generated parameter files, from the source both they and build_config.mk's
 # --print-num-vc read. Without this an edit to constants.yaml left the testbench
@@ -105,14 +161,14 @@ $(NI_PARAMS_SV): $(SPECGEN_CONSTANTS) $(CODEGEN)
 $(NI_PARAMS_H): $(SPECGEN_CONSTANTS) $(CODEGEN)
 	$(PYTHON3) $(CODEGEN) --target cpp --domain params
 
-# tb_top_<TOPOLOGY>.sv is a generated artifact; regenerate
+# tb_top_<CONFIG>.sv is a generated artifact; regenerate
 # from the topology config before Verilating. Depends on the generator script, the
-# config file, and a TOPOLOGY stamp. TB_TOP_SV comes from build_config.mk
-# (deferred = so TOPOLOGY expands correctly).
-GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
+# config file, and a CONFIG stamp. TB_TOP_SV comes from build_config.mk
+# (deferred = so CONFIG expands correctly).
+GEN_TB_TOP    := $(SIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VL_BUILD)/.topology
 
-# tb_top_<TOPOLOGY>.sv does `include "noc_fabric.sv"` (bare filename); the
+# tb_top_<CONFIG>.sv does `include "noc_fabric.sv"` (bare filename); the
 # fabric lives in ref_model/top/, already implied by -I$(SRC_SV) above.
 VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 
@@ -124,21 +180,21 @@ VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VL_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" ]; then \
-	    echo "$(TOPOLOGY)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(CONFIG)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" ]; then \
+	    echo "$(CONFIG)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" > $@; \
 	fi
 
 # DMA_JOBS_PER_NODE / DMA_LENGTH / _DMA_JOB_ARGS come from build_config.mk, so
 # the top's compare and the job files it compares cannot be built from different
 # geometries.
-GEN_DMA_JOBS := $(COSIM_ROOT)/tools/gen_dma_jobs.py
+GEN_DMA_JOBS := $(SIM_ROOT)/tools/gen_dma_jobs.py
 
 # DMA only: on the directed path TB_TOP_SV is sim/tb/tb_noc_mesh.sv, a SOURCE
 # file, and a rule with this recipe would overwrite it with generator output the
 # first time the stamp or the generator was newer.
 ifeq ($(DMA),1)
 $(TB_TOP_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP) $(NI_PARAMS_SV)
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --dma $(_DMA_JOB_ARGS) --out $(TB_TOP_SV)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(CONFIG) --dma $(_DMA_JOB_ARGS) --out $(TB_TOP_SV)
 endif
 
 # topology_pkg.sv (build_config.mk's TOPOLOGY_PKG_SV): the address-map package
@@ -146,10 +202,7 @@ endif
 # fixed: switching CONFIG must rewrite it, and the newly selected config file is
 # not necessarily newer than the package the last build wrote.
 $(TOPOLOGY_PKG_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP)
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
-
-# Mirrors the root Makefile. Override via local.mk if needed.
-PYTHON3 ?= python3
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(CONFIG) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
 
 # yaml-cpp comes from the c_model CMake build; surface a clear hint instead
 # of a mysterious linker failure when it has not been built yet.
@@ -188,14 +241,22 @@ elaborate: $(TBTOP_EXE)
 .PHONY: build
 build: $(TBTOP_EXE)
 
-# NO_BUILD=1 makes run-directed a run and nothing else, so it cannot silently
-# spend a build's worth of time. It reports the missing binary instead.
 .PHONY: check-built
 check-built:
 	@[ -x "$(TBTOP_EXE)" ] || { \
-	    echo "ERROR: $(TOPOLOGY) is not built. Run: make sim-build CONFIG=$(TOPOLOGY)"; exit 1; }
+	    echo "ERROR: $(CONFIG) is not built. Run: make build CONFIG=$(CONFIG)"; exit 1; }
 
-SEED       ?= 1
+######################
+# Traffic Generation #
+######################
+
+# RANDOM is 0..32767; RANDOM*32768+RANDOM draws a uniform 30-bit seed (< 2**30),
+# staying under Verilator's +verilator+seed+ int32 ceiling (< 2147483648). The old
+# $RANDOM$RANDOM string-concat could reach 10 digits (~3.3e9) and abort the run.
+# := so the draw happens once per make invocation, not once per reference.
+ifeq ($(SEED),)
+SEED := $(shell bash -c 'echo $$(( RANDOM * 32768 + RANDOM ))')
+endif
 
 # One directed run recipe, three injection modes.
 #   INJECTION_MODE=0 (default): two phases, writes drain before reads, scoreboard gates.
@@ -268,53 +329,65 @@ STIM_BASE      ?= test_patterns
 # leaving it beside the new one. A run reads what is there and regenerates
 # nothing. Set STIM_BASE to hold two batches side by side.
 ifeq ($(DMA),1)
-STIM_ROOT      ?= $(STIM_BASE)/$(TOPOLOGY)/dma_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
+STIM_ROOT      ?= $(STIM_BASE)/$(CONFIG)/dma_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
 else
-STIM_ROOT      ?= $(STIM_BASE)/$(TOPOLOGY)/$(_PATTERN_TAG)
+STIM_ROOT      ?= $(STIM_BASE)/$(CONFIG)/$(_PATTERN_TAG)
 endif
-_TOPO_TAG      := $(TOPOLOGY)
+_TOPO_TAG      := $(CONFIG)
 ifeq ($(DMA),1)
 SIM_TAG        ?= dma_$(_TOPO_TAG)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
 else
 SIM_TAG        ?= $(if $(_CONTINUOUS),continuous_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),$(if $(_CHECKED),checked_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),directed_$(_TOPO_TAG)_$(_PATTERN_TAG)_s$(SEED)))
 endif
-GEN_PATTERNS   := $(COSIM_ROOT)/tools/gen_test_patterns.py
-EMIT_CSV       := $(COSIM_ROOT)/tools/emit_result_csv.py
+GEN_PATTERNS   := $(SIM_ROOT)/tools/gen_test_patterns.py
+EMIT_CSV       := $(SIM_ROOT)/tools/emit_result_csv.py
 # HOTSPOT_PERIPHERALS=1 moves the hotspot set off the router array (every tile
 # targets the peripheral on its row), so HOTSPOT names nothing and is not passed.
 _HOTSPOT_ARGS  := $(if $(filter hotspot,$(PATTERN)),$(if $(HOTSPOT_PERIPHERALS),--hotspot-peripherals,--hotspot $(HOTSPOT)),)
 _MCAST_ARGS    := $(if $(filter multicast,$(PATTERN)),--mcast-shape $(MCAST_SHAPE),)
 
-.PHONY: gen-directed
-gen-directed:
+# Stimulus generation alone: no build, no run.
+.PHONY: gen
+gen:
+	@echo ">>> gen CONFIG=$(CONFIG) PATTERN=$(PATTERN) SEED=$(SEED)"
 	@mkdir -p $(STIM_ROOT)
-	$(if $(filter 1,$(DMA)),,$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
+	$(if $(filter 1,$(DMA)),,$(PYTHON3) $(GEN_PATTERNS) --topology $(CONFIG) \
 	    --out $(STIM_ROOT) --pattern $(PATTERN) \
 	    --transactions-per-node $(INJECTION_COUNT) --size 5 --len $(BURST_LEN) \
 	    --seed $(SEED) $(_HOTSPOT_ARGS) $(_MCAST_ARGS) \
 	    $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)))
-	$(if $(filter 1,$(DMA)),$(PYTHON3) $(GEN_DMA_JOBS) --topology $(TOPOLOGY) \
+	$(if $(filter 1,$(DMA)),$(PYTHON3) $(GEN_DMA_JOBS) --topology $(CONFIG) \
 	    --out $(STIM_ROOT) $(_DMA_JOB_ARGS))
 	@echo "stimulus: $(STIM_ROOT)"
 
-# Parse-time, unlike the RUN_CLASS guard at :288 which must be a recipe check:
-# nothing target-overrides STIM_ROOT, so its value is final here, and firing
-# before the first prerequisite is what keeps a missing stimulus tree from
-# costing a build first.
-ifneq ($(filter run-directed,$(MAKECMDGOALS)),)
+#######
+# Run #
+#######
+
+# Parse-time, unlike the RUN_CLASS guard in the run recipe below which must be a
+# recipe check: nothing target-overrides STIM_ROOT, so its value is final here,
+# and firing before the first prerequisite is what keeps a missing stimulus tree
+# from costing a build first.
+ifneq ($(filter sim run,$(MAKECMDGOALS)),)
 ifeq ($(wildcard $(STIM_ROOT)),)
-$(error no stimulus at $(STIM_ROOT). Run: make sim-gen CONFIG=$(TOPOLOGY) PATTERN=$(PATTERN))
+$(error no stimulus at $(STIM_ROOT). Run: make gen CONFIG=$(CONFIG) PATTERN=$(PATTERN))
 endif
 endif
 
-.PHONY: run-directed
-run-directed: $(if $(NO_BUILD),check-built,$(TBTOP_EXE))
+# One recipe, two entries. `sim` builds first; `run` is a run and nothing else,
+# so it cannot silently spend a build's worth of time -- it reports the missing
+# binary instead. The prerequisite is chosen at parse time from the goal, because
+# a prerequisite list is expanded when the rule is read: a target-specific
+# variable set on `run` would not reach it.
+.PHONY: sim run
+sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 	# Guard runs first in the recipe (before emit/run), so a wrong RUN_CLASS exits
 	# before a vacuous no-scoreboard run. Deliberately a recipe check, not a
 	# parse-time $(error): OBJ_DIR/TBTOP_EXE are := fixed at parse, so a target-
 	# specific override cannot re-key them; the cost is a wasted wrong-flavor build.
-	@[ "$(RUN_CLASS)" = "directed" ] || { echo "ERROR: run-directed requires RUN_CLASS=directed (got '$(RUN_CLASS)')"; exit 1; }
+	@[ "$(RUN_CLASS)" = "directed" ] || { echo "ERROR: a run requires RUN_CLASS=directed (got '$(RUN_CLASS)')"; exit 1; }
 	@mkdir -p output/$(SIM_TAG)
+	@echo ">>> $@ CONFIG=$(CONFIG) PATTERN=$(PATTERN) SEED=$(SEED)"
 	@echo "running $(SIM_TAG) (mode=$(INJECTION_MODE) rate=$(INJECTION_RATE) count=$(INJECTION_COUNT) pattern=$(PATTERN))"
 	$(TBTOP_EXE) \
 	    "+stim_dir=$(STIM_ROOT)" \
@@ -347,7 +420,7 @@ run-directed: $(if $(NO_BUILD),check-built,$(TBTOP_EXE))
 	    fi; \
 	    $(PYTHON3) $(EMIT_CSV) --log output/$(SIM_TAG)/run.log \
 	        --out output/$(SIM_TAG)/result.csv \
-	        --topology $(TOPOLOGY) --pattern $(PATTERN) \
+	        --topology $(CONFIG) --pattern $(PATTERN) \
 	        --injection-mode $(INJECTION_MODE) --injection-rate $(INJECTION_RATE) \
 	        --injection-count $(INJECTION_COUNT) --seed $(SEED) \
 	        $(if $(MAX_UNIQUE_IDS),--max-unique-ids $(MAX_UNIQUE_IDS)) \
@@ -361,12 +434,50 @@ run-directed: $(if $(NO_BUILD),check-built,$(TBTOP_EXE))
 	    echo "$(if $(_CHECKED),CHECKED,DIRECTED) PASS: $(SIM_TAG) scoreboard clean, non-vacuous"; \
 	fi
 
+####################
+# Injection Sweep  #
+####################
+
+# Nine rates, one point per `make sim`, at whatever VC count
+# specgen/source/constants.yaml currently holds. The VC dimension is not swept
+# here -- noc.DAT_NUM_VC is a tracked file, and a sweep would have to edit it
+# mid-run. Four curves is four edits and four sweeps; each run writes its own
+# result.csv and plot_injection_sweep.py globs them.
+# MAX_UNIQUE_IDS and MAX_OUTSTANDING are inherited, not forced. Both are shipped
+# NI parameters, and the figure's subject is the machine as built. The bring-up
+# step measures what other settings would buy, and reports it as a number.
+SWEEP_RATES ?= 0.05 0.1 0.2 0.3 0.4 0.5 0.7 0.85 1.0
+
+# Set tools/gen_tb_top.py's _MST_BACKPRESSURE to "ideal" before running this,
+# and put it back afterwards. The default is "random", which stalls the master's
+# R and B channels, and a consumer that stalls first is what the curve then
+# measures instead of fabric saturation. Same reason _MEM_LATENCY stays "ideal".
+# Generate once, up front: every point in the loop below runs the same
+# configuration, so one generation covers all of them.
+.PHONY: sim-injection-sweep
+sim-injection-sweep:
+	$(MAKE) gen CONFIG=$(CONFIG) PATTERN=$(PATTERN) SEED=$(SEED) \
+	    INJECTION_MODE=1 $(if $(INJECTION_COUNT),INJECTION_COUNT=$(INJECTION_COUNT))
+	@for r in $(SWEEP_RATES); do \
+	    echo ">>> sweep rate $$r"; \
+	    $(MAKE) sim CONFIG=$(CONFIG) PATTERN=$(PATTERN) SEED=$(SEED) \
+	        INJECTION_MODE=1 INJECTION_RATE=$$r \
+	        $(if $(MAX_UNIQUE_IDS),MAX_UNIQUE_IDS=$(MAX_UNIQUE_IDS)) \
+	        $(if $(MAX_OUTSTANDING),MAX_OUTSTANDING=$(MAX_OUTSTANDING)) || exit 1; \
+	done
+	$(PYTHON3) $(SIM_ROOT)/tools/plot_injection_sweep.py $(PATTERN)
+
+#################
+# Phony targets #
+#################
+
+.PHONY: hello clean
+
 # Smoke-test the Verilator toolchain with a trivial module before attempting
 # the full co-sim build.  Expected output: "TOOLCHAIN OK"
 hello:
 	echo "module empty_tb; initial \$$finish; endmodule" > /tmp/empty_tb.sv
-	$(VERILATOR) --cc --exe --build --top-module empty_tb \
-	    -CFLAGS "-std=c++17" /tmp/empty_tb.sv \
+	$(VERILATOR) --binary --top-module empty_tb /tmp/empty_tb.sv \
 	    --Mdir /tmp/empty_tb_obj
 	/tmp/empty_tb_obj/Vempty_tb && echo "TOOLCHAIN OK"
 

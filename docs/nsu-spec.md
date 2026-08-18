@@ -1,18 +1,20 @@
 # Design: Network Slave Unit (NSU)
 
-Top module: `nsu_wrap` (`ref_model/top/nsu_wrap.sv`), driving a cycle-accurate C++ model core (`ref_model/c_model/include/nsu/`) through the DPI handle ABI. This document specifies the as-built behavior of that model. An RTL implementation of the NSU is verified cycle-by-cycle against it by the existing co-sim testbench.
+Top module: `nsu_wrap` (`ref_model/top/nsu_wrap.sv`), driving a cycle-accurate C++ model core (`ref_model/c_model/include/nsu/`) through the DPI handle ABI. This document specifies that as-built model and target RTL overlays. Existing co-sim checks the as-built model; target CDC, Router-only VC ownership and asymmetric LOCAL DAT flow control require model alignment before cycle-exact RTL comparison.
 
 ## 2. Design Description
 
 ### 2.1 Function
 
-The NSU is the slave-side network interface of the NoC. It terminates the request stream that the fabric delivers to one tile and originates that tile's response stream.
+The NSU is the slave-side network interface of the NoC. It terminates the request stream that the fabric delivers to one tile and originates that tile's response stream through exactly one external 512-bit AXI4 master interface. Narrow and Data are internal NoC traffic classes, not separate AXI interfaces.
 
 **INPUT** request flits (AW, W, AR) from the router LOCAL output port on two faces, REQ (narrow class plus every AR) and DAT (data-class AW/W), one flit per cycle at most per face.
 **COMPUTE** depacketize each flit into exactly one AXI beat, remap the AXI id, remember per-request metadata, drive the beats out of an AXI4 master face in arrival order. When the tile slave answers, packetize each B/R beat into exactly one response flit, restoring the original id and the requester's node id from the remembered metadata, then arbitrate the flit onto a virtual channel.
-**OUTPUT** response flits to the router LOCAL input port on two faces, RSP (every B, plus narrow-class R) and DAT (data-class R), plus per-VC credit pulses on the DAT face in both directions.
+**OUTPUT** response flits to the router LOCAL input port on two faces, RSP (every B, plus narrow-class R) and DAT (data-class R). The current model exposes per-VC credit pulses in both DAT directions. Target RTL keeps per-VC credit only for DAT response injection into the Router and uses ready/valid for DAT request ejection from the Router.
 
 The NSU contains no reorder buffer and no address map. Requests are issued toward the slave in NoC arrival order per channel, regardless of AXI id. Reordering same-id responses back into request order is the job of the master-side NI, which the NSU supports only by echoing the `ordering_req` / `ordering_tag` header fields verbatim into every response flit.
+
+The AW/AR payload carries a global address. For unicast, its node-coordinate field already names this NSU and the address passes unchanged. For a multicast AW, the NSU selects the coordinate field associated with the request's AXI class and overwrites only that field with its own coordinate before issuing the AXI request; all other bits, including the node-local offset, remain unchanged. Config and Memory may use different coordinate fields. The NSU never subtracts a SAM region base. An endpoint without a declared coordinate field, including a peripheral endpoint, leaves the address unchanged.
 
 Depacketization is a one-flit-one-beat mapping. There is no burst splitting, merging, or reassembly anywhere in the NSU:
 
@@ -34,6 +36,10 @@ One 48-bit header layout, three flit widths, one per network (`specgen/generated
 | RSP | 126 | [125:48], 78 b | out: `NarrowB`, `DataB`, `NarrowR` |
 | DAT | 633 | [632:48], 585 b | in: `DataAw`, `DataW`; out: `DataR` |
 
+This table is the current `AXI_ID_WIDTH = 3` model layout. Target RTL derives REQ as
+`133 + AXI_ID_WIDTH` bits and RSP as `123 + AXI_ID_WIDTH` bits. DAT remains 633 bits for the legal
+ID range 1..8 because its 585-bit `DataW` payload remains the maximum.
+
 Header, flit bits [47:0], identical on all three:
 
 | field | flit bits | width | definition |
@@ -42,7 +48,7 @@ Header, flit bits [47:0], identical on all three:
 | `src_id` | [11:4] | 8 | Sender node id, `(y << 4) \| x`. On a request flit this is the requester. On a response flit the NSU stamps its own node id. |
 | `dst_id` | [19:12] | 8 | Destination node id. On a response flit the NSU writes the `src_id` it captured from the matching request. |
 | `fixed_vc` | [20] | 1 | 1: downstream routers keep `vc_id` instead of restamping it at VA. Set per the 2.4 table. |
-| `vc_id` | [23:21] | 3 | Virtual channel carrying the flit. On egress the `VcAllocator` stamps it. On ingress it selects the VC of the returned credit pulse, nothing else. |
+| `vc_id` | [23:21] | 3 | Virtual channel carrying the flit. On egress the assigner stamps it. In target RTL it has no NSU queue-selection role after ingress acceptance; the current model also uses it to return a receive credit. |
 | `flit_tail` | [24] | 1 | Fabric wormhole packet delimiter. See the IMPORTANT note in 2.4. |
 | `ordering_req` | [25] | 1 | Reorder-buffer flag from the source NI. The NSU echoes it into the response, it also selects the B VC policy (2.4). |
 | `ordering_tag` | [33:26] | 8 | Reorder-buffer slot from the source NI. Echoed verbatim. |
@@ -99,7 +105,13 @@ Each B/R beat is looked up against its MetaBuffer bucket front, built into one f
 
 The fabric has exactly one multi-flit packet type, AW+W on the request path, where AXI4 IHI 0022 A5.3.3 forbids interleaving W beats and leaves no choice. The output-hold cost of a wormhole lock is confined to that path; responses never pay it.
 
-B and R merge through a 2-input round-robin `WormholeArbiter` (input 0 = B, input 1 = R, no channel pairing, at most 1 flit per cycle) into the `VcAllocator`, which assigns the VC. The candidate set is every VC in {0 .. `num_vc`-1}, with no read/write class split. Only the DAT face carries `num_vc` > 1 (RSP is single-VC), and DAT carries R only.
+B and R merge through a 2-input round-robin `WormholeArbiter` (input 0 = B, input 1 = R, no channel pairing, at most 1 flit per cycle) into the `VcAllocator`, which assigns the VC. In the current C++ model, the candidate set is every VC in {0 .. `num_vc`-1}, with no read/write class split. Only the DAT face carries `num_vc` > 1 (RSP is single-VC), and DAT carries R only.
+
+**Target RTL overlay.** `DAT_VC_ALLOC_MODE=SHARED` preserves the current R hash over all
+DAT VCs. `READ_WRITE_SPLIT` requires `DAT_NUM_VC` in {2, 4, 6, 8}, restricts `DataR` to
+the upper half, and computes `DAT_NUM_VC/2 + ((dst_id ^ rid) % (DAT_NUM_VC/2))`. B stays
+on the single-VC RSP network and is unaffected. Every DAT router output applies the same
+class mask. The current C++ model implements `SHARED` only.
 
 **IMPORTANT:** VC selection is:
 
@@ -117,7 +129,11 @@ Worked example, `num_vc` = 4:
 - B flit: round-robin pointer starts at 0 after reset, so the first B takes VC 0 (if it has space and credit), the next takes VC 1.
 - If VC 1 is full or creditless, the VC-1-hashed R flit waits in the wormhole arbiter pending queue. It is never sent on another VC.
 
-Admission by configuration: for `num_vc` > 1 a flit is admitted to its per-VC pending queue only if that queue has space and the downstream credit counter for that VC is nonzero (round-robin B scans for the first VC meeting both). For `num_vc` = 1 the selection returns VC 0 without the entry-time credit check, only the pending-space check applies at admission, and the credit gate is enforced at the drain stage. This asymmetry is as-built. In all configurations the drain (`VcAllocator::tick`) sends at most 1 flit per cycle, round-robin over VCs, only to a VC with downstream credit.
+In the current C++ model, admission for `num_vc` > 1 also requires space in a per-VC pending queue;
+for `num_vc` = 1 the pending-space and credit checks occur at different stages. This asymmetry is
+as-built. Target RTL has no per-VC pending queue: the response assigner inspects the DAT Read class
+FIFO head, selects its required eligible VC only when Router credit is available, stamps `vc_id`,
+and sends at most one flit per cycle.
 
 ### 2.5 Worked example, 2-beat write end to end
 
@@ -139,6 +155,11 @@ Packetize peeks write bucket 3'h7, builds the single B flit on the RSP face: hea
 
 ### 2.6 Pipeline stages and latency
 
+In target RTL, AW/W/AR cross from `noc_clk` to `ACLK` through their existing channel FIFOs, while
+B/R cross from `ACLK` to `noc_clk`. Depacketization, Response Queue lookup, packetization, channel
+assignment and NoC class FIFOs all run in `noc_clk`; no complete-flit CDC FIFO is added. The
+current C++ model is single-clock and retains the same logical five-channel queue boundary.
+
 The model advances all stages once per clock in reverse order (later stages drain before earlier stages fill, `nsu/nsu.hpp` `Nsu::tick`), so a beat moves one stage per cycle, except the one zero-cycle hop called out below.
 
 Request path stages (tick T = the posedge at which the request flit is sampled on its ingress face):
@@ -151,6 +172,22 @@ Request path stages (tick T = the posedge at which the request flit is sampled o
 
 The ingress is a single serialized stream from the router LOCAL port, VC-blind, with one head-of-line pending slot: if a flit's stage register is still occupied, that flit waits in the single `pending_` slot and everything behind it stalls. At most 1 flit per channel is parked per cycle (3 total when a backlog exists).
 
+**Target integration overlay.** REQ and DAT Write enter independent `noc_clk` class FIFOs under
+ready/valid. The NoC-to-AXI assigner may accept one Narrow and one Data flit in the same cycle when
+their destination AXI channel FIFOs can accept them. It does not inspect VC queues or return DAT
+receive credits. The current C++ model's serialized ingress and receive-credit interface remain
+as-built behavior until target alignment.
+
+REQ may concurrently deliver a Narrow AW/W flit while the DAT Write path delivers a Data AW/W
+flit. The two `noc_clk` class FIFOs therefore feed the shared AXI master face independently. The
+NoC-to-AXI AW assignment is work-conserving: if only one class has an admissible AW it is
+selected, and if both classes do, a round-robin selector chooses between them. Each accepted AW
+appends `{class, burst_beats}` to a W-order FIFO. AW assignment may continue while an earlier
+burst's W beats are pending, preserving downstream outstanding concurrency. The shared AXI W
+channel serves only the class at the W-order FIFO head until that entry's final W beat; if that
+class has no W beat ready, the other class cannot bypass it. This preserves AXI AW/W association
+without coupling REQ and DAT ingress.
+
 Response path stages (tick T = the posedge at which the B/R wire handshake is sampled):
 
 | tick | stage |
@@ -158,16 +195,24 @@ Response path stages (tick T = the posedge at which the B/R wire handshake is sa
 | T | beat pushed into the port response FIFO (`b_q_`/`r_q_`, depth 16) |
 | T+1 | forwarded into the Packetize stage register (at most 1 B + 1 R per cycle) |
 | T+2 | flit built (MetaBuffer peek, commit on acceptance), pushed into the wormhole arbiter per-input pending queue (depth `NSU_ARBITER_FIFO_DEPTH` = 4) |
-| T+3 | wormhole arbiter moves the flit to the `VcAllocator` per-VC pending queue (depth 4), and the `VcAllocator` drains it to the NoC output queue **in the same tick**. This wormhole-to-VC hop is zero-cycle. The wrap pops the flit the same tick. |
+| T+3 | current model: wormhole arbiter moves the flit to the `VcAllocator` per-VC pending queue (depth 4), and the `VcAllocator` drains it to the NoC output queue **in the same tick**. This wormhole-to-VC hop is zero-cycle. The wrap pops the flit the same tick. |
 | T+4 | the router first samples the egress face's `valid` high (uncontended). |
 
-Back-pressure chains, request: stage register occupied stalls ingress (no credit pulse returned, router LOCAL sender counter starves, router stops ejecting), MetaBuffer pool full stalls the AW or AR register, port FIFO full stalls admission, slave not ready holds the output latch. Response: no downstream credit holds the `VcAllocator` on DAT, pending queues fill back to `b_q_`/`r_q_`, `can_accept_b/r` goes false, `bready`/`rready` deassert, the slave holds (IHI 0022, A3.2.1).
+Current-model back-pressure chains, request: stage register occupied stalls ingress and delays its
+credit return; MetaBuffer pool full stalls the AW or AR register, port FIFO full stalls admission,
+and slave not ready holds the output latch. Response: no downstream credit holds the
+`VcAllocator` on DAT, pending queues fill back to `b_q_`/`r_q_`, `can_accept_b/r` goes false,
+`bready`/`rready` deassert, and the slave holds (IHI 0022, A3.2.1). Target request ingress instead
+deasserts DAT ready before accepting a flit it cannot store.
 
 ## 3. Inputs and Outputs
 
 ### 3.1 NoC face (`nsu_wrap` ports)
 
-Three scalar faces, not structs: REQ ingress and RSP egress are ready/valid and single-VC; DAT runs credit flow control in both directions with `DAT_NUM_VC` channels. `noc_types_pkg::noc_credit_t` = {`credit` [`DAT_NUM_VC`-1:0]}; elaboration fatals if `$bits(noc_credit_t)` != `DAT_NUM_VC`.
+The current C++/DPI interface has three scalar faces, not structs: REQ ingress and RSP egress are
+ready/valid and single-VC; DAT runs credit flow control in both directions with `DAT_NUM_VC`
+channels. `noc_types_pkg::noc_credit_t` = {`credit` [`DAT_NUM_VC`-1:0]}; elaboration fatals if
+`$bits(noc_credit_t)` != `DAT_NUM_VC`. The target DAT receive delta is defined below the table.
 
 | Signal | Bit Width | Definition |
 |---|---|---|
@@ -182,6 +227,18 @@ Three scalar faces, not structs: REQ ingress and RSP egress are ready/valid and 
 | `rx_dat_crdvalid_o` | DAT_NUM_VC | To router. Consumer credit pulse vector: bit v pulses for exactly 1 cycle when the depacketizer consumed one DAT request flit whose header `vc_id` = v. At most 1 pulse per VC per cycle. Replenishes the router LOCAL sender counter. |
 | `tx_dat_valid_o` / `tx_dat_flit_o` | 1 / 633 | To router LOCAL input. `DataR` flits, same valid rules as `tx_rsp_*`. |
 | `tx_dat_crdvalid_i` | DAT_NUM_VC | From router. Credit pulse vector: bit v pulses when the router drained one NSU DAT response flit from VC v. Replenishes the NSU per-VC sender counter (seed `NOC_ROUTER_VC_DEPTH` = 8). |
+
+The table above is the current C++/DPI interface. Target RTL removes `rx_dat_crdvalid_o` and adds
+`rx_dat_ready_o`. A `DataAw` or `DataW` flit transfers from the Router only when
+`rx_dat_valid_i && rx_dat_ready_o`; ready reflects DAT Write class FIFO capacity. DAT response
+transmit keeps `tx_dat_crdvalid_i` because the destination Router owns the credited per-VC FIFO.
+Target RTL also exposes separate `ACLK`/`ARESETn` and `noc_clk`/`noc_rst_n` domains around the five
+AXI channel async FIFOs.
+
+Both resets are generated above the NSU from one common system reset. Each reset asserts
+asynchronously and deasserts synchronously in its own clock domain; release skew is legal. The NSU
+has no `sys_rst_n` port and does not support one-sided reset recovery. A reset discards all queued
+and in-flight NSU state, including FIFO contents, Response Queue state and credit counters.
 
 ### 3.2 AXI master face (`axi_req_t` driven, `axi_rsp_t` consumed)
 
@@ -237,16 +294,25 @@ Marshalling: each flit is little-endian `svBitVecVal` words at its own network's
 
 Single-sourced in `specgen/source/constants.yaml`, generated into `ni_params.h` / `ni_params_pkg.sv`, drift-gated at build by `codegen.py --check`.
 
+Address-map metadata follows the project configuration flow rather than the scalar parameters
+below. The C++ reference model derives each tile endpoint's coordinate fields from the YAML config
+at simulation startup. Synthesizable RTL receives the same fields from generated
+`topology_pkg.sv` at elaboration; it does not parse YAML and has no runtime configuration port.
+
 | Parameter | Default | Legal range | Consumed at |
 |---|---|---|---|
-| `NSU_QUEUE_DEPTH` | 16 | 1 to 1024 | per-channel AW/W/AR/B/R FIFO depth in `AxiMasterPort` |
+| `NSU_QUEUE_DEPTH` [current model] | 16 | 1 to 1024 | single-clock AW/W/AR/B/R queue depth in `AxiMasterPort` |
 | `NSU_META_BUFFER_MAX_OUTSTANDING` | 32 | 1 to 256 | MetaBuffer shared pool, per direction |
 | `NSU_META_BUFFER_MAX_UNIQUE_IDS` | 1 | {1, 8} only, constructor throws otherwise | id remap in Depacketize |
-| `NSU_ARBITER_FIFO_DEPTH` | 4 | 1 to 64 | wormhole per-input and VC-arbiter per-VC pending depths |
-| `NOC_DAT_NUM_VC` | 1 | 1 to 8 | DAT VC count, credit vector widths |
-| `NOC_ROUTER_VC_DEPTH` | 8 | 1 to 16 | DAT response sender credit seed per VC |
-| `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 136 / 126 / 633 | 64 to 1024 each | per-network flit containers and DPI marshalling |
-| `AXI_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 48 / 512 | 1..32 / 1..64 / {32,64,128,256,512,1024} | beat structs and DPI |
+| `NSU_ARBITER_FIFO_DEPTH` [current model] | 4 | 1 to 64 | wormhole and VC-arbiter pending depths; not target NI VC storage |
+| `NOC_DAT_NUM_VC` | 1 | 1 to 8 | Current C++ model DAT VC count and credit vector widths |
+| `DAT_NUM_VC` [target RTL] | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector widths |
+| `DAT_VC_ALLOC_MODE` [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | `DataR` eligible mask; system-wide with DAT router VA |
+| `NOC_ROUTER_VC_DEPTH` | 8 | 1 to 16 | Router LOCAL input VC FIFO depth and NSU DAT response sender-credit seed |
+| `NI_CDC_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | common AW/W/AR/B/R dual-clock FIFO depth |
+| `NI_CLASS_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
+| `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 136 / 126 / 633 | target `133 + AXI_ID_WIDTH` / `123 + AXI_ID_WIDTH` / 633 | per-network flit containers and DPI marshalling |
+| `AXI_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 48 / 512 | target ID 1..8, current model locked at 3 / 1..64 / {32,64,128,256,512,1024} | NoC-carried ID, beat structs and DPI |
 | create-time `src_id` | 0 | 8 bit | stamped into every response flit `src_id` |
 
 The request ingress stage is a 1-entry register per channel plus the single pending slot. It has no configurable depth.
@@ -259,12 +325,13 @@ The request ingress stage is a 1-entry register per channel plus the single pend
 4. **Output valid behavior.** `awvalid`, `wvalid`, `arvalid`, once high, stay high with stable fields until the corresponding ready is sampled high (IHI 0022, A3.2.1). `tx_rsp_valid_o` and `tx_dat_valid_o` are each high exactly 1 cycle per flit, at most 1 flit per cycle per face, and may be high in consecutive cycles for distinct flits.
 5. **Output idle value.** Every output field whose valid is low is 0. Example: with `awvalid` = 0, `awaddr` = 48'h0. `tx_rsp_flit_o` = 126'h0 while `tx_rsp_valid_o` = 0, and `tx_dat_flit_o` = 633'h0 while `tx_dat_valid_o` = 0. `bready`/`rready` are policy levels (rule 10) and carry meaning while low.
 6. **Reset.** `rst_ni` is synchronous active-low, asserted only once at the beginning of simulation. All `nsu_wrap` output registers clear to 0 during reset. Model state is initialized by `cmodel_nsu_create` at time 0. There is no mid-run reset.
-7. **Gap and rate.** No minimum gap anywhere: request flits may arrive every cycle, response flits may leave every cycle, subject only to credit. Each credit pulse is exactly 1 cycle wide, at most 1 per VC per cycle on each credit port.
+7. **Gap and rate (current model).** No minimum gap anywhere: request flits may arrive every cycle, response flits may leave every cycle, subject only to credit. Each modeled credit pulse is exactly 1 cycle wide, at most 1 per VC per cycle on each credit port. Target request ingress is instead subject to ready/valid.
 8. **Latency.** Request: from the posedge at which an AW (or AR) flit is sampled on its ingress face to the posedge at which the slave first samples `awvalid` (`arvalid`) high is exactly 2 cycles when uncontended (empty queues, MetaBuffer pool not full, slave ready). Response: from the posedge at which the B/R wire handshake is sampled to the posedge at which the router first samples the egress face's `valid` high is exactly 4 cycles when uncontended (empty queues, sender credit available). Under contention the latency grows with backpressure and has no bound in this spec.
 9. **W presentation budget.** `wvalid` never rises for a beat whose owning AW handshake has not completed. The budget counter `w_pop_budget_` (model type uint32) increments by `awlen` + 1 at each AW handshake and decrements by 1 per W beat presented. Example: AW with `awlen` = 8'd1 handshakes at cycle 2, budget 0 to 2, W beat 0 may be presented from cycle 3, never earlier.
 10. **Context-gated ready pre-assert.** `bready` = (`outstanding_w_` > 0) and B FIFO has space. `rready` = (`expected_r_beats_` > 0) and R FIFO has space. Both are asserted without waiting for valid. `outstanding_w_` (uint32) increments when a `wlast` beat completes its W handshake and decrements at each B wire handshake. `expected_r_beats_` (uint32) increments by `arlen` + 1 at each AR handshake and decrements at each R beat wire handshake. Example: after one AR with `arlen` = 8'd3 handshakes, `expected_r_beats_` = 4 and `rready` stays high until 4 R beats have been accepted (given FIFO space). A B/R beat is accepted into the model only on a true wire handshake, valid together with the ready level the NSU drove in that cycle.
-11. **Request credit.** On the DAT face, one `rx_dat_crdvalid_o` pulse is returned for each flit the depacketizer ingress consumes, on the consumed flit's header `vc_id`, at most 1 per VC per cycle. Uncontended, the pulse for a flit sampled at posedge T is on the wire during the next cycle. A stalled ingress returns no pulses, which is the request-side backpressure mechanism. REQ has no credit: `rx_req_ready_o` is tied true, so that face carries no backpressure.
+11. **Request credit (current model only).** On the DAT face, one `rx_dat_crdvalid_o` pulse is returned for each flit the depacketizer ingress consumes, on the consumed flit's header `vc_id`, at most 1 per VC per cycle. Uncontended, the pulse for a flit sampled at posedge T is on the wire during the next cycle. A stalled ingress returns no pulses, which is the current-model request-side backpressure mechanism. Target RTL supersedes this rule with `rx_dat_ready_o` as described in Section 3.1.
 12. **Response credit.** On the DAT face the NSU holds one sender credit counter per VC, seeded to `NOC_ROUTER_VC_DEPTH` = 8 at time 0. Sending a flit on VC v decrements counter v, a `tx_dat_crdvalid_i` pulse on bit v increments it. A flit is sent only while its counter is nonzero. Invariant: counter + flits in flight toward the router on that VC = 8 at all times. RSP has no counter: it grants against the advisory `tx_rsp_ready_i`.
+13. **Address handling.** The NSU never subtracts a SAM region base. A unicast AW/AR address passes unchanged. For a multicast AW at a tile endpoint, the AXI class selects the corresponding Config or Memory coordinate field and only that field is replaced with this NSU's coordinate. The two fields may occupy different address bits. An endpoint without a declared coordinate field leaves every address unchanged.
 
 ### 3.6 Input guarantees
 
@@ -275,11 +342,11 @@ The implementer does not handle any of the following, they are guaranteed not to
 | G1 | Every request flit has `axi_ch` in {`NarrowAw`, `NarrowW`, `NarrowAr`, `DataAw`, `DataW`, `DataAr`}. The model asserts and aborts otherwise. |
 | G2 | Every request flit is addressed to this node. The fabric delivers only matching `dst_id`, the NSU never checks it. |
 | G3 | Every header field carries a legal encoding. There is no `rsvd` field to check. |
-| G4 | The router sends a request flit only while it holds sender credit, so DAT ingress occupancy is bounded by the credit window. No overflow handling at either request face. |
+| G4 | Target Router-to-NSU DAT ejection holds valid/flit until NSU ready, so request ingress cannot overflow. The current model instead relies on Router sender credit. |
 | G5 | Every burst targets a single tile address window (validated by the source NI's address map at packetize time). The NSU never splits a burst. |
 | G6 | The slave holds `bvalid`/`rvalid` and all response fields stable until the matching ready is sampled high (IHI 0022, A3.2.1). |
 | G7 | The slave responds only to requests the NSU issued and completes same-id transactions in order (IHI 0022, A6.3), so every B/R beat matches its MetaBuffer bucket front. The model asserts and aborts on a missing entry. |
-| G8 | Downstream credit is truthful: a VC reported as having credit accepts the push. The model asserts and aborts otherwise. |
+| G8 | For NSU-to-Router DAT responses, downstream credit is truthful: a VC reported as having credit accepts the push. The model asserts and aborts otherwise. |
 | G9 | Reset is given once, before traffic. No mid-run reset. |
 | G10 | Since W flits carry no id, the fabric wormhole serialization guarantees every W flit follows its AW flit on the same stream. |
 
@@ -298,13 +365,15 @@ Each item names its verification and failure condition. ctest paths are under `r
 9. MetaBuffer commit discipline: the bucket front is matched, a write entry is retired when the B flit is accepted by the arbiter (not before, not on a refused push), a read entry is retired only on the accepted `rlast` beat, every earlier burst beat peeks the same entry. Verify: `nsu/test_nsu_packetize.cpp` `PushRMultiBeatPeekUntilRLast`, `PushBNoCommitOnNocFull`, `nsu/test_meta_buffer.cpp` `MultiOutstandingSameIdFifoOrder`. Fail: early or skipped commit, wrong entry consumed.
 10. Header `flit_tail` = 1 on every B flit and every R beat flit, burst framing only in payload `rlast`. Verify: `nsu/test_nsu_packetize.cpp` flit field checks, co-sim (a `flit_tail` = 0 response flit wedges downstream wormhole arbitration and hangs the run). Fail: any response flit with header `flit_tail` = 0.
 11. `ordering_req` and `ordering_tag` are echoed verbatim from the matching request into every response flit, including every beat of a multi-beat R burst. Verify: `nsu/test_nsu_packetize.cpp` `MultiBeatR_AllFlitsCarrySameOrderingTag`. Fail: any beat carries a different value than its request.
-12. VC selection implements the 2.4 table exactly, including refuse-not-spill for the hashed R flits, the `num_vc` = 1 degenerate path (everything on VC 0, no entry-time credit check), and header `fixed_vc` (R = 1, B = 0). Verify: `nsu/test_nsu_vc_allocator.cpp` `RBurstStaysOnOneVc`, `RobbedRBurstStaysOnOneVcToo`, `DistinctRidsSpreadAcrossVcs`, `SameRidDifferentDstYieldsDistinctVcs`, `SameBidRoundRobins`, `FixedVcFullRefusesInsteadOfSpilling`, `FixedVcStampedOnRNotB`, `Nsu_Degenerate_NumVc1_Passthrough`. Fail: flit observed on any VC other than the rule's choice, or wrong fixed_vc bit.
+12. VC selection implements the 2.4 table exactly for the current `SHARED` C++ model, including refuse-not-spill for the hashed R flits, the `num_vc` = 1 degenerate path (everything on VC 0, no entry-time credit check), and header `fixed_vc` (R = 1, B = 0). Verify: `nsu/test_nsu_vc_allocator.cpp` `RBurstStaysOnOneVc`, `RobbedRBurstStaysOnOneVcToo`, `DistinctRidsSpreadAcrossVcs`, `SameRidDifferentDstYieldsDistinctVcs`, `SameBidRoundRobins`, `FixedVcFullRefusesInsteadOfSpilling`, `FixedVcStampedOnRNotB`, `Nsu_Degenerate_NumVc1_Passthrough`. Target `READ_WRITE_SPLIT` coverage is `[TBD]` until the model and RTL implement the overlay. Fail: flit observed on any VC other than the rule's choice, or wrong fixed_vc bit.
 13. Response arbitration sends at most 1 flit per cycle, round-robin between B and R at the wormhole stage and round-robin over VCs at the drain, no starvation of a nonempty input. Verify: `router/test_wormhole_arbiter.cpp` for the B/R stage, `nsu/test_nsu_vc_allocator.cpp` `Nsu_Degenerate_NumVc1_Passthrough` for the one-flit-per-tick drain, and co-sim link monitors for the multi-VC drain order; no ctest pins the multi-VC drain round-robin at the NSU. Fail: 2 flits in one cycle or a nonempty input never served while the other drains.
 14. DAT credit conformance per rules 11 and 12, including the seed-8 sender invariant. Verify: co-sim link monitors and the model abort on downstream credit lies (G8). Fail: counter divergence, pulse without a consumed/drained flit, or flit sent without credit.
 15. AXI master face conformance: held-valid on AW/W/AR (rule 4), W budget (rule 9), context-gated `bready`/`rready` with handshake-qualified acceptance (rule 10). Verify: co-sim scoreboard (a violation surfaces as a lost or duplicated beat and a readback mismatch or hang). Fail: readback mismatch, hang, or a valid deasserted before ready.
 16. Reset behavior per rule 6: every output 0 in the first cycle after `rst_ni` deasserts, no X. Verify: co-sim waveform at simulation start. Fail: any nonzero or unknown output before the first request completes the pipeline.
 17. Uncontended latency exactly 2 cycles (request, flit to AXI valid) and exactly 4 cycles (response, handshake to the egress face's `valid`) per rule 8, with the zero-cycle wormhole-to-VC hop of 2.6. Verify: co-sim waveform inspection of an isolated transaction. Fail: valid earlier or later than the specified edge in the uncontended case.
 18. All parameters of 3.4 are consumed from the generated headers, never redefined locally. Verify: `codegen.py --check` build gate. Fail: drift gate error at build.
+19. Address handling follows rule 13. Verify: `nsu/test_nsu_depacketize.cpp` `RebasesAReplicaAddressOntoThisNode`, `RebaseIsTheIdentityForAUnicastAlreadyNamingThisNode`, and `UndeclaredCoordsLeaveTheAddressAlone`. Fail: a unicast or peripheral address changes, a multicast replica keeps another node's coordinate, or any non-coordinate bit changes.
+20. NoC-to-AXI write assignment follows the target integration overlay: Narrow and Data AW compete by work-conserving round robin, every accepted AW appends its class and burst length to the W-order FIFO, and W cannot bypass the FIFO head class through WLAST. The current C++ structure implements this policy; direct simultaneous-class round-robin and blocked-head W coverage is `[TBD]`. Fail: one ready class idles while the other is absent, one class starves while both remain ready, or a W beat is associated with a later AW.
 
 ## 5. Block Diagram
 

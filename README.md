@@ -36,7 +36,7 @@ AXI4 Master --> NMU --> router mesh --> NSU --> AXI4 Slave
 
 - CMake 3.20 or newer, GCC with C++17, GNU make
 - Verilator 5.048 (primary, WSL); 5.036 also works (the Makefile carries its workarounds)
-- Python 3 with PyYAML, pytest (specgen drift gate)
+- Python 3 with PyYAML, pytest, jsonschema (specgen drift gate)
 - GoogleTest and yaml-cpp are fetched by CMake; no system install
 
 | Platform | Scope | Verified |
@@ -85,6 +85,7 @@ checkout delete the cache rather than editing it, and confirm with
 ~~~bash
 make test                                  # c_model ctest suite
 make pytest                                # specgen + sim/tools suites, golden drift gate
+make docker-pytest                         # same Python suites in the pinned Docker toolchain
 python3 specgen/tools/codegen.py --check   # committed generated code matches sources
 ~~~
 

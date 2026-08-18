@@ -1,6 +1,7 @@
 # Top-level Makefile — build and test gates. Run these targets from repo root.
 #
-# Simulation is not here: `make sim CONFIG=... PATTERN=...`, see sim/Makefile.
+# Simulation is not here: `make sim CONFIG=... PATTERN=...`, see
+# sim/verilator/Makefile.
 # Run logs land in sim/verilator/output/<scenario>/run.log.
 #
 # All build artifacts live under the top-level build/ tree (gitignored):
@@ -14,11 +15,11 @@ BUILD_ROOT      := build
 # local.mk` below (e.g. $(HOME)/noc_build on WSL), and CMODEL_BUILD must pick up
 # that override rather than freezing the pre-include `build` value.
 CMODEL_BUILD     = $(BUILD_ROOT)/cmodel
-COSIM_VERILATOR := sim/verilator
-COSIM_VCS       := sim/vcs
+SIM_VERILATOR := sim/verilator
+SIM_VCS       := sim/vcs
 
 .PHONY: help build build-cmodel build-yamlcpp build-verilator test \
-        pytest check \
+        pytest check docker-build docker-shell docker-test docker-pytest docker-sim-setup docker-sim-smoke docker-sim-tier2 \
         clean clean-cmodel clean-verilator clean-vcs clean-generated
 
 help:
@@ -33,12 +34,21 @@ help:
 	@echo "  make sim-build CONFIG=<config>                   build only, no run"
 	@echo "  make sim-run CONFIG=<config> PATTERN=<p>         run only; errors if not built"
 	@echo "  CONFIG is a sim/configs/*.yml basename: mesh_2x2 mesh_2x2_periph mesh_4x4 mesh_4x4_periph4"
-	@echo "  make -C sim help                                 every simulation variable"
+	@echo "  make -C sim/verilator help                       every simulation variable"
 	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
 	@echo "  make pytest           specgen + sim/tools suites, golden drift gate"
 	@echo "  make check            both of the above -- run this before committing"
+	@echo ""
+	@echo "Docker:"
+	@echo "  make docker-build     build noc-dev Docker image"
+	@echo "  make docker-shell     shell in noc-dev image with this repo mounted"
+	@echo "  make docker-test      run full c_model ctest suite inside noc-dev image"
+	@echo "  make docker-pytest    run specgen + sim/tools pytest suites inside noc-dev image"
+	@echo "  make docker-sim-setup prepare sim-only deps inside noc-dev image, ctest bypassed"
+	@echo "  make docker-sim-smoke run 2x2 verify inside noc-dev image, ctest bypassed"
+	@echo "  make docker-sim-tier2 legacy alias for docker-sim-smoke (2x2 verify)"
 	@echo ""
 	@echo "Clean:"
 	@echo "  make clean                  everything (build/ + per-sim output/ + generated stimulus)"
@@ -118,13 +128,13 @@ build-yamlcpp: $(CMODEL_BUILD)/CMakeCache.txt
 $(CMODEL_BUILD)/CMakeCache.txt:
 	@$(CMAKE) -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS) $(CMAKE_EXTRA)
 
-# Default topology for standalone build-verilator.
-# sim/Makefile overrides this by passing TOPOLOGY=$(CONFIG) explicitly.
-TOPOLOGY  ?= mesh_4x4
+# Default configuration for standalone build-verilator. `build` and not the
+# default goal: sim/verilator/Makefile defaults to running.
+CONFIG    ?= mesh_4x4
 RUN_CLASS ?= directed
 
 build-verilator: build-yamlcpp
-	@$(MAKE) -C $(COSIM_VERILATOR) TOPOLOGY=$(TOPOLOGY) RUN_CLASS=$(RUN_CLASS)
+	@$(MAKE) -C $(SIM_VERILATOR) build CONFIG=$(CONFIG) RUN_CLASS=$(RUN_CLASS)
 
 # --- test ---
 
@@ -144,6 +154,7 @@ pytest:
 	@status=0; \
 	(cd specgen && $(PYTHON3) -m pytest tests/ -q) || status=1; \
 	(cd sim/tools && $(PYTHON3) -m pytest . -q) || status=1; \
+	git add --refresh -- specgen/generated || status=1; \
 	exit $$status
 
 # Run before committing. The SAM parity proof lives half in each suite: ctest
@@ -154,23 +165,57 @@ pytest:
 # together, leaves pytest green, and shows up in ctest alone.
 check: test pytest
 
-# Simulation runs from sim/, whose Makefiles reach tools/ and output/ by
-# relative path, so these forward with -C rather than include. CONFIG, PATTERN and
-# the rest reach the sub-make on their own: make passes command-line variables
-# down through MAKEFLAGS. .PHONY is what stops `sim` matching the directory of
-# the same name and answering "'sim' is up to date" without running anything.
+# --- docker ---
+
+DOCKER ?= docker
+DOCKER_IMAGE ?= noc-dev:verilator-5.048
+DOCKER_BUILD_VOLUME ?= noc-dev-build-cache
+DOCKER_SIM_VOLUME ?= noc-dev-sim-cache
+DOCKER_CCACHE_VOLUME ?= noc-dev-ccache
+DOCKER_SIM_BUILD_ROOT ?= /home/agent/noc_sim_build
+DOCKER_PROJECT_DIR ?= $(shell cygpath -m "$(CURDIR)" 2>/dev/null || printf '%s\n' "$(CURDIR)")
+DOCKER_NO_PATHCONV ?= MSYS_NO_PATHCONV=1
+DOCKER_RUN = $(DOCKER_NO_PATHCONV) $(DOCKER) run --rm -v "$(DOCKER_PROJECT_DIR):/workspace" -v "$(DOCKER_BUILD_VOLUME):/home/agent/noc_build" -v "$(DOCKER_CCACHE_VOLUME):/home/agent/.cache/ccache" -w /workspace $(DOCKER_IMAGE)
+DOCKER_SIM_RUN = $(DOCKER_NO_PATHCONV) $(DOCKER) run --rm -v "$(DOCKER_PROJECT_DIR):/workspace" -v "$(DOCKER_SIM_VOLUME):$(DOCKER_SIM_BUILD_ROOT)" -v "$(DOCKER_CCACHE_VOLUME):/home/agent/.cache/ccache" -w /workspace -e BUILD_ROOT=$(DOCKER_SIM_BUILD_ROOT) $(DOCKER_IMAGE)
+
+docker-build:
+	$(DOCKER) build -f docker/noc-dev/Dockerfile -t $(DOCKER_IMAGE) .
+
+docker-shell:
+	$(DOCKER_NO_PATHCONV) $(DOCKER) run --rm -it -v "$(DOCKER_PROJECT_DIR):/workspace" -v "$(DOCKER_BUILD_VOLUME):/home/agent/noc_build" -v "$(DOCKER_CCACHE_VOLUME):/home/agent/.cache/ccache" -w /workspace $(DOCKER_IMAGE) bash
+
+docker-test:
+	$(DOCKER_RUN) bash -lc 'make test'
+
+docker-pytest:
+	$(DOCKER_RUN) bash -lc 'make pytest'
+
+docker-sim-setup:
+	$(DOCKER_SIM_RUN) bash -lc 'make build-yamlcpp BUILD_ROOT=$$BUILD_ROOT CMAKE_EXTRA=-DBUILD_TESTING=OFF'
+
+docker-sim-smoke:
+	$(DOCKER_SIM_RUN) bash -lc 'set -euo pipefail; make build-yamlcpp BUILD_ROOT=$$BUILD_ROOT CMAKE_EXTRA=-DBUILD_TESTING=OFF; rm -f sim/filelist_*.f sim/tb/test/tb_top_*.sv sim/tb/soc/tb_top_dma_*.sv; rm -rf "$$BUILD_ROOT"/verilator/obj_dir_*; make sim BUILD_ROOT=$$BUILD_ROOT CONFIG=mesh_2x2 PATTERN=neighbor'
+
+docker-sim-tier2: docker-sim-smoke
+
+# Simulation runs from sim/verilator, whose Makefile reaches output/ by relative
+# path, so these forward with -C rather than include. CONFIG, PATTERN and the
+# rest reach the sub-make on their own: make passes command-line variables down
+# through MAKEFLAGS. .PHONY is what stops `sim` matching the directory of the
+# same name and answering "'sim' is up to date" without running anything.
+# The VCS flow will land beside these as sim-vcs-* against sim/vcs.
 .PHONY: sim sim-build sim-run sim-gen sim-injection-sweep
 sim sim-injection-sweep:
-	@$(MAKE) -C sim $@
+	@$(MAKE) -C $(SIM_VERILATOR) $@
 
 sim-build:
-	@$(MAKE) -C sim build
+	@$(MAKE) -C $(SIM_VERILATOR) build
 
 sim-run:
-	@$(MAKE) -C sim run
+	@$(MAKE) -C $(SIM_VERILATOR) run
 
 sim-gen:
-	@$(MAKE) -C sim gen
+	@$(MAKE) -C $(SIM_VERILATOR) gen
 
 # --- clean ---
 
@@ -200,8 +245,7 @@ clean-generated:
 	find . -type d -name .pytest_cache -prune -exec rm -rf {} +
 
 clean-verilator:
-	$(MAKE) -C $(COSIM_VERILATOR) clean
+	$(MAKE) -C $(SIM_VERILATOR) clean
 
 clean-vcs:
-	$(MAKE) -C sim/vcs clean
-
+	$(MAKE) -C $(SIM_VCS) clean

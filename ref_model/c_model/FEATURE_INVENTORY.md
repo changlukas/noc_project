@@ -19,7 +19,7 @@ _Role_: AXI-side injection / response sink
 | Feature ID | Summary | Modes | Expected c_model header |
 |---|---|---|---|
 | `FEAT-NMU-AXI_SLAVE_PORT` | AXI4 full-protocol slave port (AW/W/AR/B/R): per-channel FIFO queuing, single-clock (no CDC in c_model). | Active, Passive | `ref_model/c_model/include/nmu/axi_slave_port.hpp` |
-| `FEAT-NMU-ADDR_TRANS` | Converts AXI awaddr/araddr to NoC dst_id + tile-local address by first-match range lookup over the SAM table, loaded from the config file at runtime. | — | `ref_model/c_model/include/nmu/addr_trans.hpp` |
+| `FEAT-NMU-ADDR_TRANS` | Maps AXI awaddr/araddr to NoC dst_id by first-match SAM range lookup and forwards the global address unchanged; the C++ model loads the topology YAML at runtime. | — | `ref_model/c_model/include/nmu/addr_trans.hpp` |
 | `FEAT-NMU-PACKETIZE` | Assembles AXI AW/W/AR transactions into NoC request flit streams (header + payload), tagging dst_id, src_id, awid/arid, flit_tail, and ordering_tag. | — | `ref_model/c_model/include/nmu/packetize.hpp` |
 | `FEAT-NMU-VC_MAPPING` | Maps outbound flits to a VC at flit-construct time (VC 0 at DAT_NUM_VC=1; REQ/RSP always VC 0), and stamps fixed_vc on the ordering_req=0 AW streak so routers keep that VC instead of restamping at VA. | — | `ref_model/c_model/include/nmu/vc_allocator.hpp` |
 | `FEAT-NMU-VC_ARB` | Round-robin arbitration across populated VCs at NMU REQ_OUT egress. Selects which VC's flit is emitted onto the NoC link each cycle, subject to per-VC credit availability. | RoundRobin | `ref_model/c_model/include/nmu/vc_allocator.hpp` |

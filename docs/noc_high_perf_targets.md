@@ -36,7 +36,7 @@ decides whether this NoC pays for itself.
 `B` response, used to be carried in the same 408-bit flit, so control channels used only 18
 to 31 % of the payload (`AW/AR` 108/352 = 31 %, `B` 64/352 = 18 %) and the header cost
 13.7 % overhead. Recovering that is why the narrow plane was split out; the fabric now
-carries three per-network widths (REQ 136 b, RSP 126 b, DAT 633 b) over a 48 b header.
+carries three per-network widths (default REQ 136 b, RSP 126 b, DAT 633 b) over a 48 b header.
 
 ---
 
@@ -64,8 +64,9 @@ carries three per-network widths (REQ 136 b, RSP 126 b, DAT 633 b) over a 48 b h
 - **Topology**: 2D Mesh, 4 × 4 default, scalable to 16 × 16 (256 nodes, `src/dst_id` 8-bit)
 - **Switching mechanism**: flit-based wormhole
 - **Routing method**: XY (dimension-order) routing
-- **Flow control**: credit-based backpressure, initial credits seeded by the per-VC buffer depth
-- **Virtual channels**: 1 per link default, up to 8 (`VC_ID` 3-bit)
+- **Flow control**: per-VC credit on inter-router DAT links and NI-to-Router DAT injection;
+  ready/valid on REQ/RSP and Router-to-NI DAT ejection
+- **Virtual channels**: DAT defaults to 2 and supports 1 to 8 (`VC_ID` 3-bit); VC FIFOs exist only in routers
 - **Clocking**: GALS, router clock domain decoupled from IP clock domain, NoC target 1 GHz
 - **AXI conformance**: AXI4 (IHI 0022H), supporting single transfer, burst transfer (INCR / WRAP / FIXED), outstanding transactions, out-of-order completion across IDs (same-ID order preserved), and read data interleaving
 - **Ordering**: per-ID reorder buffer, 32 entries (`ordering_tag` 5-bit), preserves AXI same-ID order, up to 32 outstanding transactions per ID

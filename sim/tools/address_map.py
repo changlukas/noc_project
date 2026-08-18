@@ -143,6 +143,8 @@ def pack_config(cfg):
     Rules come out range-major -- every member of a range, then the next range --
     which is the order nmu/sam_yaml.hpp load_config_table() walks them in.
     """
+    if cfg.get("routing", {}).get("use_id_table", True) is not True:
+        raise ValueError("routing.use_id_table must be true; offset decode is deferred")
     x_dim, y_dim = router_array(cfg)
     entries = []
     for ep in cfg["endpoints"]:

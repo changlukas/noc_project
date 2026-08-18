@@ -183,10 +183,9 @@ TEST(SamYaml, SpaceAttributeSelectsClass) {
 // a space stops being collective-eligible, so a regression there would surface
 // only as a multicast refused at the source, nothing at build time. The
 // ASSERT_NE below is what stands in for that missing abort. All four shipped
-// configs are walked; the y_range cross-space EXPECT_EQ is
-// the field-identity offset decode requires (spec §5.1) and that offset == 32
-// alone does not pin, since both spaces could each be internally offset-32
-// with a mismatched y term.
+// configs are walked; the y_range cross-space EXPECT_EQ pins their shared block
+// stride completely, since matching x offsets alone would not catch a mismatched
+// y term.
 TEST(SamYaml, CoordRangesDerivedFromTheBlockStride) {
     struct Row {
         const char* file;
@@ -210,8 +209,7 @@ TEST(SamYaml, CoordRangesDerivedFromTheBlockStride) {
         EXPECT_EQ(config->x_range.len, row.dim_bits);
         EXPECT_EQ(config->y_range.offset, 32u + row.dim_bits);
         EXPECT_EQ(config->y_range.len, row.dim_bits);
-        // Both spaces put the node index at the same bits, not just the same
-        // x offset -- the property offset decode (spec §5.1) needs.
+        // Both shipped spaces use the same block stride and coordinate field.
         EXPECT_EQ(memory->y_range.offset, config->y_range.offset);
     }
 }
@@ -442,18 +440,7 @@ TEST(SamYaml, UnknownSpaceRejected) {
 }
 
 // === Decode mode (spec §5.1) ===
-//
-// routing.use_id_table false is offset decode, which holds ONE coordinate range
-// pair for the whole map and is therefore legal only where every space puts its
-// node index at the same address bits. Each addr_range authors its own stride,
-// so that is a property of the file: the same map is legal under table decode
-// and rejected under offset decode below.
-//
-// This is also the only place use_id_table: false is exercised at all -- every
-// shipped config leaves it at the default.
 
-// One stride for both spaces: memory 4 KB at 0x0, config 4 KB at 0x100000, node
-// stride 0x200000 in both, so one range pair reaches both.
 static std::string one_stride_config(const char* name, const char* routing) {
     return write_config(
         name, mesh_config_yaml(
@@ -465,8 +452,8 @@ static std::string one_stride_config(const char* name, const char* routing) {
 
 // Two strides: memory strides 0x100000 and config 0x200000, so the node index
 // sits at bit 20 in one space and bit 21 in the other. The regions still do not
-// overlap and every node is covered exactly once, so nothing but the decode mode
-// has anything to say about this map.
+// overlap and every node is covered exactly once, so table decode accepts the
+// map without requiring one shared coordinate field.
 static std::string two_stride_config(const char* name, const char* routing) {
     return write_config(
         name, mesh_config_yaml(
@@ -479,19 +466,9 @@ static std::string two_stride_config(const char* name, const char* routing) {
 static const char* kOffsetDecode = "routing:\n  use_id_table: false\n";
 static const char* kTableDecode = "routing:\n  use_id_table: true\n";
 
-TEST(SamYaml, OffsetDecodeAcceptsOneStrideAcrossSpaces) {
-    auto sam = load_sam_table(one_stride_config("sam_offset_ok.yml", kOffsetDecode));
-    const auto* mem = sam.collective_coords(axi::Space::Memory);
-    const auto* cfg = sam.collective_coords(axi::Space::Config);
-    ASSERT_NE(mem, nullptr);
-    ASSERT_NE(cfg, nullptr);
-    EXPECT_EQ(mem->x_range.offset, cfg->x_range.offset);  // the one global pair
-    EXPECT_EQ(mem->y_range.offset, cfg->y_range.offset);
-}
-
-TEST(SamYamlDeath, OffsetDecodeRejectsTwoStridesAcrossSpaces) {
-    EXPECT_DEATH(load_sam_table(two_stride_config("sam_offset_two.yml", kOffsetDecode)),
-                 "same node stride");
+TEST(SamYamlDeath, OffsetDecodeIsNotSupported) {
+    EXPECT_DEATH(load_sam_table(one_stride_config("sam_offset.yml", kOffsetDecode)),
+                 "use_id_table must be true");
 }
 
 // The same map under table decode, which holds the ranges per entry and so has

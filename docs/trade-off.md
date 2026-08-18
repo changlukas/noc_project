@@ -67,15 +67,20 @@ transaction. And a long same-`(id, dst)` burst flows through without clogging
 the pool, so slots stay free for the cross-destination traffic that needs
 reordering.
 
-`RobMode::Disabled` is the stall scheme in this design: a per-ID flag
-(`read_outstanding_`) refuses a second same-ID push while one is outstanding,
-with zero reorder storage. The B side has no mode. A B slot holds metadata
-only, so the B RoB stays on.
+`RobMode::Disabled` is the stall scheme in this design, with zero reorder storage. Each ID keeps
+an outstanding counter and a latched ordering-domain key `{dst_id, dst_port_id, AXI class}`.
+Same-key successors are admitted up to `NMU_MAX_TXNS_PER_ID`; a key change waits until that ID is
+idle. The port term is required because a tile and a peripheral may share one router coordinate,
+and the class term is required because Narrow R and Data R return on different physical networks.
+RTL selects the R implementation with the elaboration-time `READ_ROB_ENABLED` parameter and
+`generate if`, not a preprocessor conditional. The B side has no mode. It remains a per-ID
+metadata-only RoB, so different IDs are not placed into one global response order and no B data
+SRAM is needed.
 
 | mode | fabric guarantee | endpoint storage | stalls |
 |---|---|---|---|
 | `RobMode::Enabled` | same-`(dst, id)` responses in order | RoB sized to the cross-destination window, bypass traffic takes no slot | only on slot exhaustion |
-| `RobMode::Disabled` | same | none | every same-ID transaction waits out its predecessor |
+| `RobMode::Disabled` | same ordering domain remains in order | per-ID counter and key, no response data | ordering-domain change waits for the ID to become idle |
 
 ## Invariants
 
@@ -86,7 +91,7 @@ only, so the B RoB stays on.
   gates on RoB space up front, because a response stalled in-fabric with
   nowhere to land would block every flit behind it. Slot reservation before
   injection is the fabric's deadlock gate.
-- The same-destination bypass stays sound only while same-`(dst, id)` responses
+- The same-ordering-domain bypass stays sound only while same-`(dst, port, class, id)` responses
   cannot split across VCs. The fixed VC id provides that. A round-robin spread
   of the streak breaks it, which is why each streak stays on one VC per
   network.
@@ -100,6 +105,326 @@ only, so the B RoB stays on.
   remains. This is the recurring cost of the small RoB.
 - No sweep exists for `max_txns_per_id` (default 32, `[TBD]`) or `r_rob_depth`
   (default 32, expressible to 256 via `R_ROB_DEPTH`).
-- `RobMode::Disabled` refuses a second same-ID push while one is outstanding.
-  The upstream counter scheme admits same-destination successors. No
-  measurement exists of the throughput the simpler flag gives up.
+- The approved Disabled-mode counter/key policy and the `dst_port_id` term in Enabled-mode bypass
+  are not yet implemented in the C++ reference model.
+
+## SAM destination decode
+
+The first RTL milestone implements table decode only. A first-match range lookup returns the
+destination node, destination port and AXI class while forwarding the global AXI address unchanged.
+This covers every shipped mesh and peripheral map. Offset decode can replace the range comparators
+with fixed address-bit slices, but is deferred until table area or timing is a measured problem.
+
+AW and AR use separate elaboration-time register-slice controls: `AW_SAM_REG_TYPE` and
+`AR_SAM_REG_TYPE`, both default 0. Value 0 bypasses the slice, value 1 adds a simple output
+register, and value 2 adds a full skid buffer with registered backpressure. Keeping the channels
+independent allows the longer AW collective path to be cut without adding AR latency. These knobs
+are RTL timing controls and do not belong in the topology YAML.
+
+Table decode also selects collective coordinate metadata with the matched SAM rule. Each
+collective-capable address space has one internally uniform `node_stride`, but Config and Memory
+may use different strides and coordinate bit positions. This preserves address-map flexibility
+without adding a datapath search: the SAM result already identifies the required X/Y slices. A
+future table-free offset decoder would instead require one global coordinate field.
+
+## External AXI interface
+
+Each NMU and NSU has exactly one 512-bit AXI4 interface. The SAM classifies its transactions into
+Narrow or Data NoC traffic; those classes do not create separate physical AXI ports. A Narrow
+transfer packetizes only the addressed 64-bit lane and restores that lane at the destination.
+Supporting a second AXI interface is outside the architecture, not a deferred RTL option.
+
+The shared AXI face does not imply a shared NoC request scheduler. After the AXI channel CDC and
+SAM classification, the NMU uses independent REQ and DAT Write pipelines, channel assignment and
+`noc_clk` class FIFOs.
+REQ may emit one Narrow write flit while DAT emits one Data write flit in the same cycle; blocking
+one network does not block the other after classification. Each network keeps its own AW-to-WLAST
+wormhole lock.
+
+W has no address or class field, so an AW-order context FIFO records the class and route of every
+accepted AW. Each accepted W beat uses the context at the FIFO head and is steered to that
+burst's REQ or DAT pipeline; the context retires only on WLAST. Parallel NoC drain may therefore
+reorder already-buffered packets across the two physical networks, but it cannot interleave W beats
+or attach a W beat to a later AW. The shared AXI source still accepts at most one AW and one W beat
+per cycle.
+
+This parallelism does not relax an AXI ordering domain. AXI guarantees request order for the same
+channel, ID and destination, while it gives no ordering guarantee across different peripheral
+regions or memory locations ([AMBA AXI ordering model, Section A6.1](https://developer.arm.com/-/media/Arm%20Developer%20Community/PDF/IHI0022H_amba_axi_protocol_spec.pdf)).
+Narrow and Data are distinct address spaces and are already separate terms in the NMU ordering key.
+Within one class and destination, requests remain on one physical network. Across classes, the
+physical arrival order may differ; the NMU's per-ID B ordering state still returns write responses
+in issue order. A requester that needs ordering across otherwise unordered regions must wait for
+the earlier response before issuing the dependent transaction.
+
+The surveyed reference reaches the same network-level parallelism with separate Narrow and Wide
+AW/W state machines and separate request/wide arbiters ([AW/W selection](https://github.com/pulp-platform/FlooNoC/blob/2fa02eb23c1babef9a8f714715ea7c78de98c364/hw/floo_nw_chimney.sv#L1311-L1373),
+[REQ arbitration](https://github.com/pulp-platform/FlooNoC/blob/2fa02eb23c1babef9a8f714715ea7c78de98c364/hw/floo_nw_chimney.sv#L1375-L1409),
+[wide arbitration](https://github.com/pulp-platform/FlooNoC/blob/2fa02eb23c1babef9a8f714715ea7c78de98c364/hw/floo_nw_chimney.sv#L1448-L1479)).
+Its two AXI class ports provide separate W streams; this design instead requires the AW-order
+context FIFO because both classes share one AXI W channel. The current C++ NMU already has separate
+REQ and DAT arbiter/allocation instances, but simultaneous same-cycle egress lacks a dedicated
+test.
+
+The reverse NSU NoC-to-AXI merge uses independent REQ Narrow and DAT Data ingress queues followed
+by one work-conserving AW selector. A sole admissible class wins immediately; simultaneous classes
+use round robin. Each accepted AW records `{class, burst_beats}` in a W-order FIFO, while the shared
+W output serves only the FIFO head class through its final beat. AW may therefore admit later
+transactions before an earlier burst completes its W data. This retains AW outstanding concurrency
+and prevents class starvation. Its cost is intentional W head-of-line blocking when the head
+class's next W beat is late; allowing the other class to bypass would break the accepted AW order
+on the one downstream W channel.
+
+The surveyed reference has separate Narrow and Wide downstream AXI class ports, so it does not
+perform this shared-port merge. The current C++ NSU is the implementation reference for the merge:
+it independently drains REQ and DAT ingress, round-robins simultaneous AW classes, records class
+and burst length in `w_order_`, and blocks W behind the FIFO head. Direct tests for simultaneous
+AW fairness and blocked-head W behavior are still missing.
+
+The NoC-carried AXI ID uses elaboration-time derived physical widths rather than an 8-bit reserved
+field. `AXI_ID_WIDTH` is legal from 1 to 8 and defaults to 3. With the fixed 48-bit header, the
+packet layout gives `REQ_FLIT_WIDTH = 133 + AXI_ID_WIDTH` and
+`RSP_FLIT_WIDTH = 123 + AXI_ID_WIDTH`. DAT stays 633 bits throughout this range because its
+585-bit `DataW` payload remains wider than `DataAw` and `DataR`. The generated field positions,
+flit containers, router ports and NoC class FIFOs all use the same elaborated widths; each AXI
+async FIFO derives its entry width from its own parameterized channel type.
+
+This avoids paying five unused ID wires on every default-width REQ and RSP link while allowing a
+customer build to carry wider IDs. The cost is that changing `AXI_ID_WIDTH` changes the REQ/RSP
+module interface and requires one coherent rebuild of the NI, routers, wrappers and verification
+model. That is acceptable because ID width is an elaboration parameter, not a runtime setting. The
+surveyed reference likewise composes flits from parameterized packed header and payload types
+([type definitions](https://github.com/pulp-platform/FlooNoC/blob/2fa02eb23c1babef9a8f714715ea7c78de98c364/hw/include/floo_noc/typedef.svh#L34-L81)).
+
+## NSU downstream ID mapping
+
+The surveyed reference design carries the request source in the packet header and preserves that
+header beside the original AXI ID for response routing, but indexes the downstream Response Queue
+by AXI ID alone. Two sources that present the same AXI ID therefore share one
+downstream ordering stream. This is inferred from its [header
+type](https://raw.githubusercontent.com/pulp-platform/FlooNoC/master/hw/include/floo_noc/typedef.svh),
+[request/response path](https://raw.githubusercontent.com/pulp-platform/FlooNoC/master/hw/floo_axi_chimney.sv),
+and [metadata buffer](https://raw.githubusercontent.com/pulp-platform/FlooNoC/master/hw/floo_meta_buffer.sv).
+
+Three policies were considered:
+
+| policy | downstream mapping key | consequence |
+|---|---|---|
+| AXI-ID-only | `noc_id` | smallest table and matches the surveyed reference, but unrelated sources using the same ID serialize |
+| strict pass-through | none; drive `noc_id` directly | no allocation state, but cannot preserve independent source concurrency and cannot narrow the ID width |
+| source-aware dynamic mapping | `{src_id, src_port_id, noc_id}` | preserves independent source streams at the cost of a bounded mapping table |
+
+The design adopts source-aware dynamic mapping. `src_port_id` is part of the key because this
+design carries it separately from `src_id`; omitting it would merge two endpoints attached to the
+same node. Narrow and Data class are not key terms because both classes terminate at the same
+external AXI interface and therefore share its ordering domain.
+
+Allocation is identity-preferred. An existing key reuses its mapped downstream ID. A new key uses
+`noc_id` when that value fits `NSU_AXI_ID_WIDTH` and is free; otherwise it receives the lowest free
+downstream ID. A full table stalls only new keys. The write and read directions use separate
+tables: AW allocates and B retires, while AR allocates and RLAST retires. A reference count keeps a
+mapping live while transactions of that key remain outstanding. The tables live in `noc_clk`:
+request allocation occurs before AW/AR enter their AXI async FIFOs, and response retirement occurs
+after B/R leave those FIFOs. The FIFOs carry the mapped AXI ID; live mapping state never crosses.
+
+The target block is named **Response Queue** (`nsu_response_queue` in RTL), and one stored record
+is a `response_entry_t`. `ResponseHeader` is not used for this state because an entry also contains
+ID, ordering, class, collective and narrow-read context; `response_header_t` remains reserved for
+an actual NoC response header. The current C++ class remains `MetaBuffer` until the reference-model
+alignment work begins.
+
+## NI CDC and Router VC ownership
+
+The adopted CDC boundary reuses the five AXI channel FIFOs. AW, W and AR cross toward the NI core;
+B and R cross in the opposite direction. Each entry is one AXI channel record. There is no
+additional complete-flit CDC stage. After the five FIFOs, SAM, ordering, packetization,
+depacketization, channel assignment, credit management and all NoC class queues run in `noc_clk`.
+
+This matches the surveyed [five-channel AXI CDC](https://github.com/pulp-platform/axi/blob/master/src/axi_cdc.sv),
+which instantiates one dual-clock FIFO for each AXI channel. The owner-provided bridge RTL uses the
+same five-FIFO topology but currently drives all five from one clock, so it is architectural
+precedent rather than a CDC implementation. The surveyed NoC NI instead demultiplexes Read and
+Write VCs before buffering and returns credit by consumed VC
+([source](https://github.com/pulp-platform/FlooNoC/blob/2fa02eb23c1babef9a8f714715ea7c78de98c364/hw/floo_nw_chimney.sv#L252-L284)).
+That placement is intentionally not copied: this target puts VC FIFOs only in the Router.
+
+The four NoC-side queues are REQ, RSP, DAT Write and DAT Read. They are synchronous `noc_clk`
+class FIFOs, not CDC or per-VC FIFOs. `NI_CLASS_FIFO_DEPTH`, default 8 with legal values 4, 8 and
+16, is their common entry count. Separate per-class depth parameters are not introduced.
+
+| Flow | Storage owner | Backpressure |
+|---|---|---|
+| NI to Router REQ/RSP | NI class FIFO, then Router input FIFO | ready/valid |
+| NI to Router DAT | NI class FIFO, then Router LOCAL per-VC input FIFO | NI sender counter per VC, seeded by `NOC_ROUTER_VC_DEPTH` |
+| Router to NI REQ/RSP | Router output, then NI class FIFO | ready/valid |
+| Router to NI DAT | Router output, then NI DAT Write or DAT Read class FIFO | ready/valid |
+| Router to Router DAT | downstream Router per-VC input FIFO | per-VC credit in both directions |
+
+The AXI-to-NoC assigner owns DAT VC selection. It reads the sender-side per-VC credit counters,
+applies `DAT_VC_ALLOC_MODE`, stamps the selected `vc_id`, and decrements that counter on send.
+`DataW` inherits its owning `DataAw` VC through WLAST. The credit state is not a FIFO: the credited
+slots reside in the Router LOCAL input VC FIFOs. The NI has no per-VC pending or ingress queue.
+
+Router-to-NI DAT ejection uses ready/valid because the NI receiver has shared class storage, not a
+separately provisioned FIFO per VC. Combining per-VC credit and ready on this direction is rejected:
+two authorities would define one transfer. Keeping per-VC receive credit would instead require
+partitioned NI VC storage, which is outside the adopted ownership boundary.
+
+| CDC partition | Benefit | Decision |
+|---|---|---|
+| Five AXI channel async FIFOs | reuses required protocol queues; all NI processing runs in `noc_clk` | adopted |
+| Additional complete-flit async FIFOs | crosses already-packetized records | rejected as duplicate buffering |
+| NI per-VC ingress FIFOs | symmetric credit protocol | rejected; VC storage belongs only to Router |
+
+The reset contract is coordinated rather than independently recoverable. Integration fans out one
+active-low system reset through separate `ACLK` and `noc_clk` reset synchronizers, then supplies
+`ARESETn` and `noc_rst_n` to the NI. Assertion is asynchronous; deassertion is synchronous to each
+destination clock, and release skew is legal. The NI has no `sys_rst_n` port. Any system reset
+flushes the CDC FIFOs and all transaction state; one-sided reset and in-flight replay are not
+supported.
+
+The surveyed [five-channel AXI CDC](https://github.com/pulp-platform/axi/blob/master/src/axi_cdc.sv)
+exposes distinct source- and destination-domain resets. Its supporting
+[CDC library](https://github.com/pulp-platform/common_cells) lists a separate clearable FIFO for
+one-sided reset, confirming that independent recovery requires extra reset coordination. The
+surveyed NoC NI uses one clock/reset domain. This target therefore keeps the ordinary FIFO and
+places the two reset synchronizers at system integration.
+
+`NI_DAT_VC_DEPTH` is removed from the target. `NOC_ROUTER_VC_DEPTH`, default 8 with legal range
+1 to 16, is both the Router input VC FIFO depth and the NI-to-Router DAT credit seed.
+`NI_CDC_FIFO_DEPTH` retains its approved default 8 and legal values 4, 8 and 16, now as the common
+entry count of the five AXI channel async FIFOs. These queues absorb clock-ratio variation and AXI
+backpressure; they do not store transaction lifetime state.
+
+The current C++ model remains a known divergence: it is single-clock, its `VcAllocator` owns
+per-VC pending queues, and its LOCAL DAT receive path returns per-VC credits. Target alignment is a
+separate implementation task.
+
+## NSU downstream ID mapping consequences
+
+For writes, the class selected by AW selects REQ or DAT Write for the whole burst. Existing
+AW-order metadata preserves the AW/W association; the split does not permit W beats or later write
+bursts to bypass an active burst. For responses, the Response Queue lookup by `BID` or `RID`
+restores context before packetization selects RSP or DAT Read. A write entry retires only when its
+complete B flit enters the RSP class FIFO. A read entry retires only when its complete RLAST flit
+enters the RSP or DAT Read class FIFO. Earlier R beats retain the same entry. Each completed transaction
+decrements the mapping reference count, and the downstream ID becomes free only when that count
+reaches zero.
+
+After classification, separate REQ/RSP/DAT Write/DAT Read FIFOs prevent one NoC class from consuming
+another class's queue capacity. Before classification, Narrow and Data beats share their AXI channel
+FIFO, so a blocked head can delay the other class. The design also cannot preempt a Data write burst
+already using the single AXI W channel or a Data R beat held by the external AXI slave. Removing
+those cases requires more queues before classification or another AXI interface; neither is adopted.
+
+This policy has the following advantages:
+
+- Different sources using the same `noc_id` can remain independently outstanding and may complete
+  without artificial same-ID serialization at the downstream AXI interface.
+- ID values remain unchanged in the common no-collision case, while independent
+  `AXI_ID_WIDTH` and `NSU_AXI_ID_WIDTH` values remain legal.
+- Storage scales with `NSU_MAX_ACTIVE_IDS`, not with the Cartesian product of all source and ID
+  widths.
+- Deterministic lowest-free allocation makes cycle-level verification reproducible.
+
+The costs are:
+
+- The NSU needs associative key comparison, free-ID selection, reference counts and Response
+  Queue lookup instead of direct ID wiring.
+- Five AXI channel async FIFOs per AXI interface add pointer and synchronizer area, but reuse the
+  protocol queues that the interface already requires instead of adding a second CDC stage.
+- A source collision can change the downstream ID value, so this is not strict pass-through even
+  when the two configured widths match.
+- Table exhaustion backpressures a previously unseen key; sizing therefore affects achievable
+  multi-source concurrency.
+- The current C++ reference model uses AXI-ID-only mapping and must be aligned before this policy
+  becomes an implementation requirement.
+
+Revisit this choice only if synthesis shows the bounded associative table on the timing-critical
+path, or workload measurements show that same-`noc_id` traffic from different sources does not
+benefit from independent completion. The fallback is AXI-ID-only mapping with per-ID response
+entry FIFOs; strict pass-through is valid only when ID widths match and source-level
+serialization is acceptable.
+
+## AXI QoS to NoC QoS survey
+
+Status: selectable shared or Read/Write-split DAT VC allocation approved. The first RTL transports
+AXI QoS attributes but does not implement a NoC QoS policy. A DAT-only QoS extension is recorded
+below and deferred.
+
+AXI defines 4-bit `AWQOS` and `ARQOS` identifiers but leaves their exact system use
+implementation-defined. The protocol recommends treating a larger value as higher priority and
+defines zero as no QoS participation. A component may select a higher-QoS transaction only when
+AXI ordering imposes no conflicting requirement; ordering takes precedence over QoS. See the
+[AMBA AXI protocol specification, QoS signaling](https://developer.arm.com/-/media/Arm%20Developer%20Community/PDF/IHI0022H_amba_axi_protocol_spec.pdf).
+
+Confirmed implementations use two distinct steps: compress `AxQOS` into a small NoC traffic
+class, then arbitrate class-specific queues or virtual channels. They do not normally allocate one
+VC for every one of the 16 AXI values.
+
+| Case | Confirmed behavior | Relevance |
+|---|---|---|
+| Public hard-memory NoC | the upper two `AxQOS` bits select one of four NoC urgency levels; zero is lowest and three highest | direct precedent for `AxQOS` compression rather than 16 VCs; [QoS mapping](https://www.intel.com/content/www/us/en/docs/programmable/768844/23-3/quality-of-service-qos-support.html) |
+| Public programmable NoC | each port has eight credit-controlled VC FIFOs; high-priority requests precede low-priority requests, while per-VC tokens apportion service among eligible requests | precedent for separating priority from bandwidth fairness; [packet switch](https://docs.amd.com/r/en-US/pg313-network-on-chip/NoC-Packet-Switch) and [VC arbitration](https://docs.amd.com/r/en-US/pg313-network-on-chip/Virtual-Channel-Arbitration) |
+| Surveyed open-source wide NoC | complete AXI AW/AR payloads, including `qos`, are transported; its optional wide-link VC mode separates write and read into two VCs, but its router arbitration does not consume `AxQOS` | transport and read/write separation are reusable; NoC QoS policy is not; [packetization](https://github.com/pulp-platform/FlooNoC/blob/2fa02eb23c1babef9a8f714715ea7c78de98c364/hw/floo_nw_chimney.sv#L1222-L1267), [VC count](https://github.com/pulp-platform/FlooNoC/blob/2fa02eb23c1babef9a8f714715ea7c78de98c364/hw/floo_nw_chimney.sv#L155-L158) and [VC arbiter ports](https://github.com/pulp-platform/FlooNoC/blob/2fa02eb23c1babef9a8f714715ea7c78de98c364/hw/floo_vc_arbiter.sv#L11-L30) |
+| Open-source AXI NoC building blocks | AXI muxes used to construct a mesh NoC use round-robin arbitration and do not rank requests by `AxQOS`; a memory endpoint adapter does compare read and write QoS, but that decision is outside the NoC router | proof that AXI QoS transport is not equivalent to NoC QoS; [NoC architecture](https://arxiv.org/abs/2308.00154), [mux arbitration](https://github.com/pulp-platform/axi/blob/4da15979747f326bde2f9869c64e587ce599772c/src/axi_mux.sv#L264-L280) and [endpoint arbitration](https://github.com/pulp-platform/axi/blob/4da15979747f326bde2f9869c64e587ce599772c/src/axi_to_detailed_mem.sv#L292-L301) |
+| Open-source protocol-independent NoC | AXI AW, W, AR, R and B use five fixed virtual networks to break protocol dependencies; `AxQOS` does not select the virtual network | protocol-deadlock classes and QoS classes are separate concerns; [AXI virtual-network map](https://github.com/ucb-bar/constellation/blob/c1b42cd0c7c7d6e4fc1ed9bf1f86fbd3b31ac510/src/main/scala/protocol/AXI4.scala#L291-L301) |
+
+`DAT_VC_ALLOC_MODE` selects one of two elaboration-time policies and defaults to `SHARED`.
+`DAT_NUM_VC` remains the only VC count parameter, with a legal range of 1 to 8 and a default of 2.
+
+| Mode | Legal `DAT_NUM_VC` | Eligible VC set |
+|---|---|---|
+| `SHARED` | 1 to 8 | `DataAw`, `DataW` and `DataR` may use every VC |
+| `READ_WRITE_SPLIT` | 2, 4, 6 or 8 | lower half for `DataAw`/`DataW`, upper half for `DataR` |
+
+`DataW` inherits its owning `DataAw` VC in both modes. Split mode is system-wide: the NI allocator
+and every DAT router output VA apply the same class mask when assigning or restamping `vc_id`.
+Restricting only injection would allow a later hop to move a flit into the wrong class set. There
+are no independent Read or Write VC-count parameters.
+
+The DAT VC pool is not part of the protocol-deadlock proof. As in the surveyed
+[wide-channel mapping](https://github.com/pulp-platform/FlooNoC/blob/main/docs/floonoc/links.md#narrow-wide-axi-to-req-rsp-wide-mapping),
+`DataAr` uses REQ, `DataAw` / `DataW` and `DataR` use DAT, and `DataB` uses RSP. A Data-AR can
+create a Data-R dependency from REQ to DAT; accepted Data-AW/Data-W can create a Data-B dependency
+from DAT to RSP; narrow requests create a direct REQ-to-RSP dependency. No response creates a
+dependency back to REQ or DAT. The resulting message dependency graph is therefore acyclic:
+
+```text
+REQ -> DAT -> RSP
+```
+
+One DAT VC in `SHARED` mode is therefore legal and protocol-deadlock-free. The default of two is a
+performance policy. `SHARED` avoids reserving half of the DAT buffers for an idle direction, at
+the cost of possible Read/Write head-of-line blocking within one VC. `READ_WRITE_SPLIT` removes
+that cross-class blocking, at the cost of stranded capacity under asymmetric traffic.
+
+Both modes keep the same physical buffering. The NI has one DAT Write and one DAT Read class FIFO;
+the Router alone owns per-VC input FIFOs. Split mode changes the eligible VC masks applied by the
+NI sender and Router VA, not NI storage. Its isolation and possible stranded capacity therefore
+occur in Router VC capacity, not in duplicated NI queues.
+
+The first RTL retains `AWQOS` and `ARQOS` on the AXI interface and transports them unchanged in
+the AW and AR flit payloads. It does not add QoS to the 48-bit NoC header, map `AxQOS` to a VC, or
+rank router requests by `AxQOS`. DAT VC allocation remains credit-aware, with round-robin selection
+among the mode-eligible VCs allowed by the ordering rules. `DataW` inherits the VC selected for its
+owning `DataAw`, and the wormhole grant remains locked through WLAST. Router arbitration continues
+to use round robin. QoS adds no width beyond the selected ID-width layout. The current C++ model
+implements only the `SHARED` candidate set and requires alignment for `READ_WRITE_SPLIT`.
+
+The deferred DAT-only QoS design keeps QoS metadata separate from `vc_id`. It adds the complete
+4-bit `AxQOS` value as router-visible header metadata, increasing the common header from 48 to
+52 bits and, at the default `AXI_ID_WIDTH = 3`, REQ/RSP/DAT widths from 136/126/633 to
+140/130/637 bits. `DataAw` and every owning
+`DataW` flit carry `AWQOS`; the NSU Response Queue preserves `ARQOS` and restores it on each
+`DataR` flit. At each packet boundary, an output arbiter selects the highest eligible QoS value,
+round-robins ties, and holds the winner through tail. This is best-effort priority: it does not
+guarantee bandwidth, bounded latency, or freedom from low-priority starvation. Aging belongs only
+with a future bounded-progress requirement; weighted service belongs only with a bandwidth-share
+requirement. Extending QoS to REQ/RSP is a separate architecture decision.
+
+Direct `AxQOS`-to-`vc_id` mapping is rejected for this extension. Default `AxQOS = 0` traffic would
+collapse onto VC0 and waste the remaining VCs. `READ_WRITE_SPLIT` partitions by AXI direction, not
+QoS, and does not change this decision. The current C++ model's `DAT_NUM_VC = 1` default still
+differs from the approved target default of 2; that parameter and mode alignment is independent of
+QoS.
