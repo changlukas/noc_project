@@ -237,8 +237,8 @@ credit counters; in-flight transactions are discarded rather than preserved or r
 | R | `noc_clk` to `ACLK` | `ACLK` to `noc_clk` |
 
 Each AXI interface therefore has five dual-clock FIFOs. Their entries are AXI channel records, not
-physical flits. `NI_CDC_FIFO_DEPTH` is their common entry count. The NoC side has four logical
-`noc_clk` class FIFOs: REQ, RSP, DAT Write and DAT Read. `NI_CLASS_FIFO_DEPTH`, default 8 with
+physical flits. `AXI_FIFO_DEPTH` is their common entry count. The NoC side has four logical
+`noc_clk` class FIFOs: REQ, RSP, DAT Write and DAT Read. `NOC_FIFO_DEPTH`, default 8 with
 legal values 4, 8 and 16, is their common entry count. They are not CDC FIFOs and are not
 replicated per VC.
 
@@ -251,7 +251,7 @@ replicated per VC.
 
 On injection, the AXI-to-NoC assigner selects REQ, RSP, DAT Write or DAT Read after packetization.
 REQ and RSP use ready/valid. For DAT, sender-side Credit Management holds one counter per Router VC,
-applies `DAT_VC_ALLOC_MODE`, selects an eligible credited VC, stamps `vc_id`, and decrements that
+applies `NOC_DAT_VC_MODE`, selects an eligible credited VC, stamps `vc_id`, and decrements that
 counter when the flit is sent. `DataW` inherits its owning `DataAw` VC through WLAST. The NI has no
 per-VC queue; the selected Router LOCAL input VC FIFO owns the credited storage.
 
@@ -415,7 +415,7 @@ For Router-to-NI DAT ejection, a transfer occurs only when `RXDATVALID` and `RXD
 high. No NI receive-credit counter or `RXDATCRDVALID` exists. Inter-router DAT ports retain the
 symmetric per-VC credit signals specified by the Router.
 
-The five AXI channel async FIFOs use `NI_CDC_FIFO_DEPTH`, default 8 with legal values 4, 8 and 16.
+The five AXI channel async FIFOs use `AXI_FIFO_DEPTH`, default 8 with legal values 4, 8 and 16.
 The implementation derives Gray-pointer widths from this entry count. These FIFOs absorb clock-ratio
 variation and temporary AXI backpressure; they do not define the number of outstanding AXI
 transactions. Outstanding capacity is owned separately by the per-ID order lists, RoBs and NSU
@@ -449,10 +449,10 @@ at simulation startup, and the verification flow checks the generated and runtim
 | AXI interface | Endpoint interfaces | 1 | One fixed 512-bit interface carries both classes; the SAM address space selects the internal NoC class |
 | AXI interface | `AXI_ID_WIDTH` | 1-8 (3) | NMU AXI ID and NoC-carried ID width; REQ/RSP flit widths derive from it at elaboration |
 | Flow control | `DAT_NUM_VC` | 1-8 (2) | Total DAT VC count and the Section 4.3 credit signal width; mode-specific legality applies below |
-| Flow control | `DAT_VC_ALLOC_MODE` | `SHARED`, `READ_WRITE_SPLIT` (`SHARED`) | System-wide eligible-VC policy for NI allocators and DAT router VA |
+| Flow control | `NOC_DAT_VC_MODE` | `SHARED`, `READ_WRITE_SPLIT` (`SHARED`) | System-wide eligible-VC policy for NI allocators and DAT router VA |
 | Flow control | `NOC_ROUTER_VC_DEPTH` | 1-16 (8) | Router DAT input FIFO depth and NI-to-Router sender-credit seed |
-| CDC | `NI_CDC_FIFO_DEPTH` | 4, 8, 16 (8) | Common entry count of the AW/W/AR/B/R dual-clock FIFOs on each AXI interface |
-| NoC class queues | `NI_CLASS_FIFO_DEPTH` | 4, 8, 16 (8) | Common entry count of the REQ/RSP/DAT Write/DAT Read synchronous FIFOs |
+| CDC | `AXI_FIFO_DEPTH` | 4, 8, 16 (8) | Common entry count of the AW/W/AR/B/R dual-clock FIFOs on each AXI interface |
+| NoC class queues | `NOC_FIFO_DEPTH` | 4, 8, 16 (8) | Common entry count of the REQ/RSP/DAT Write/DAT Read synchronous FIFOs |
 | Ordering | Outstanding transactions per ID | 1-32 (32) | Applies to both R modes. A master holds at most `32 x 2^AXI_ID_WIDTH` in total, 256 at the default; Enabled requests that require reordering additionally reserve an `ordering_tag`, see §6 |
 | Ordering | `READ_ROB_ENABLED` | enabled, disabled (enabled) | Selects the R path at elaboration with `generate if`. Disabled permits a same-ID streak only within one `{dst_id, dst_port_id, AXI class}` ordering domain. B always uses a per-ID metadata-only RoB. The §3 ordering requirement holds in either setting |
 | Address map | SAM address spaces | config, memory | Config space selects the narrow class, memory space the data class. Uniform across nodes and fixed for one elaborated RTL image |
@@ -461,8 +461,8 @@ at simulation startup, and the verification flow checks the generated and runtim
 | NMU timing | `AW_SAM_REG_TYPE` | 0, 1, 2 (0) | AW SAM-output slice: bypass, simple register, or full skid buffer |
 | NMU timing | `AR_SAM_REG_TYPE` | 0, 1, 2 (0) | AR SAM-output slice, independent of AW |
 
-`DAT_VC_ALLOC_MODE=SHARED` allows `DAT_NUM_VC` from 1 to 8 and lets `DataAw`, `DataW` and `DataR`
-use every VC. `DAT_VC_ALLOC_MODE=READ_WRITE_SPLIT` requires an even `DAT_NUM_VC` in {2, 4, 6, 8};
+`NOC_DAT_VC_MODE=SHARED` allows `DAT_NUM_VC` from 1 to 8 and lets `DataAw`, `DataW` and `DataR`
+use every VC. `NOC_DAT_VC_MODE=READ_WRITE_SPLIT` requires an even `DAT_NUM_VC` in {2, 4, 6, 8};
 the lower half serves `DataAw`/`DataW` and the upper half serves `DataR`. The NI allocator and every
 DAT router output VA apply this same class mask. Illegal combinations fail elaboration.
 

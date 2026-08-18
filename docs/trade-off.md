@@ -249,7 +249,7 @@ Write VCs before buffering and returns credit by consumed VC
 That placement is intentionally not copied: this target puts VC FIFOs only in the Router.
 
 The four NoC-side queues are REQ, RSP, DAT Write and DAT Read. They are synchronous `noc_clk`
-class FIFOs, not CDC or per-VC FIFOs. `NI_CLASS_FIFO_DEPTH`, default 8 with legal values 4, 8 and
+class FIFOs, not CDC or per-VC FIFOs. `NOC_FIFO_DEPTH`, default 8 with legal values 4, 8 and
 16, is their common entry count. Separate per-class depth parameters are not introduced.
 
 | Flow | Storage owner | Backpressure |
@@ -261,7 +261,7 @@ class FIFOs, not CDC or per-VC FIFOs. `NI_CLASS_FIFO_DEPTH`, default 8 with lega
 | Router to Router DAT | downstream Router per-VC input FIFO | per-VC credit in both directions |
 
 The AXI-to-NoC assigner owns DAT VC selection. It reads the sender-side per-VC credit counters,
-applies `DAT_VC_ALLOC_MODE`, stamps the selected `vc_id`, and decrements that counter on send.
+applies `NOC_DAT_VC_MODE`, stamps the selected `vc_id`, and decrements that counter on send.
 `DataW` inherits its owning `DataAw` VC through WLAST. The credit state is not a FIFO: the credited
 slots reside in the Router LOCAL input VC FIFOs. The NI has no per-VC pending or ingress queue.
 
@@ -292,7 +292,7 @@ places the two reset synchronizers at system integration.
 
 `NI_DAT_VC_DEPTH` is removed from the target. `NOC_ROUTER_VC_DEPTH`, default 8 with legal range
 1 to 16, is both the Router input VC FIFO depth and the NI-to-Router DAT credit seed.
-`NI_CDC_FIFO_DEPTH` retains its approved default 8 and legal values 4, 8 and 16, now as the common
+`AXI_FIFO_DEPTH` retains its approved default 8 and legal values 4, 8 and 16, now as the common
 entry count of the five AXI channel async FIFOs. These queues absorb clock-ratio variation and AXI
 backpressure; they do not store transaction lifetime state.
 
@@ -370,7 +370,7 @@ VC for every one of the 16 AXI values.
 | Open-source AXI NoC building blocks | AXI muxes used to construct a mesh NoC use round-robin arbitration and do not rank requests by `AxQOS`; a memory endpoint adapter does compare read and write QoS, but that decision is outside the NoC router | proof that AXI QoS transport is not equivalent to NoC QoS; [NoC architecture](https://arxiv.org/abs/2308.00154), [mux arbitration](https://github.com/pulp-platform/axi/blob/4da15979747f326bde2f9869c64e587ce599772c/src/axi_mux.sv#L264-L280) and [endpoint arbitration](https://github.com/pulp-platform/axi/blob/4da15979747f326bde2f9869c64e587ce599772c/src/axi_to_detailed_mem.sv#L292-L301) |
 | Open-source protocol-independent NoC | AXI AW, W, AR, R and B use five fixed virtual networks to break protocol dependencies; `AxQOS` does not select the virtual network | protocol-deadlock classes and QoS classes are separate concerns; [AXI virtual-network map](https://github.com/ucb-bar/constellation/blob/c1b42cd0c7c7d6e4fc1ed9bf1f86fbd3b31ac510/src/main/scala/protocol/AXI4.scala#L291-L301) |
 
-`DAT_VC_ALLOC_MODE` selects one of two elaboration-time policies and defaults to `SHARED`.
+`NOC_DAT_VC_MODE` selects one of two elaboration-time policies and defaults to `SHARED`.
 `DAT_NUM_VC` remains the only VC count parameter, with a legal range of 1 to 8 and a default of 2.
 
 | Mode | Legal `DAT_NUM_VC` | Eligible VC set |
