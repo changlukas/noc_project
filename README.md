@@ -263,6 +263,7 @@ python3 specgen/tools/codegen.py --check
 ## Documentation
 
 - [NMU design spec](docs/nmu-spec.md)
+- [NMU RTL verification plan](docs/nmu-verification-plan.md)
 - [NSU design spec](docs/nsu-spec.md)
 - [NSU RTL verification plan](docs/nsu-verification-plan.md)
 - [Router design spec](docs/router-spec.md)
