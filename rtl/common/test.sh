@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+task_mode=${1:-test}
+task_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+task_manifest="$task_root/rtl/Bender.yml"
+task_revision=9ca8a7655f741e7dd5736669a20a301325194c28
+task_tmp=$(mktemp -d "${TMPDIR:-/tmp}/noc-common-primitives-XXXXXX")
+trap 'rm -rf "$task_tmp"' EXIT
+
+if [[ -n "${COMMON_CELLS_DIR:-}" ]]; then
+    task_common_cells=$COMMON_CELLS_DIR
+else
+    task_common_cells="$task_tmp/common_cells"
+    git clone --quiet https://github.com/pulp-platform/common_cells.git "$task_common_cells"
+    git -C "$task_common_cells" checkout --quiet "$task_revision"
+fi
+
+[[ $(git -C "$task_common_cells" rev-parse HEAD) == "$task_revision" ]]
+grep -Fq "$task_revision" "$task_manifest"
+
+task_sources=(
+    "$task_common_cells/src/binary_to_gray.sv"
+    "$task_common_cells/src/fifo_v3.sv"
+    "$task_common_cells/src/gray_to_binary.sv"
+    "$task_common_cells/src/spill_register_flushable.sv"
+    "$task_common_cells/src/spill_register.sv"
+    "$task_common_cells/src/stream_register.sv"
+    "$task_common_cells/src/sync.sv"
+    "$task_common_cells/src/cdc_fifo_gray.sv"
+    "$task_root/rtl/common/noc_sync_fifo.sv"
+    "$task_root/rtl/common/axi_async_fifo.sv"
+    "$task_root/rtl/common/noc_reg_slice.sv"
+    "$task_root/rtl/common/tests/tb_common_primitives.sv"
+)
+
+task_verilator=(
+    verilator --timing --assert -Wall -Wno-fatal -Wno-DECLFILENAME -Wno-TIMESCALEMOD
+    -Wno-UNUSEDPARAM -Wno-UNUSEDSIGNAL -DCOMMON_CELLS_ASSERTS_OFF
+    -I"$task_common_cells/include" --top-module tb_common_primitives
+)
+
+case "$task_mode" in
+    lint)
+        "${task_verilator[@]}" --lint-only "${task_sources[@]}"
+        ;;
+    test)
+        "${task_verilator[@]}" --lint-only "${task_sources[@]}"
+        "${task_verilator[@]}" --binary --Mdir "$task_tmp/obj_dir" -o common_primitives_tb \
+            "${task_sources[@]}"
+        "$task_tmp/obj_dir/common_primitives_tb"
+        ;;
+    *)
+        echo "usage: $0 [lint|test]" >&2
+        exit 2
+        ;;
+esac
