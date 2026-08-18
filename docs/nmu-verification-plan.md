@@ -389,6 +389,8 @@ packet fields. It is excluded from every production source list.
 The RTL NMU uses independent `ACLK` and `noc_clk`. The reference NSU and its AXI target tick on
 `noc_clk`. Runs include equal clocks, AXI faster, NoC faster, non-integer ratios, and randomized
 phase. CDC signoff remains N0/N1 RTL evidence; the single-clock reference is not a CDC oracle.
+The hybrid applies reset only at startup because the reference NSU has no mid-run core-reset
+operation; nonempty and mid-transaction reset acceptance comes exclusively from N0/N1.
 
 ### 11.2 Random pressure and stimulus
 
@@ -402,8 +404,8 @@ Every run has a reproducible seed and independently randomized controls:
 - RTL-NMU DAT Read ready stalls through finite internal capacity and F0, with legal reference
   credits returned only on freed adapter slots;
 - downstream AXI memory AWREADY/WREADY/ARREADY and B/R response delays;
-- coordinated reset with empty and nonempty state, randomized legal assertion time, and both legal
-  domain-release orders.
+- startup reset with both legal RTL-domain release orders; the reference NSU remains idle until both
+  RTL domains have been released.
 
 Pressure generators have bounded fairness during completion phases. Separate directed tests hold a
 boundary blocked long enough to fill the finite upstream storage and prove backpressure propagation;
@@ -416,7 +418,7 @@ random tests alone are not used to claim a full/empty boundary.
 | N2-HYB-03 | delay direct DAT Write credits and F0/DataR capacity separately, including all-credit-zero/full intervals | each direction backpressures independently, then recovers without credit, flit, or transaction mismatch |
 | N2-HYB-04 | prefill Narrow/Data writes, release REQ/DAT together, and arrange concurrent B/R completion | simultaneous REQ+DAT and BVALID+RVALID witnesses occur; physical and AXI response channels remain independent |
 | N2-HYB-05 | separate builds sweep all SAM register modes, both read-RoB modes, legal VC counts, and both VC modes | every applicable configuration reaches the same functional completion criteria; mode-specific latency/eligibility checks pass |
-| N2-HYB-06 | equal and unrelated clock relationships plus coordinated reset at empty and nonempty states | five-channel CDC integrity and both legal reset-release orders pass; no pre-reset transaction escapes |
+| N2-HYB-06 | equal and unrelated clock relationships plus startup reset with both legal RTL-domain release orders | post-release traffic completes under each clock relationship; N0/N1 supply five-channel CDC integrity and nonempty-reset evidence |
 | N2-HYB-07 | checker-red runs corrupt one F0 bit, duplicate one accepted response, and violate one credit conservation event separately | each run fails only through its intended checker and cannot report hybrid PASS |
 | N2-HYB-08 | long reproducible random sequences with mixed IDs, bursts, classes, and all pressure mechanisms | all non-vacuity counters are nonzero, no watchdog fires, every scoreboard drains, and all credit totals return to seed |
 
