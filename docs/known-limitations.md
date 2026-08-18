@@ -1,6 +1,6 @@
 # Known limitations
 
-What the model does not do, and what the test suite does not check, as of 2026-08-07.
+What the model does not do, and what the test suite does not check, as of 2026-08-18.
 Sites cite a file and a symbol rather than a line number, so a refactor does not silently
 invalidate a row.
 
@@ -10,6 +10,7 @@ invalidate a row.
 |---|---|---|
 | The approved RoB-less read policy is not implemented: the model still permits only one outstanding read per ID instead of a same-ordering-domain streak, and Enabled-mode bypass compares `{dst_id, class}` without `dst_port_id` | `READ_ROB_ENABLED=0`, or one ID addresses a tile and peripheral sharing a coordinate | `nmu/rob.hpp`, `Rob::push_aw` / `Rob::push_ar`; `specgen/source/constants.yaml`, `READ_ROB_ENABLED` |
 | `remap_downstream_id` collapses every id to `3'h7` at `max_unique_ids == 1`, so a slave that violates B ordering can stamp a collective mask onto an unrelated B and inject a false CollectB into the join | only with a B-ordering-violating slave, which no shipped stimulus produces | `nsu/meta_buffer.hpp`, `remap_downstream_id` |
+| The C++ NSU Response Queue surrogate is `MetaBuffer`, keyed only by downstream AXI ID with collapse/pass-through modes. It does not implement the target source-aware `{src_id, src_port_id, noc_id}` dynamic mapping, identity-preferred/lowest-free allocation, or mapping reference counts | target S0 downstream-ID comparison and multi-source same-ID concurrency; an ID-only model cannot be the mapping oracle | `nsu/meta_buffer.hpp`; `nsu/depacketize.hpp`, `remap_downstream_id`; `docs/nsu-verification-plan.md`, Section 9 |
 | Unicast AWs admitted through `Rob::push_aw` get no `burst_footprint_ok` check; only the direct `Packetize::push_aw` path asserts it | an oversized unicast burst reaches the fabric unchecked, where the collective path checks every replica | `nmu/rob.hpp`, `nmu/packetize.hpp` |
 | The `ordering_req = 0` same-`(dst, id)` bypass streak holds order only while REQ/RSP stay single-VC and AR/B stay off DAT | opening a second REQ/RSP VC, or steering AR/B to DAT, loses in-fabric ordering. AR pinning and the B fixed hash were deleted in S3b. `ChannelModel` is VC-blind, so ctest cannot see it | `nmu/rob.hpp`, admission tree |
 | The router's VA divergence assert sits behind the credit gate | a zero-credit diverging `fixed_vc = 0` worm idles silently instead of tripping the checker, a liveness gap rather than a wrong answer | `router/router.hpp`, VA stage |
@@ -66,7 +67,7 @@ not necessarily a larger config tile.
 
 | Gap | Consequence |
 |---|---|
-| NSU `max_unique_ids` takes only 1 or 8 | no intermediate ID-compression tier. Selectable N per-id FIFOs would close it |
+| Target Response Queue width/capacity defaults and legal ranges are absent from the canonical RTL parameter table; the current C++ `max_unique_ids` accepts only 1 or 8 | target elaboration guards and boundary tests remain `[TBD]`; the current collapse/pass-through model cannot stand in for the approved dynamic mapper |
 | Per-tile compute rate appears in no spec or perf doc | every utilization figure and the minimum viable tile size depend on a number the model does not carry (`docs/noc-workload-benchmark.md` section 9) |
 
 ## Input validation

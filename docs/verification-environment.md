@@ -117,6 +117,8 @@ excluded explicitly rather than hidden by loose scoreboarding.
 
 The acceptance order is unit DV, hybrid block co-sim, full-RTL `2x2 verify`, then the full-RTL
 `4x4 verify` milestone. Every ready/valid hybrid boundary receives randomized stall injection.
+The NSU-specific S0/S1 tests, comparison exclusions, F0 adapter checks, and non-vacuous pass criteria
+are defined in `docs/nsu-verification-plan.md`.
 
 ### Model-facing REQ/RSP egress
 
@@ -167,13 +169,24 @@ their transitive sources and include order from `rtl/Bender.yml`. Production bui
 exact revision and do not copy or rewrite the files. The upstream license is
 [Solderpad Hardware License v0.51](https://github.com/pulp-platform/common_cells/blob/9ca8a7655f741e7dd5736669a20a301325194c28/LICENSE).
 
+Issue #12 inspected two additional source trees for NSU planning. The classifications below govern
+this plan and do not change the license of any source:
+
+| ID | source and inspected revision | classification and permitted use | license obligation |
+|---|---|---|---|
+| P1 | FlooNoC at `cb7b2ba3fd4b7eac340a4117ffba05c2a9757699`; inspected `floo_meta_buffer.sv` and `floo_axi_chimney.sv` | production-approved external reference; architecture and behavior may inform reviewed production work, but issue #12 copies or instantiates no RTL | inspected files carry `SPDX-License-Identifier: SHL-0.51`; preserve their copyright/SPDX notices and the repository's Solderpad Hardware License v0.51 terms in any separately approved reuse |
+| P2 | Taxi at `d5d38c268e1ec5a0bf55ea59b6c25fb59c7b73ad`; inspected AXI/stream register and async-FIFO test methods | reference-only; test intent may inform project-owned DV, but its RTL must not be copied, adapted, or instantiated in production | inspected sources carry `SPDX-License-Identifier: CERN-OHL-S-2.0`; retain all notices in the reference tree and do not rewrite or remove them |
+
+The project-owned C++ NSU model is a conditional executable oracle rather than a third-party source.
+Its target-aligned and excluded comparison areas are listed in `docs/nsu-verification-plan.md`.
+
 Upstream references:
 
 - IHI 0022H, AMBA AXI protocol specification (Arm Ltd.), cited by section
   throughout the block specs. The A5.3 rule set relied on for ordering:
   same-ID read data returns in AR-issue order, read data of different ARIDs
   may interleave, and AXI4 removed WID with write-data interleaving.
-- FlooNoC RTL (read-only): `floo_rob.sv` (slot pool, high-water allocator,
+- FlooNoC RTL (production-approved reference; inspected read-only): `floo_rob.sv` (slot pool, high-water allocator,
   idle-ID and same-destination bypass, per-beat release), `floo_rob_wrapper.sv`
   (RoB type selection), `floo_simple_rob.sv` (ring-pointer allocator,
   documented alternative, not chosen), `floo_meta_buffer.sv` (meta buffer,
