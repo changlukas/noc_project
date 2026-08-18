@@ -8,6 +8,9 @@ The target LOCAL DAT ready/valid overlay is not implemented by the current model
 comparison for that port starts only after the model and wrapper are aligned; N/E/S/W credit
 behavior remains the as-built reference.
 
+The production top is `router`. Its wrapper-facing ports, fixed five-port hierarchy, and reviewed
+child boundaries are frozen in `rtl/README.md`; this document remains authoritative for behavior.
+
 The target Router belongs entirely to the `noc_clk` domain and receives only `noc_rst_n`. System
 integration derives that reset and each NI's `ARESETn` from one common system reset; assertion is
 asynchronous and deassertion is synchronized to the destination clock. The Router has no
@@ -89,14 +92,14 @@ Target RTL makes one LOCAL-output exception: Router-to-NI DAT ejection uses read
 NI has no per-VC FIFO. NI-to-Router DAT injection remains credit-controlled; its credited storage
 is this Router's LOCAL input VC FIFO.
 
-REQ and RSP use ready/valid instead. `ready` is an almost-full early ready computed off
-current occupancy, `ready = (occupancy + ready_slack <= depth)`, so it deasserts
-`ready_slack` flits before the FIFO physically fills — that covers the multi-cycle round
-trip of a registered ready wire between two nodes. It is advisory, not a same-cycle
-accept: the sender grants against a `ready` sampled two registrations earlier and the
-receiver pushes unconditionally on `valid`, so the transfer is `valid` alone. The
-shipped `ready_slack` = 2 is PROVISIONAL and awaits a measured wire-loop calibration
-(`simple_router.hpp` `SimpleRouterConfig::ready_slack`).
+REQ and RSP use ready/valid instead. The C++ core computes an almost-full early ready from
+current occupancy, `ready = (occupancy + ready_slack <= depth)`. At the model-facing wire the
+verification wrapper applies the standard contract: a transfer occurs only with `valid && ready`,
+and a source holds valid plus flit while stalled. The wrapper converts each accepted wire transfer
+back to the one-cycle ingress pulse expected by the C++ core and captures each one-cycle core
+egress strobe in the approved `spill_register`. The shipped `ready_slack` = 2 remains PROVISIONAL
+and awaits a measured wire-loop calibration (`simple_router.hpp`
+`SimpleRouterConfig::ready_slack`).
 
 ### 2.2 Flit format
 
@@ -156,9 +159,10 @@ if it ever does (`route_compute`, `router.hpp:65-68`).
 ### 2.4 Pipeline: three stages, one stage per cycle (DAT)
 
 The DAT `Router` is a 3-stage pipeline. A flit advances exactly one stage per cycle.
-The REQ/RSP `SimpleRouter` runs the same stages 1 and 2 but with `output_fifo_depth` = 0,
-so stage 2 drives the downstream link directly and there is no stage 3 — 2 cycles per
-hop instead of 3 (`SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`).
+The REQ/RSP `SimpleRouter` core runs the same stages 1 and 2 but with `output_fifo_depth` = 0,
+so stage 2 produces its output strobe directly and there is no core stage 3 — 2 core ticks
+(`SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`). The model-facing spill register adds
+one verification-only wire cycle, for 3 cycles per hop at the wrapper pins.
 
 | Stage | Storage | Action per cycle |
 |---|---|---|
@@ -190,10 +194,12 @@ The model evaluates stages in reverse order (3, then 2, then 1) within one tick
   most one per (port, VC) per cycle. The surplus pulse is delivered on the following
   cycle (drained one per VC per cycle by the wrap, `router_adapters.hpp` `LinkCreditOut`).
 
-Zero-load latency is exactly 3 cycles per hop on DAT and exactly 2 on REQ/RSP: a flit
-sampled from the input wire at posedge N is sampled on the output wire (by the neighbor
-or the NI) at posedge N+3 / N+2. Verified by `RouterDatapath.ZeroLoadLatencyIsThreeTicks`
-and `SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`.
+Zero-load model-facing wire latency is exactly 3 cycles per hop on all three networks: a flit
+handshaken from the input wire at posedge N is handshaken on an always-ready output at posedge
+N+3. DAT obtains those cycles from the core and existing DPI output register. REQ/RSP have 2 core
+ticks plus the verification-only spill register. The core halves are verified by
+`RouterDatapath.ZeroLoadLatencyIsThreeTicks` and
+`SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`.
 
 ### 2.5 Arbitration: two-level round-robin per output
 
@@ -352,8 +358,8 @@ start at 8.
 
 Head latency: injected cycle 0, at the destination NI cycle 6 = 2 hops x 3 cycles.
 Tail: cycle 2 -> cycle 8. A's `credit_[EAST][0]` bottoms at 5 (three flits in flight)
-and returns to 8 by cycle 8. The same packet on REQ would take 2 cycles a hop and gate on
-`tx_req_ready` instead of a counter.
+and returns to 8 by cycle 8. The same packet on model-facing REQ would take 3 cycles a hop and
+transfer with `tx_req_valid && tx_req_ready` instead of consuming a counter.
 
 ### 2.10 Collectives: multicast fork and CollectB join
 
@@ -457,8 +463,8 @@ and its `SimpleRouterForkWedge` twin, and by the co-sim `multicast` pattern
 
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
-| `DAT_NUM_VC` | current 1; target 2 | 1..8 (= 2^VC_ID_WIDTH); Split requires {2,4,6,8} | VCs on the DAT link. REQ/RSP are fixed single-VC. The current value comes from `ni_params_pkg::NOC_DAT_NUM_VC_DFLT`; target alignment remains pending. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != DAT_NUM_VC`. |
-| `NOC_DAT_VC_MODE` [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | Eligible-VC mask applied by every DAT output VA; not implemented by the current C++ router. |
+| `NOC_DAT_NUM_VC` (`DAT_NUM_VC` wrapper alias) | 2 | 1..8 (= 2^VC_ID_WIDTH); Split requires {2,4,6,8} | VCs on the DAT link. REQ/RSP are fixed single-VC. `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t)` disagrees. |
+| `NOC_DAT_VC_MODE` | SHARED (0) | {SHARED (0), READ_WRITE_SPLIT (1)} | Eligible-VC mask applied by every target DAT output VA; current C++ router implements SHARED only. |
 | `REQ_FLIT_WIDTH` | 136 | `133 + AXI_ID_WIDTH` | Derived REQ flit bus width, bits |
 | `RSP_FLIT_WIDTH` | 126 | `123 + AXI_ID_WIDTH` | Derived RSP flit bus width, bits |
 | `DAT_FLIT_WIDTH` | 633 | 633 for `AXI_ID_WIDTH` 1..8 | Derived DAT flit bus width, bits |
@@ -496,7 +502,9 @@ carries this node's own NI traffic, N/E/S/W the inter-router links. Target RTL r
 flit arrays but gives LOCAL DAT output the ready signal described below instead of a credit-return
 input. `noc_types_pkg::noc_credit_t` = `{credit[DAT_NUM_VC-1:0]}`, one bit per VC.
 
-> REQ/RSP `ready` is advisory, not a same-cycle accept: the sender grants against a `ready` sampled ~2 registrations earlier, and the receiver pushes unconditionally on `valid`, so a real transfer is `valid` alone.
+> REQ/RSP at the model-facing pins use standard held ready/valid. A transfer occurs only with
+> `valid && ready`; the verification wrapper converts that handshake to/from the C++ core's
+> one-cycle ingress/egress strobes. DAT remains credit-controlled.
 
 Inputs:
 
@@ -507,7 +515,7 @@ Inputs:
 | `ctx_i` | 64 | Model handle returned by `cmodel_router_create`. Constant after reset. From tb_top. |
 | `rx_req_valid` | 5 | Bit p: the sender at port p drives one REQ flit this cycle. Bit 0 is the local NI's injection. |
 | `rx_req_flit` | 136 x 5 (unpacked `[LINK_PORTS]`) | REQ flit from port p. Valid only when `rx_req_valid[p]` is high, all zeros otherwise. |
-| `tx_req_ready` | 5 | Bit p: the receiver at port p can take a REQ flit. Advisory (see above). |
+| `tx_req_ready` | 5 | Bit p: the receiver at port p accepts a REQ transfer when this and `tx_req_valid[p]` are high. |
 | `rx_rsp_valid` / `rx_rsp_flit` / `tx_rsp_ready` | 5 / 126 x 5 / 5 | RSP mirror. |
 | `rx_dat_valid` | 5 | Bit p: the sender at port p drives one DAT flit this cycle. |
 | `rx_dat_flit` | 633 x 5 | DAT flit from port p. |
@@ -560,9 +568,9 @@ all three routers.
 | Function | When | Semantics |
 |---|---|---|
 | `cmodel_router_create(name, x_coord, y_coord, mesh_x_dim, mesh_y_dim, dat_num_vc)` | once, from the tb_top `initial` block, after `rst_ni` deassertion | constructs all three routers. Construction is reset: all FIFOs empty, all credits at seed. Returns the 64-bit `ctx` handle. |
-| `cmodel_router_{req,rsp,dat}_set_inputs(ctx, ...)` | posedge, step 1 (one call per network) | samples the current SV wire values (the previous cycle's registered outputs of the peers) into the model input latch. Split per network so no DPI signature marshals more than one flit width |
+| `cmodel_router_{req,rsp,dat}_set_inputs(ctx, ...)` | posedge, step 1 (one call per network) | samples the current SV wire values into the model input latch. For REQ/RSP, the wrapper passes ingress valid only on the wire's `valid && ready` transfer and passes spill-register input capacity as the model's egress ready. DAT is unchanged. Split per network so no DPI signature marshals more than one flit width |
 | `cmodel_router_tick(ctx)` | posedge, step 2 | advances all three routers exactly one cycle |
-| `cmodel_router_{req,rsp,dat}_get_outputs(ctx, ...)` | posedge, step 3 (one call per network) | reads the model output latch. The SV module registers these values nonblocking, so they appear on the output pins one cycle later. |
+| `cmodel_router_{req,rsp,dat}_get_outputs(ctx, ...)` | posedge, step 3 (one call per network) | reads the model output latch. The SV module registers these values nonblocking. REQ/RSP strobes then enter one `spill_register` per port and are held to the RTL-side handshake; DAT remains directly registered. |
 
 Marshalling is port-major, at each network's own word count: flit = 5 (REQ) / 4 (RSP) /
 20 (DAT) 32-bit words per port, DAT credit = one `[DAT_NUM_VC-1:0]` word per port,
@@ -570,10 +578,11 @@ valid and ready = one bit per port in a packed vector.
 
 ### 3.5 Protocol rules
 
-R1 (input rhythm). At most one flit per network per input port per cycle: one on each
-of `rx_req_*`, `rx_rsp_*`, `rx_dat_*` per port, LOCAL included. Back-to-back flits on consecutive cycles are legal
-without limit while credit lasts. Flits of one packet need not be contiguous: gaps of
-any length may separate them (the wormhole lock holds across gaps, rule 2.6.2).
+R1 (input rhythm). At most one flit transfers per network per input port per cycle. REQ/RSP input
+valid and flit may remain asserted across any number of stalled cycles and transfer only with
+ready; DAT valid remains a credit-qualified one-cycle strobe. Back-to-back transfers on consecutive
+cycles are legal. Flits of one packet need not be contiguous: gaps of any length may separate them
+(the wormhole lock holds across gaps, rule 2.6.2).
 
 R2 (idle bus state). When a `valid` bit is low, the corresponding flit bus carries all
 zeros. This holds for the module's own outputs (registered zeros) and for
@@ -585,11 +594,10 @@ registered and change only at the posedge. The verification environment (co-sim
 scoreboard, `link_perf_monitor` assertions, boundary `$fatal` checks) samples at the
 posedge.
 
-R4 (valid behavior). Each `valid` bit is high for exactly 1 cycle per flit, and there is
-no retraction: a driven flit is committed. On DAT a sender may assert valid on VC v
-toward a port only while its credit counter for that (port, VC) is nonzero. On REQ/RSP
-the sender grants against the port's `ready`, sampled two registrations earlier, so
-`ready` never gates the transfer in the same cycle.
+R4 (valid behavior). On REQ/RSP, once an output `valid` bit rises it and its flit remain stable until
+the cycle the matching ready is sampled high; the transfer occurs on that `valid && ready` edge.
+On DAT each valid bit remains a credit-qualified one-cycle strobe, and a sender may assert it on VC
+v only while its credit counter for that (port, VC) is nonzero.
 
 R5 (credit pulse shape, DAT). Every credit signal bit is a single-cycle pulse. At most
 one pulse per (port, VC) per cycle. Each pulse means exactly one freed buffer slot.
@@ -616,11 +624,11 @@ beginning of simulation, before `cmodel_router_create` and before any traffic. W
 is created after reset deassertion). Mid-simulation reset does not occur and is not
 modeled.
 
-R10 (latency definition). Per-hop latency is measured from the posedge at which a flit
-is sampled on an input pin to the posedge at which it is sampled on the corresponding
-output pin (this module's registered output, as seen by the next sampler). At zero
-load (no contention on the granted output, nonzero credit, output FIFO below depth)
-this latency is exactly 3 cycles per hop on DAT and 2 on REQ/RSP (section 2.4).
+R10 (latency definition). Per-hop latency is measured from the posedge of the input transfer to the
+posedge of the corresponding output transfer, with output ready high. At zero load (no contention,
+nonzero DAT credit, output FIFO below depth) the model-facing wrapper latency is exactly 3 cycles
+per hop on DAT and REQ/RSP. The REQ/RSP C++ core remains 2 ticks; the verification-only spill
+register contributes the third wire cycle (section 2.4).
 
 R11 (output uniqueness). At most one flit per output port per network per cycle: each
 bit of `tx_req_valid` / `tx_rsp_valid` / `tx_dat_valid` covers exactly one flit bus.
@@ -673,12 +681,13 @@ of its `dst_id` (section 2.3), recomputed at every hop. Verified by ctest
 `RouterRouteCompute.XyDimensionOrder` and the co-sim scoreboard (a misroute delivers
 data to the wrong NSU). Failure: wrong output port on any flit.
 
-SPEC 4 (zero-load latency). Input-pin sample edge to output-pin sample edge is exactly
-3 cycles on DAT and 2 on REQ/RSP, when the granted output is uncontended, has credit or
-ready, and its output FIFO is below depth. Verified by ctest
-`RouterDatapath.ZeroLoadLatencyIsThreeTicks` and
-`SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`. Failure: the flit appears on
-the output wire earlier or later than that edge.
+SPEC 4 (zero-load latency). Input transfer to output transfer is exactly 3 cycles at the
+model-facing wrapper pins for DAT, REQ, and RSP when the granted output is uncontended, has credit
+or ready, and its output FIFO is below depth. Verified by ctest
+`RouterDatapath.ZeroLoadLatencyIsThreeTicks` for DAT and
+`SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks` for the 2-tick REQ/RSP core, plus wrapper
+elaboration and co-sim for the spill-register cycle. Failure: the flit transfers earlier or later
+than the stated edge.
 
 SPEC 5 (bit transparency). Every flit leaves bit-identical to how it entered — all
 bits, header and payload — except the header `vc_id` field, which the VA stage

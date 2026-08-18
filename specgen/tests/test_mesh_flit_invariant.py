@@ -29,7 +29,7 @@ def constants():
 # ---------------------------------------------------------------------------
 
 def test_default_config_no_errors(packet_spec, constants):
-    """Default MESH_X_DIM=4, MESH_Y_DIM=4, DAT_NUM_VC=1 must produce no ERROR."""
+    """Default MESH_X_DIM=4, MESH_Y_DIM=4, DAT_NUM_VC=2 must produce no ERROR."""
     issues = check_mesh_within_flit(packet_spec, constants)
     errors = [i for i in issues if i.severity == "ERROR"]
     assert not errors, f"unexpected errors: {[i.message for i in errors]}"

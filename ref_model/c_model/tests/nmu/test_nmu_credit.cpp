@@ -32,6 +32,9 @@ namespace {
 NmuConfig make_cfg(uint8_t src_id) {
     NmuConfig cfg{};
     cfg.src_id = src_id;
+    // This file isolates one VC's credit conservation. Keep the topology
+    // explicit now that the generated production default contains two VCs.
+    cfg.dat_num_vc = 1;
     // 16x16 uniform, 4 GB/tile, no rebase: reproduces the retired
     // addr_trans::xy_route mapping so this file's fixed test address (0x100)
     // is unaffected by the migration off xy_route.

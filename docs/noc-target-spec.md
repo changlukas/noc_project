@@ -61,6 +61,10 @@ compute tile per node on a 2D mesh, standard AXI4 at every endpoint.
 
 ## 3. Architecture
 
+The reviewed production top and child-module contract is `rtl/README.md`. It fixes the `nmu`,
+`nsu`, and `router` boundaries, clock/reset and channel ownership, and independent model/RTL
+selection without changing the behavior specified here.
+
 - Each node holds one compute tile and its local memory, so it is both an AXI master and an AXI slave
 - XY routing fixes both the path a multicast takes and the path its merged response is aggregated
   along. The two are different trees: the request spreads from the issuer, the response aggregates

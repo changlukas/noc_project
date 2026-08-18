@@ -79,6 +79,27 @@ Every commit:
 
 Branch: feature work on feature branches; PRs target `main`.
 
+## ASIC PPA Discipline
+
+This is a production ASIC design. Functional and protocol correctness are hard constraints, not
+the complete acceptance criterion. Among correct implementations, prefer the option with better
+performance, area, and utilization.
+
+- For every microarchitecture trade-off, evaluate sustained throughput, latency, critical-path and
+  fanout risk, storage/register cost, and useful buffer/link utilization. Record the comparison in
+  `docs/trade-off.md` before implementation when it changes the architecture.
+- Do not add speculative queues, replicated state, pipeline stages, arbitration layers, or width
+  expansion without identifying their PPA cost and the workload or timing constraint that needs
+  them.
+- Preserve configurability already required by the specs, but do not add flexibility solely for a
+  hypothetical future use. Constant parameters must remain synthesis-friendly.
+- Use existing performance counters and focused stress tests to support throughput and utilization
+  claims. Mark frequency, area, power, or utilization targets `[TBD]` when no approved numeric
+  target or synthesis result exists; never invent a number.
+- DV must cover performance invariants that are part of the specification, such as no avoidable
+  bubbles under available credit and backpressure-free traffic. PPA optimization must never weaken
+  AXI ordering, flow control, deadlock freedom, reset behavior, or checker coverage.
+
 ## Reminders
 
 Never:

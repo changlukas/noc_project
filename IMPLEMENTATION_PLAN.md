@@ -7,7 +7,7 @@ issue IDs and readiness are maintained in the campaign issue graph; this file re
 ## Stage 1: Top-Level Contract
 Goal: Freeze the NMU, NSU, and Router hierarchy, interfaces, clock/reset ownership, canonical RTL parameters, and independent per-block model/RTL DUT selection.
 Success Criteria: The three block contracts are reviewed against their specs and wrappers; NMU, NSU, and Router can each select model or RTL without exposing DPI handles to production RTL; parameter names, defaults, and legal ranges have one canonical source; `codegen.py --check` passes; no placeholder RTL is committed.
-Status: Not Started
+Status: Complete
 
 ## Stage 2: Shared Foundation And DV Plans
 Goal: Integrate and verify the pinned common_cells FIFO/register primitives and approve one verification plan for each major block.

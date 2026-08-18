@@ -1,6 +1,9 @@
 # Design: Network Slave Unit (NSU)
 
-Top module: `nsu_wrap` (`ref_model/top/nsu_wrap.sv`), driving a cycle-accurate C++ model core (`ref_model/c_model/include/nsu/`) through the DPI handle ABI. This document specifies that as-built model and target RTL overlays. Existing co-sim checks the as-built model; target CDC, Router-only VC ownership and asymmetric LOCAL DAT flow control require model alignment before cycle-exact RTL comparison.
+Model top module: `nsu_wrap` (`ref_model/top/nsu_wrap.sv`), driving a cycle-accurate C++ model core (`ref_model/c_model/include/nsu/`) through the DPI handle ABI. This document specifies that as-built model and target RTL overlays. Existing co-sim checks the as-built model; target CDC, Router-only VC ownership and asymmetric LOCAL DAT flow control require model alignment before cycle-exact RTL comparison.
+
+The production top is `nsu`. Its wrapper-facing ports, clock/reset ownership, and reviewed child
+boundaries are frozen in `rtl/README.md`; this document remains authoritative for behavior.
 
 ## 2. Design Description
 
@@ -221,11 +224,11 @@ channels. `noc_types_pkg::noc_credit_t` = {`credit` [`DAT_NUM_VC`-1:0]}; elabora
 | `ctx_i` | 64 | Model handle from `cmodel_nsu_create`. Constant after time 0. |
 | `rx_req_valid_i` / `rx_req_flit_i` | 1 / 136 | From router LOCAL output. Request flit, valid 1 cycle per flit. Flit ignored while `valid` is low. |
 | `rx_req_ready_o` | 1 | To router. Tied constant true: the model's ingress queue is unbounded (`nsu_wrap.hpp`), so REQ backpressure is not exercised at this face. |
-| `tx_rsp_valid_o` / `tx_rsp_flit_o` | 1 / 126 | To router LOCAL input. Response flit, `valid` high exactly 1 cycle per flit, at most 1 flit per cycle, back-to-back cycles legal. `flit` = 126'h0 while `valid` is low. |
-| `tx_rsp_ready_i` | 1 | From router. Advisory, sampled two registrations late; the receiver pushes unconditionally on `valid`. |
+| `tx_rsp_valid_o` / `tx_rsp_flit_o` | 1 / 126 | To router LOCAL input. The model-facing wrapper holds `valid` and flit until `tx_rsp_ready_i` is sampled high. At most one flit transfers per cycle; back-to-back transfers are legal. `flit` = 126'h0 while `valid` is low. |
+| `tx_rsp_ready_i` | 1 | From router. Completes an RSP transfer together with `tx_rsp_valid_o`. |
 | `rx_dat_valid_i` / `rx_dat_flit_i` | 1 / 633 | From router LOCAL output. `DataAw` / `DataW` flits. No ready wire, flow control is pure credit: the router sends only while it holds sender credit, the NSU accepts every valid flit. |
 | `rx_dat_crdvalid_o` | DAT_NUM_VC | To router. Consumer credit pulse vector: bit v pulses for exactly 1 cycle when the depacketizer consumed one DAT request flit whose header `vc_id` = v. At most 1 pulse per VC per cycle. Replenishes the router LOCAL sender counter. |
-| `tx_dat_valid_o` / `tx_dat_flit_o` | 1 / 633 | To router LOCAL input. `DataR` flits, same valid rules as `tx_rsp_*`. |
+| `tx_dat_valid_o` / `tx_dat_flit_o` | 1 / 633 | To router LOCAL input. `DataR` flits; `valid` is a one-cycle credit-qualified strobe and does not use the RSP ready/valid adaptation. |
 | `tx_dat_crdvalid_i` | DAT_NUM_VC | From router. Credit pulse vector: bit v pulses when the router drained one NSU DAT response flit from VC v. Replenishes the NSU per-VC sender counter (seed `NOC_ROUTER_VC_DEPTH` = 8). |
 
 The table above is the current C++/DPI interface. Target RTL removes `rx_dat_crdvalid_o` and adds
@@ -290,6 +293,11 @@ No `*user` and no `*region` signals cross this face in either direction.
 
 Marshalling: each flit is little-endian `svBitVecVal` words at its own network's count (REQ 136 b = 5 words, RSP 126 b = 4, DAT 633 b = 20), 48-bit addresses occupy 2 words, 512-bit data is 16 words, the credit vector is 1 word with bit v = VC v. Handles are validated per call, a wrong-type or dead handle latches a DPI error polled centrally by `tb_top`.
 
+On model-facing RSP egress only, the registered one-cycle C++ strobe feeds the approved
+`spill_register`. Its input capacity is returned to the model, and its output holds the complete
+flit until the RTL-side `valid && ready` handshake. DAT bypasses this verification adaptation and
+remains credit-controlled.
+
 ### 3.4 Parameters
 
 Single-sourced in `specgen/source/constants.yaml`, generated into `ni_params.h` / `ni_params_pkg.sv`, drift-gated at build by `codegen.py --check`.
@@ -305,12 +313,11 @@ at simulation startup. Synthesizable RTL receives the same fields from generated
 | `NSU_META_BUFFER_MAX_OUTSTANDING` | 32 | 1 to 256 | MetaBuffer shared pool, per direction |
 | `NSU_META_BUFFER_MAX_UNIQUE_IDS` | 1 | {1, 8} only, constructor throws otherwise | id remap in Depacketize |
 | `NSU_ARBITER_FIFO_DEPTH` [current model] | 4 | 1 to 64 | wormhole and VC-arbiter pending depths; not target NI VC storage |
-| `NOC_DAT_NUM_VC` | 1 | 1 to 8 | Current C++ model DAT VC count and credit vector widths |
-| `DAT_NUM_VC` [target RTL] | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector widths |
-| `NOC_DAT_VC_MODE` [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | `DataR` eligible mask; system-wide with DAT router VA |
+| `NOC_DAT_NUM_VC` | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector widths; wrapper-local `DAT_NUM_VC` is an alias |
+| `NOC_DAT_VC_MODE` | SHARED (0) | {SHARED (0), READ_WRITE_SPLIT (1)} | Target `DataR` eligible mask; system-wide with DAT router VA; current model implements SHARED only |
 | `NOC_ROUTER_VC_DEPTH` | 8 | 1 to 16 | Router LOCAL input VC FIFO depth and NSU DAT response sender-credit seed |
-| `AXI_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | common AW/W/AR/B/R dual-clock FIFO depth |
-| `NOC_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
+| `AXI_FIFO_DEPTH` | 8 | {4,8,16} | common AW/W/AR/B/R dual-clock FIFO depth |
+| `NOC_FIFO_DEPTH` | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
 | `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 136 / 126 / 633 | target `133 + AXI_ID_WIDTH` / `123 + AXI_ID_WIDTH` / 633 | per-network flit containers and DPI marshalling |
 | `AXI_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 48 / 512 | target ID 1..8, current model locked at 3 / 1..64 / {32,64,128,256,512,1024} | NoC-carried ID, beat structs and DPI |
 | create-time `src_id` | 0 | 8 bit | stamped into every response flit `src_id` |
@@ -321,16 +328,16 @@ The request ingress stage is a 1-entry register per channel plus the single pend
 
 1. **Input rhythm.** Each request face delivers at most one flit per cycle, each valid for exactly 1 cycle. Within one packet stream the AW flit precedes its W flits and the N W flits of an `awlen` = N-1 burst arrive in beat order (gaps allowed, example: AW at cycle 0, W0 at cycle 1, W1 at cycle 5 is legal). AR packets are single flits. Flits of different packets may interleave only at packet granularity per the fabric wormhole rules.
 2. **Input idle state.** While a face's `valid` is low its `flit` may carry any value and is ignored.
-3. **Sampling edge.** All inputs are sampled at the positive edge of `clk_i` by the 3-call DPI sequence `set_inputs`, `tick`, `get_outputs`, in that order, every non-reset posedge. Outputs are registered at the same posedge and visible from the next cycle. The verification pattern checks outputs at the positive edge.
-4. **Output valid behavior.** `awvalid`, `wvalid`, `arvalid`, once high, stay high with stable fields until the corresponding ready is sampled high (IHI 0022, A3.2.1). `tx_rsp_valid_o` and `tx_dat_valid_o` are each high exactly 1 cycle per flit, at most 1 flit per cycle per face, and may be high in consecutive cycles for distinct flits.
+3. **Sampling edge.** All inputs are sampled at the positive edge of `clk_i` by the 3-call DPI sequence `set_inputs`, `tick`, `get_outputs`, in that order, every non-reset posedge. Outputs enter the wrap register at the same posedge and are visible from the next cycle; RSP then crosses the model-facing spill register. The verification pattern checks outputs at the positive edge.
+4. **Output valid behavior.** `awvalid`, `wvalid`, `arvalid`, once high, stay high with stable fields until the corresponding ready is sampled high (IHI 0022, A3.2.1). `tx_rsp_valid_o` follows the same held-ready/valid rule and transfers only with `tx_rsp_ready_i`; `tx_dat_valid_o` remains a one-cycle credit-qualified strobe. At most one flit per cycle transfers on either face, and distinct transfers may occur in consecutive cycles.
 5. **Output idle value.** Every output field whose valid is low is 0. Example: with `awvalid` = 0, `awaddr` = 48'h0. `tx_rsp_flit_o` = 126'h0 while `tx_rsp_valid_o` = 0, and `tx_dat_flit_o` = 633'h0 while `tx_dat_valid_o` = 0. `bready`/`rready` are policy levels (rule 10) and carry meaning while low.
 6. **Reset.** `rst_ni` is synchronous active-low, asserted only once at the beginning of simulation. All `nsu_wrap` output registers clear to 0 during reset. Model state is initialized by `cmodel_nsu_create` at time 0. There is no mid-run reset.
 7. **Gap and rate (current model).** No minimum gap anywhere: request flits may arrive every cycle, response flits may leave every cycle, subject only to credit. Each modeled credit pulse is exactly 1 cycle wide, at most 1 per VC per cycle on each credit port. Target request ingress is instead subject to ready/valid.
-8. **Latency.** Request: from the posedge at which an AW (or AR) flit is sampled on its ingress face to the posedge at which the slave first samples `awvalid` (`arvalid`) high is exactly 2 cycles when uncontended (empty queues, MetaBuffer pool not full, slave ready). Response: from the posedge at which the B/R wire handshake is sampled to the posedge at which the router first samples the egress face's `valid` high is exactly 4 cycles when uncontended (empty queues, sender credit available). Under contention the latency grows with backpressure and has no bound in this spec.
+8. **Latency.** Request: from the posedge at which an AW (or AR) flit is sampled on its ingress face to the posedge at which the slave first samples `awvalid` (`arvalid`) high is exactly 2 cycles when uncontended (empty queues, MetaBuffer pool not full, slave ready). Response: from the posedge at which the B/R wire handshake is sampled to the posedge at which the router first samples the model-facing RSP egress `valid` high is exactly 5 cycles when uncontended (empty queues, egress ready). The fifth cycle is the verification-only spill register. DAT response latency remains 4 cycles when sender credit is available. Under contention the latency grows with backpressure and has no bound in this spec.
 9. **W presentation budget.** `wvalid` never rises for a beat whose owning AW handshake has not completed. The budget counter `w_pop_budget_` (model type uint32) increments by `awlen` + 1 at each AW handshake and decrements by 1 per W beat presented. Example: AW with `awlen` = 8'd1 handshakes at cycle 2, budget 0 to 2, W beat 0 may be presented from cycle 3, never earlier.
 10. **Context-gated ready pre-assert.** `bready` = (`outstanding_w_` > 0) and B FIFO has space. `rready` = (`expected_r_beats_` > 0) and R FIFO has space. Both are asserted without waiting for valid. `outstanding_w_` (uint32) increments when a `wlast` beat completes its W handshake and decrements at each B wire handshake. `expected_r_beats_` (uint32) increments by `arlen` + 1 at each AR handshake and decrements at each R beat wire handshake. Example: after one AR with `arlen` = 8'd3 handshakes, `expected_r_beats_` = 4 and `rready` stays high until 4 R beats have been accepted (given FIFO space). A B/R beat is accepted into the model only on a true wire handshake, valid together with the ready level the NSU drove in that cycle.
 11. **Request credit (current model only).** On the DAT face, one `rx_dat_crdvalid_o` pulse is returned for each flit the depacketizer ingress consumes, on the consumed flit's header `vc_id`, at most 1 per VC per cycle. Uncontended, the pulse for a flit sampled at posedge T is on the wire during the next cycle. A stalled ingress returns no pulses, which is the current-model request-side backpressure mechanism. Target RTL supersedes this rule with `rx_dat_ready_o` as described in Section 3.1.
-12. **Response credit.** On the DAT face the NSU holds one sender credit counter per VC, seeded to `NOC_ROUTER_VC_DEPTH` = 8 at time 0. Sending a flit on VC v decrements counter v, a `tx_dat_crdvalid_i` pulse on bit v increments it. A flit is sent only while its counter is nonzero. Invariant: counter + flits in flight toward the router on that VC = 8 at all times. RSP has no counter: it grants against the advisory `tx_rsp_ready_i`.
+12. **Response flow control.** On the DAT face the NSU holds one sender credit counter per VC, seeded to `NOC_ROUTER_VC_DEPTH` = 8 at time 0. Sending a flit on VC v decrements counter v, a `tx_dat_crdvalid_i` pulse on bit v increments it. A flit is sent only while its counter is nonzero. Invariant: counter + flits in flight toward the router on that VC = 8 at all times. RSP has no counter: its model-facing wrapper accepts a C++ strobe only with spill capacity, then holds it until `tx_rsp_valid_o && tx_rsp_ready_i`.
 13. **Address handling.** The NSU never subtracts a SAM region base. A unicast AW/AR address passes unchanged. For a multicast AW at a tile endpoint, the AXI class selects the corresponding Config or Memory coordinate field and only that field is replaced with this NSU's coordinate. The two fields may occupy different address bits. An endpoint without a declared coordinate field leaves every address unchanged.
 
 ### 3.6 Input guarantees
@@ -370,7 +377,7 @@ Each item names its verification and failure condition. ctest paths are under `r
 14. DAT credit conformance per rules 11 and 12, including the seed-8 sender invariant. Verify: co-sim link monitors and the model abort on downstream credit lies (G8). Fail: counter divergence, pulse without a consumed/drained flit, or flit sent without credit.
 15. AXI master face conformance: held-valid on AW/W/AR (rule 4), W budget (rule 9), context-gated `bready`/`rready` with handshake-qualified acceptance (rule 10). Verify: co-sim scoreboard (a violation surfaces as a lost or duplicated beat and a readback mismatch or hang). Fail: readback mismatch, hang, or a valid deasserted before ready.
 16. Reset behavior per rule 6: every output 0 in the first cycle after `rst_ni` deasserts, no X. Verify: co-sim waveform at simulation start. Fail: any nonzero or unknown output before the first request completes the pipeline.
-17. Uncontended latency exactly 2 cycles (request, flit to AXI valid) and exactly 4 cycles (response, handshake to the egress face's `valid`) per rule 8, with the zero-cycle wormhole-to-VC hop of 2.6. Verify: co-sim waveform inspection of an isolated transaction. Fail: valid earlier or later than the specified edge in the uncontended case.
+17. Uncontended latency exactly 2 cycles (request, flit to AXI valid), exactly 5 cycles (RSP response handshake to model-facing egress valid), and exactly 4 cycles for credit-controlled DAT response per rule 8. The RSP count includes the verification-only spill register after the existing DPI output register; production RTL does not include this adapter. Verify: co-sim waveform inspection of an isolated transaction. Fail: valid earlier or later than the specified edge in the uncontended case.
 18. All parameters of 3.4 are consumed from the generated headers, never redefined locally. Verify: `codegen.py --check` build gate. Fail: drift gate error at build.
 19. Address handling follows rule 13. Verify: `nsu/test_nsu_depacketize.cpp` `RebasesAReplicaAddressOntoThisNode`, `RebaseIsTheIdentityForAUnicastAlreadyNamingThisNode`, and `UndeclaredCoordsLeaveTheAddressAlone`. Fail: a unicast or peripheral address changes, a multicast replica keeps another node's coordinate, or any non-coordinate bit changes.
 20. NoC-to-AXI write assignment follows the target integration overlay: Narrow and Data AW compete by work-conserving round robin, every accepted AW appends its class and burst length to the W-order FIFO, and W cannot bypass the FIFO head class through WLAST. The current C++ structure implements this policy; direct simultaneous-class round-robin and blocked-head W coverage is `[TBD]`. Fail: one ready class idles while the other is absent, one class starves while both remain ready, or a W beat is associated with a later AW.
@@ -420,13 +427,13 @@ axi wlast          ____________________┌───┐__________________________
 axi bready         _________________________┌────────┐______________________
 axi bvalid (slave) ______________________________┌───┐______________________
 axi bid   (slave)  ______________________________  7 _______________________
-tx_rsp_valid_o     ______________________________________________________┌───┐
-tx_rsp_flit_o      ______________________________________________________ B__
+tx_rsp_valid_o     __________________________________________________________┌───┐
+tx_rsp_flit_o      __________________________________________________________ B__
                         │         │                   │                   │
    AW flit cycle 0 ─────┘         │                   │                   │
    awvalid cycle 2 = flit + 2 ────┘ (rule 8)          │                   │
    B wire handshake cycle 6 ──────────────────────────┘                   │
-   tx_rsp_valid_o cycle 10 = handshake + 4 ───────────────────────────────┘
+   tx_rsp_valid_o cycle 11 = handshake + 5 ───────────────────────────────────┘
 ```
 
 Annotations:
@@ -435,4 +442,4 @@ Annotations:
 - `awvalid` in cycle 2, exactly 2 cycles after the AW flit (rule 8). With `awready` high it is a 1-cycle presentation.
 - `wvalid` first rises in cycle 3, one cycle after the AW handshake in cycle 2, never earlier: the W budget went 0 to 2 at the AW handshake (rule 9). W0 in cycle 3, W1 with `wlast` in cycle 4, back to back.
 - `bready` rises in cycle 5, after the `wlast` handshake made `outstanding_w_` = 1, and without waiting for `bvalid` (rule 10). It falls in cycle 7 after the B handshake in cycle 6 returned `outstanding_w_` to 0.
-- The B wire handshake in cycle 6 (bvalid and bready both high) starts the response pipeline: `b_q_` end of 6, Packetize S1 end of 7, wormhole pending end of 8, VC pending and NoC output queue end of 9 (zero-cycle hop, 2.6), `tx_rsp_valid_o` in cycle 10. The flit carries `bid` = 3'h5, `dst_id` = 8'h12, header `flit_tail` = 1, VC 0. RSP has no credit counter, so the B leaves as soon as the egress queue drains; a `DataR` on the same path would instead decrement the DAT VC 0 counter from 8 to 7 and be replenished by a later `tx_dat_crdvalid_i[0]` pulse.
+- The B wire handshake in cycle 6 (bvalid and bready both high) starts the response pipeline: `b_q_` end of 6, Packetize S1 end of 7, wormhole pending end of 8, VC pending and NoC output queue end of 9 (zero-cycle hop, 2.6), DPI output register in cycle 10, and model-facing RSP spill output in cycle 11. The flit carries `bid` = 3'h5, `dst_id` = 8'h12, header `flit_tail` = 1, VC 0. RSP has no credit counter and remains valid until ready; a `DataR` on the same model path bypasses the RSP spill, decrements the DAT VC 0 counter from 8 to 7, and is replenished by a later `tx_dat_crdvalid_i[0]` pulse.

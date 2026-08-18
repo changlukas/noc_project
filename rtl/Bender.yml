@@ -1,0 +1,9 @@
+# Production RTL dependencies. Exact revisions keep builds reproducible without
+# vendoring or rewriting third-party primitive RTL.
+package:
+  name: noc_rtl
+
+dependencies:
+  common_cells:
+    git: https://github.com/pulp-platform/common_cells.git
+    rev: 9ca8a7655f741e7dd5736669a20a301325194c28

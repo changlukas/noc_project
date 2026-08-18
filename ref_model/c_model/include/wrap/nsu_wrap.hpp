@@ -70,7 +70,8 @@ class NsuWrap {
     // can rewrite an arriving address to name this node (nsu::Depacketize's
     // rebase_). Empty means "no address map", and the NSU forwards addresses
     // untouched, which is what the pure-C++ fixtures want.
-    void init(uint8_t src_id = 0, uint8_t port_id = 0, uint8_t dat_num_vc = 1,
+    void init(uint8_t src_id = 0, uint8_t port_id = 0,
+              uint8_t dat_num_vc = ::ni::NOC_DAT_NUM_VC,
               std::size_t queue_depth = ni::NSU_QUEUE_DEPTH,
               std::size_t max_unique_ids = ni::NSU_META_BUFFER_MAX_UNIQUE_IDS,
               std::size_t max_outstanding = ni::NSU_META_BUFFER_MAX_OUTSTANDING,
@@ -341,7 +342,7 @@ class NsuWrap {
     uint32_t w_pop_budget() const { return w_pop_budget_; }
 
   private:
-    uint8_t dat_num_vc_ = 1;
+    uint8_t dat_num_vc_ = ::ni::NOC_DAT_NUM_VC;
     std::unique_ptr<nsu::NsuStandalone> nsu_;
     NsuInputs in_{};
     NsuOutputs out_{};

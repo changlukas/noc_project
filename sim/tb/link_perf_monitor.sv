@@ -4,16 +4,9 @@
 //     belongs to), so every valid flit is a real transfer; a stall cycle is
 //     "not moving, but the credit VC buffer is full" (credit[vc_id]==0).
 //     Credit is a single-cycle pulse per VC.
-//   "ready_valid" (REQ/RSP): ready is advisory, not a same-cycle accept --
-//     the sender grants against a ready sampled 2 registrations earlier
-//     (SimpleRouter::ready() deasserts ready_slack flits before its FIFO is
-//     physically full to cover that lag), and the receiver pushes
-//     unconditionally on valid, never re-checking its own current-cycle
-//     ready. So a transfer is valid alone, like the credit flow; a stall
-//     cycle is "idle, and downstream's advisory ready is still down"
-//     (!valid && !ready), mirroring the credit branch's "idle, but the
-//     credit buffer is full." No credit array (REQ/RSP are single-VC,
-//     ready/valid per spec §4.3).
+//   "ready_valid" (REQ/RSP): a transfer is valid && ready. The model-facing
+//     source wrapper holds valid and payload through backpressure; a stall is
+//     valid && !ready. No credit array (REQ/RSP are single-VC).
 
 `ifndef LINK_PERF_MONITOR_SV
 `define LINK_PERF_MONITOR_SV
@@ -56,11 +49,8 @@ module link_perf_monitor #(
             automatic longint next_flit;
             automatic longint next_stall;
             if (FLOW == "ready_valid") begin
-                // ready is advisory (see header comment): every valid flit
-                // already transferred, so count on valid alone. A stall
-                // cycle is idle with downstream still not ready.
-                next_flit  = flit_count + (valid ? 1 : 0);
-                next_stall = stall_cyc  + ((!valid && !ready) ? 1 : 0);
+                next_flit  = flit_count + ((valid && ready) ? 1 : 0);
+                next_stall = stall_cyc  + ((valid && !ready) ? 1 : 0);
             end else begin
                 // Credit reserves the slot before valid asserts, so every
                 // valid flit is a real transfer; the stall is "idle, but the
@@ -81,11 +71,8 @@ module link_perf_monitor #(
         end
     end
 
-    // Credit-flow-only assertions: no analogous protocol violation exists on
-    // the ready_valid side. The sender only ever presents valid after its own
-    // grant against a (stale, advisory) ready, and the receiver pushes
-    // unconditionally on valid -- there is no separate credit pool that can
-    // desync, and no same-cycle ready check to violate.
+    // Credit-flow-only assertions: the ready_valid side is checked by the
+    // held-valid assertions in the model-facing wrappers instead.
     if (FLOW != "ready_valid") begin : g_credit_asserts
         // Per-VC credit must never underflow: valid && credit[vc_id]==0 means the
         // upstream sender violated the credit protocol (or a mis-wire). Assert loudly.

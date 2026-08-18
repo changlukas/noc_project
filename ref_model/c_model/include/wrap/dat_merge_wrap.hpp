@@ -225,7 +225,7 @@ class DatMergeWrap {
     uint8_t num_vc() const { return dat_num_vc_; }
 
   private:
-    uint8_t dat_num_vc_ = 1;
+    uint8_t dat_num_vc_ = ::ni::NOC_DAT_NUM_VC;
     detail::DatMergeDownstream term_;
     std::unique_ptr<router::WormholeArbiter<detail::DatMergeDownstream>> wormhole_;
     DatMergeInputs in_{};

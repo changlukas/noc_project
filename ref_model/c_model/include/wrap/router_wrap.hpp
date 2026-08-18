@@ -51,7 +51,7 @@ namespace ni::cmodel::wrap {
 class RouterWrap {
   public:
     void init(uint8_t x_coord, uint8_t y_coord = 0, uint8_t mesh_x_dim = 2, uint8_t mesh_y_dim = 1,
-              uint8_t dat_num_vc = 1) {
+              uint8_t dat_num_vc = ::ni::NOC_DAT_NUM_VC) {
         dat_num_vc_ = dat_num_vc;
 
         router::SimpleRouterConfig sc;
@@ -203,7 +203,7 @@ class RouterWrap {
     }
 
   private:
-    uint8_t dat_num_vc_ = 1;
+    uint8_t dat_num_vc_ = ::ni::NOC_DAT_NUM_VC;
 
     std::unique_ptr<router::SimpleRouter> req_router_, rsp_router_;
     std::array<router::SimpleRouterWireLink, ROUTER_LINK_PORTS> req_link_, rsp_link_;

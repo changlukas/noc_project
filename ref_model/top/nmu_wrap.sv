@@ -166,6 +166,8 @@ module nmu_wrap #(
 
     bit                    tx_req_valid_q;
     bit [REQ_FLIT_WIDTH-1:0] tx_req_flit_q;
+    logic                  tx_req_model_ready;
+    logic                  tx_req_spill_ready;
     bit                    rx_rsp_ready_q;
     bit                    tx_dat_valid_q;
     bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q;
@@ -227,7 +229,7 @@ module nmu_wrap #(
                 axi_req_i.arqos,
                 axi_req_i.rready,
                 // REQ egress ready, RSP ingress, DAT both directions
-                tx_req_ready_i,
+                tx_req_model_ready,
                 rx_rsp_valid_i,
                 rx_rsp_flit_i,
                 rx_dat_valid_i,
@@ -308,8 +310,31 @@ module nmu_wrap #(
     assign axi_rsp_o.rresp   = rresp_q;
     assign axi_rsp_o.rlast   = rlast_q;
 
-    assign tx_req_valid_o    = tx_req_valid_q;
-    assign tx_req_flit_o     = tx_req_flit_q;
+    // The C++ model emits a one-cycle REQ strobe after sampling ready.  The
+    // existing DPI output register is one cycle ahead of the spill register,
+    // so stop another model pop while that register carries an unaccepted
+    // pulse.  The spill register then owns the RTL-facing held-valid contract.
+    assign tx_req_model_ready = tx_req_spill_ready && !tx_req_valid_q;
+
+    spill_register #(
+        .T(logic [REQ_FLIT_WIDTH-1:0]),
+        .Bypass(1'b0)
+    ) i_tx_req_spill_register (
+        .clk_i,
+        .rst_ni,
+        .valid_i(tx_req_valid_q),
+        .ready_o(tx_req_spill_ready),
+        .data_i(tx_req_flit_q),
+        .valid_o(tx_req_valid_o),
+        .ready_i(tx_req_ready_i),
+        .data_o(tx_req_flit_o)
+    );
+
+    assert property (@(posedge clk_i) disable iff (!rst_ni)
+        tx_req_valid_o && !tx_req_ready_i
+        |=> tx_req_valid_o && $stable(tx_req_flit_o))
+        else $error("nmu_wrap: REQ changed before valid/ready handshake");
+
     assign rx_rsp_ready_o    = rx_rsp_ready_q;
     assign tx_dat_valid_o    = tx_dat_valid_q;
     assign tx_dat_flit_o     = tx_dat_flit_q;

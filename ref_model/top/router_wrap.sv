@@ -157,9 +157,13 @@ module router_wrap #(
 
     bit [LINK_PORTS-1:0]     tx_req_valid_q;
     logic [REQ_FLIT_WIDTH-1:0] tx_req_flit_q [LINK_PORTS];
+    logic [LINK_PORTS-1:0]     tx_req_model_ready;
+    logic [LINK_PORTS-1:0]     tx_req_spill_ready;
     bit [LINK_PORTS-1:0]     rx_req_ready_q;
     bit [LINK_PORTS-1:0]     tx_rsp_valid_q;
     logic [RSP_FLIT_WIDTH-1:0] tx_rsp_flit_q [LINK_PORTS];
+    logic [LINK_PORTS-1:0]     tx_rsp_model_ready;
+    logic [LINK_PORTS-1:0]     tx_rsp_spill_ready;
     bit [LINK_PORTS-1:0]     rx_rsp_ready_q;
     bit [LINK_PORTS-1:0]     tx_dat_valid_q;
     logic [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q [LINK_PORTS];
@@ -202,8 +206,12 @@ module router_wrap #(
                     b_rx_dat_flit[p]     = rx_dat_flit[p];
                     b_tx_dat_crdvalid[p] = tx_dat_crdvalid[p];
                 end
-                cmodel_router_req_set_inputs(ctx_i, rx_req_valid, b_rx_req_flit, tx_req_ready);
-                cmodel_router_rsp_set_inputs(ctx_i, rx_rsp_valid, b_rx_rsp_flit, tx_rsp_ready);
+                cmodel_router_req_set_inputs(ctx_i, rx_req_valid & rx_req_ready_q,
+                                             b_rx_req_flit,
+                                             tx_req_model_ready);
+                cmodel_router_rsp_set_inputs(ctx_i, rx_rsp_valid & rx_rsp_ready_q,
+                                             b_rx_rsp_flit,
+                                             tx_rsp_model_ready);
                 cmodel_router_dat_set_inputs(ctx_i, rx_dat_valid, b_rx_dat_flit, b_tx_dat_crdvalid);
             end
 
@@ -249,13 +257,60 @@ module router_wrap #(
     // Drive outputs from registered state
     // -------------------------------------------------------------------------
 
-    assign tx_req_valid    = tx_req_valid_q;
-    assign tx_req_flit     = tx_req_flit_q;
     assign rx_req_ready    = rx_req_ready_q;
 
-    assign tx_rsp_valid    = tx_rsp_valid_q;
-    assign tx_rsp_flit     = tx_rsp_flit_q;
     assign rx_rsp_ready    = rx_rsp_ready_q;
+
+    for (genvar p = 0; p < LINK_PORTS; p++) begin : g_model_egress_spill
+        logic [REQ_FLIT_WIDTH-1:0] tx_req_flit_monitor;
+        logic [RSP_FLIT_WIDTH-1:0] tx_rsp_flit_monitor;
+
+        // Each C++ router output is a one-cycle strobe.  Stop another pop while
+        // its DPI staging register is pending, then let the approved primitive
+        // hold valid and payload through arbitrary RTL-side backpressure.
+        assign tx_req_model_ready[p] = tx_req_spill_ready[p] && !tx_req_valid_q[p];
+        assign tx_rsp_model_ready[p] = tx_rsp_spill_ready[p] && !tx_rsp_valid_q[p];
+        assign tx_req_flit_monitor = tx_req_flit[p];
+        assign tx_rsp_flit_monitor = tx_rsp_flit[p];
+
+        spill_register #(
+            .T(logic [REQ_FLIT_WIDTH-1:0]),
+            .Bypass(1'b0)
+        ) i_tx_req_spill_register (
+            .clk_i,
+            .rst_ni,
+            .valid_i(tx_req_valid_q[p]),
+            .ready_o(tx_req_spill_ready[p]),
+            .data_i(tx_req_flit_q[p]),
+            .valid_o(tx_req_valid[p]),
+            .ready_i(tx_req_ready[p]),
+            .data_o(tx_req_flit[p])
+        );
+
+        spill_register #(
+            .T(logic [RSP_FLIT_WIDTH-1:0]),
+            .Bypass(1'b0)
+        ) i_tx_rsp_spill_register (
+            .clk_i,
+            .rst_ni,
+            .valid_i(tx_rsp_valid_q[p]),
+            .ready_o(tx_rsp_spill_ready[p]),
+            .data_i(tx_rsp_flit_q[p]),
+            .valid_o(tx_rsp_valid[p]),
+            .ready_i(tx_rsp_ready[p]),
+            .data_o(tx_rsp_flit[p])
+        );
+
+        assert property (@(posedge clk_i) disable iff (!rst_ni)
+            tx_req_valid[p] && !tx_req_ready[p]
+            |=> tx_req_valid[p] && $stable(tx_req_flit_monitor))
+            else $error("router_wrap: REQ port %0d changed before handshake", p);
+
+        assert property (@(posedge clk_i) disable iff (!rst_ni)
+            tx_rsp_valid[p] && !tx_rsp_ready[p]
+            |=> tx_rsp_valid[p] && $stable(tx_rsp_flit_monitor))
+            else $error("router_wrap: RSP port %0d changed before handshake", p);
+    end
 
     assign tx_dat_valid    = tx_dat_valid_q;
     assign tx_dat_flit     = tx_dat_flit_q;

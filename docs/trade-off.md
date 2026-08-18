@@ -425,6 +425,45 @@ requirement. Extending QoS to REQ/RSP is a separate architecture decision.
 
 Direct `AxQOS`-to-`vc_id` mapping is rejected for this extension. Default `AxQOS = 0` traffic would
 collapse onto VC0 and waste the remaining VCs. `READ_WRITE_SPLIT` partitions by AXI direction, not
-QoS, and does not change this decision. The current C++ model's `DAT_NUM_VC = 1` default still
-differs from the approved target default of 2; that parameter and mode alignment is independent of
-QoS.
+QoS, and does not change this decision. The C++ model and generated wrappers now take the approved
+`NOC_DAT_NUM_VC = 2` default; model implementation of the non-default split mode remains separate
+from QoS.
+
+## Production shared primitive policy
+
+Production RTL obtains synchronous FIFO, asynchronous FIFO, and reusable register-slice storage
+from the exact external revision in `rtl/Bender.yml`; source and license evidence is recorded only
+in the Provenance section of `docs/verification-environment.md`. Project adapters may translate
+types and handshakes but may not reproduce storage arrays, pointers, CDC synchronizers, or generic
+register-slice state. A custom primitive is rejected unless a concrete library gap and replacement
+semantics are approved in this file before implementation. Block-specific architectural state is
+outside this restriction.
+
+For register slices, implementation starts by comparing the reference-only source behavior and
+tests, then maps the required semantics onto the production-approved primitive. Interface-specific
+`*_REG_TYPE` parameters use 0 for bypass, 1 for a simple register, and 2 for a skid buffer. Each
+parameter keeps its separately approved default; this rule does not introduce a global default or
+permit reference-only source in the production build.
+
+## Model-facing REQ/RSP held-valid adaptation
+
+REQ and RSP retain standard held ready/valid semantics: a transfer occurs only on
+`valid && ready`, and the source keeps valid plus the complete flit stable while stalled. The C++
+model emits one-cycle pop strobes, so the verification-only NMU REQ, NSU RSP, and Router REQ/RSP
+egresses capture those strobes with the approved `common_cells` `spill_register`. The existing DPI
+output register is treated as a pending input stage: another model pop is blocked until that stage
+has entered the spill register. Model-facing Router ingress converts each wire handshake back to
+one C++ injection pulse. DAT does not enter this path and remains credit-controlled.
+
+This follows the upstream stream-cut precedent, which instantiates `spill_register` per elastic
+channel rather than changing ready/valid into a pulse protocol
+([`floo_cut.sv`](https://github.com/pulp-platform/FlooNoC/blob/cb7b2ba3fd4b7eac340a4117ffba05c2a9757699/hw/floo_cut.sv#L43-L69)).
+A standalone flow-control normalizer and a project-local FIFO are rejected. The adaptation stays
+in `ref_model/top/*_wrap.sv`; no production module under `rtl/` contains it.
+
+Pros: stalled flits cannot be dropped or changed; randomized ready stalls remain meaningful; the
+storage and handshake implementation comes from the pinned approved primitive; REQ/RSP wire
+semantics match production RTL without changing the C++ cores. Cons: the model-facing REQ/RSP path
+adds one wire cycle, the pending DPI register can introduce an input bubble, and model-to-model
+Router composition must handshake-qualify ingress before recreating the C++ pulse. These are
+verification timing costs, not production microarchitecture.

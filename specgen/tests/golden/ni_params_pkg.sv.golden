@@ -11,14 +11,19 @@ package ni_params_pkg;
   localparam int unsigned AXI_ADDR_WIDTH_DFLT         = 48;
   localparam int unsigned AXI_DATA_WIDTH_DFLT         = 512;
   localparam int unsigned AXI_AWUSER_WIDTH_DFLT       = 58;
+  localparam int unsigned AXI_FIFO_DEPTH_DFLT         = 8;
 
   // NoC parameter defaults
-  localparam int unsigned NOC_DAT_NUM_VC_DFLT               = 1;
+  localparam int unsigned NOC_DAT_VC_MODE_SHARED            = 0;
+  localparam int unsigned NOC_DAT_VC_MODE_READ_WRITE_SPLIT  = 1;
+  localparam int unsigned NOC_DAT_VC_MODE_DFLT              = 0;
+  localparam int unsigned NOC_DAT_NUM_VC_DFLT               = 2;
   localparam int unsigned NOC_REQ_NUM_VC_DFLT               = 1;
   localparam int unsigned NOC_RSP_NUM_VC_DFLT               = 1;
   localparam int unsigned NOC_REQ_FLIT_WIDTH_DFLT           = 136;
   localparam int unsigned NOC_RSP_FLIT_WIDTH_DFLT           = 126;
   localparam int unsigned NOC_DAT_FLIT_WIDTH_DFLT           = 633;
+  localparam int unsigned NOC_FIFO_DEPTH_DFLT               = 8;
   localparam int unsigned NOC_ROUTER_VC_DEPTH_DFLT          = 8;
   localparam int unsigned NOC_ROUTER_OUTPUT_FIFO_DEPTH_DFLT = 2;
   localparam int unsigned NOC_MESH_X_DIM_DFLT               = 4;
