@@ -1,0 +1,11 @@
+{
+  "name": "noc-project-tools",
+  "private": true,
+  "scripts": {
+    "sandcastle:smoke": "tsx .sandcastle/noc-runner.mts"
+  },
+  "devDependencies": {
+    "@ai-hero/sandcastle": "0.12.0",
+    "tsx": "4.23.12"
+  }
+}

@@ -1,20 +1,24 @@
 # Design: Network Master Unit (NMU)
 
-The NMU is the master-side network interface of the NoC. It sits between an external AXI4 master and the router mesh: it converts AXI4 request beats (AW / W / AR) into NoC flits, and converts response flits (B / R) back into AXI4 response beats. This document specifies the as-built C++ behavior model (`ref_model/c_model/include/nmu/`), its wrap (`ref_model/c_model/include/wrap/nmu_wrap.hpp`), and the SV DPI module (`ref_model/top/nmu_wrap.sv`). An RTL implementation of this block is verified cycle-by-cycle against this model by the existing co-sim testbench.
+The NMU is the master-side network interface of the NoC. It sits between exactly one external 512-bit AXI4 master interface and the router mesh: it converts AXI4 request beats (AW / W / AR) into NoC flits, and converts response flits (B / R) back into AXI4 response beats. Narrow and Data are internal NoC traffic classes selected by the SAM, not separate AXI interfaces. This document specifies the as-built C++ behavior model (`ref_model/c_model/include/nmu/`), its wrap (`ref_model/c_model/include/wrap/nmu_wrap.hpp`), and target RTL overlays. Existing co-sim checks the as-built model; target CDC, Router-only VC ownership and asymmetric LOCAL DAT flow control require model alignment before cycle-exact RTL comparison.
 
 ## 2. Design Description
 
 ### 2.1 Packetization
 
-The NoC fabric moves fixed-size flits, not AXI beats. Packetization is a 1-to-1 mapping: every accepted AXI request beat becomes exactly one flit, and every response flit becomes exactly one AXI response beat. A flit is a 48-bit header plus a payload sized per network (REQ 136 b, RSP 126 b, DAT 633 b total). The header carries routing and ordering metadata (source node, destination node, virtual channel, wormhole packet boundary, reorder-buffer tag, collective op and mask). The payload carries the AXI channel fields verbatim.
+The NoC fabric moves fixed-size flits, not AXI beats. Packetization is a 1-to-1 mapping: every accepted AXI request beat becomes exactly one flit, and every response flit becomes exactly one AXI response beat. The current `AXI_ID_WIDTH = 3` model uses a 48-bit header plus a payload sized per network (REQ 136 b, RSP 126 b, DAT 633 b total). The target RTL derives REQ as `133 + AXI_ID_WIDTH` bits and RSP as `123 + AXI_ID_WIDTH` bits; DAT remains 633 bits for the legal ID range 1..8 because `DataW` is its largest payload. The header carries routing and ordering metadata (source node, destination node, virtual channel, wormhole packet boundary, reorder-buffer tag, collective op and mask). The payload carries the AXI channel fields verbatim.
 
 A write transaction of AWLEN+1 beats therefore becomes 1 AW flit followed by AWLEN+1 W flits. A read request becomes 1 AR flit. The write's flits form one wormhole packet (the AW flit opens it, the W flit with `wlast=1` closes it) so no other request flit from this NMU can interleave between an AW and its W beats on the link. AW+W is the only multi-flit packet the fabric builds, and AXI4 IHI 0022 A5.3.3 is why: W beats of different transactions may not interleave, so the AW and its burst have to travel as one indivisible unit. A read request and every response are single-flit packets, R beats included.
 
-The NMU has three flit faces, one per physical network (Section 3.1):
+The current C++ NMU has three flit faces, one per physical network (Section 3.1):
 
 - REQ egress (NMU produces): `NarrowAw` / `NarrowW` / `NarrowAr` plus `DataAr` — no AR rides DAT. Ready/valid.
 - RSP ingress (NMU consumes): `NarrowB` / `DataB` plus `NarrowR`. Ready/valid.
-- DAT egress + ingress: `DataAw` / `DataW` out, `DataR` in. Credit flow control both directions, no ready wire. DAT is the only face carrying more than one VC.
+- DAT egress + ingress: `DataAw` / `DataW` out, `DataR` in. The model uses credit flow control both directions.
+
+The target RTL keeps credit only on DAT egress into the Router LOCAL input VC FIFOs. DAT ingress
+from the Router uses ready/valid, with ready derived from the NMU DAT Read class FIFO. The NMU has
+no receive VC FIFO.
 
 ### 2.2 Flit format
 
@@ -52,7 +56,7 @@ AW payload (88 bits). AR payload is field-for-field identical with `ar*` names:
 | Field | Payload bits | Width | Definition |
 |---|---|---|---|
 | awid | [2:0] | 3 | AXI ID. |
-| awaddr | [50:3] | 48 | The request address, forwarded unchanged (Section 2.3). |
+| awaddr | [50:3] | 48 | The global request address, emitted unchanged by the NMU (Sections 2.3 and 2.8). |
 | awlen | [58:51] | 8 | Burst length minus 1. |
 | awsize | [61:59] | 3 | Bytes per beat = 2^awsize, awsize <= 3'h6 (64 B, the 512-bit data bus). |
 | awburst | [63:62] | 2 | 2'b00: FIXED. 2'b01: INCR. 2'b10: WRAP. 2'b11 never occurs. |
@@ -94,13 +98,11 @@ R payload, `NarrowR` 78 b / `DataR` 526 b, consumed by the response path:
 
 Destination derivation is a System Address Map (SAM) range lookup, not a bit-slice decode. The SAM is a list of entries {base, size, dst_id, class} (`nmu::addr_trans::SamTable`). On every shipped topology a node owns one memory-space entry and one config-space entry, and the two are far apart in the system map.
 
-**INPUT** wire address A. **COMPUTE** scan entries in list order, first entry with base <= A < base+size wins. **OUTPUT** {dst_id, class, A}.
+**INPUT** wire address A. **COMPUTE** scan entries in list order, first entry with base <= A < base+size wins. **OUTPUT** {dst_id, dst_port_id, AXI class, space coordinate metadata, A}.
 
-The address is forwarded unchanged. There is one address domain end to end: what the master issued is what the flit carries, what the destination NSU emits, and what that tile's decoder matches. The destination's two spaces are told apart by the bases the map already gave them, so no second decode is needed anywhere.
+The NMU forwards the global address unchanged and never subtracts the matched SAM region base. For unicast, the destination NSU presents that same address to the tile. For multicast, every branch carries the original AW address and each destination NSU overwrites only its node-coordinate field before presenting it to the tile; all non-coordinate bits remain unchanged. The destination's two spaces remain distinct through the global bases assigned by the map.
 
-That is also what upstream does. `floo_id_translation` turns an address into a node id and nothing else, and a search for `addr_decode` across FlooNoC's `hw/` finds it at exactly two sites, the source NI and the router — there is no endpoint-local decoder. A tile-local rebase existed here briefly and was removed: it created a second address domain, which a tile cannot have once its own initiator and its NI share one decoder.
-
-The SAM is loaded at runtime from the config file's `endpoints` block (`sim/configs/*.yml`, parsed by `nmu/sam_yaml.hpp`). There is no built-in default map: `NmuWrap::init` rejects a null or empty `config_path` with `std::invalid_argument`.
+The authored SAM comes from the config file's `endpoints` block (`sim/configs/*.yml`). The C++ reference model loads it at simulation startup through `nmu/sam_yaml.hpp`; there is no built-in model default, and `NmuWrap::init` rejects a null or empty `config_path` with `std::invalid_argument`. Synthesizable RTL does not parse YAML: the generator emits the equivalent SAM and decode metadata into `topology_pkg.sv`, and the NMU consumes them as elaboration-time constants. There is no runtime SAM programming interface. Each collective-capable space has its own X/Y address ranges. The matched SAM rule selects those ranges for AWUSER mask translation, so Config and Memory may place their coordinate fields at different address bits.
 
 Example (`mesh_4x4`): A = 0x6_0000_0080. Matching entry: raster index 6, base = 6 * 0x1_0000_0000 = 0x6_0000_0000, size 0x1_0000_0000, dst_id = 8'h12 (x=2, y=1), memory space. Result: dst_id = 8'h12, local_addr = 0x6_0000_0080 (forwarded unchanged). Non-matching entry for contrast: the dst_id = 8'h11 entry covers [0x5_0000_0000, 0x6_0000_0000), which excludes A because A >= its base+size.
 
@@ -108,22 +110,63 @@ Both windows of one node, on `mesh_2x2`: A = 0x1000 hits node (0,0)'s memory ent
 
 A SAM miss (address covered by no entry) cannot happen (Section 3.5, guarantee G1). The model aborts if violated. There is no DECERR generation in this block.
 
+The RTL evaluates every SAM entry in parallel for AW and AR. After each decoder, an independent
+elaboration-time register slice may be selected with `AW_SAM_REG_TYPE` or `AR_SAM_REG_TYPE`:
+0 bypasses the slice, 1 uses one output register and may insert one bubble after backpressure, and
+2 uses a full skid buffer with registered backpressure and one-request-per-cycle throughput. Modes
+1 and 2 add one cycle in the zero-stall path. The slice stores the complete AXI beat together with
+`dst_id`, `dst_port_id`, AXI class and collective metadata. W bypasses SAM decode and these slices.
+The C++ reference model currently represents mode 0 only.
+
 ### 2.4 Request pipeline
 
+In the target RTL, AW/W/AR first cross from `ACLK` into `noc_clk` through their existing channel
+FIFOs. Every stage below then runs in `noc_clk`; no complete-flit CDC FIFO follows packetization.
+The current C++ model is single-clock and uses the same logical five-channel queue boundary.
+
 ```
-AXI master -> AxiSlavePort -> Rob -> S1 (NmuReqS1Bridge) -> Packetize
-           -> WormholeArbiter(3 in: AW, W, AR, pairing {AW->W})
-           -> VcAllocator -> REQ egress (ready/valid) | DAT egress (credit-gated)
+AXI master -> AxiSlavePort -> SAM(AW/AR) -> optional per-channel RegSlice -> Rob
+                       W -----------------------------------------------> Rob
+           -> S1 (NmuReqS1Bridge) -> Packetize
+           -> REQ WormholeArbiter(3 in: AW, W, AR, pairing {AW->W}) -> REQ assignment
+           -> DAT WormholeArbiter(2 in: AW, W, pairing {AW->W})     -> DAT assignment
 ```
 
-- `AxiSlavePort`: per-channel FIFOs (depth `NMU_QUEUE_DEPTH` = 16 each for AW / W / AR / B / R). Pure transport, FIFO order per channel regardless of AXI ID.
-- `Rob`: request admission gate and response reorder buffer (Section 2.5). Stamps ordering_req / ordering_tag metadata and translates the address through its SAM.
+The REQ and DAT branches are independent after `Packetize`: each has its own arbiter, AW-to-WLAST
+lock, pending storage, channel assignment and physical output. One Narrow write flit may leave on
+REQ in the same `noc_clk` cycle that one Data write flit leaves on DAT. REQ backpressure does not
+stall an already-buffered DAT packet, and DAT credit exhaustion does not stall an already-buffered
+REQ packet.
+
+Because the external AXI interface has only one W channel, `w_meta_fifo_` records every accepted AW
+in AW order. W is steered by the FIFO head's class and inherits that AW's route and ordering fields;
+the entry retires on WLAST. Separate NoC drain never changes this association. The current C++
+model already contains the two network-local arbiter/allocation pairs and tests cross-network
+backpressure independence. A dedicated same-cycle REQ+DAT egress test is `[TBD]`.
+
+- `AxiSlavePort`: current-model per-channel FIFOs (depth `NMU_QUEUE_DEPTH` = 16 each for AW / W / AR / B / R). Pure transport, FIFO order per channel regardless of AXI ID.
+- `SAM`: parallel combinational AW and AR range decode. Optional AW and AR register slices are selected independently by Section 2.7 parameters.
+- `Rob`: request admission gate and response reorder buffer (Section 2.5). Consumes decoded route metadata and stamps ordering_req / ordering_tag.
 - S1 (`NmuReqS1Bridge`): one 1-entry pipeline register per channel (AW, W, AR), drained independently so a full AW register never blocks the W stream that must release the wormhole lock.
 - `Packetize`: builds the flit (Section 2.2). W flits inherit dst_id / ordering_req / ordering_tag from a write-metadata FIFO (`w_meta_fifo_`), pushed per AW flit, popped on the wlast W flit. The model queue is unbounded, its occupancy is bounded by the number of accepted AW bursts whose wlast W flit has not yet been emitted.
-- `WormholeArbiter`: 3-input round-robin arbiter with the AW->W lock, 1 flit per cycle, per-input pending depth `NMU_ARBITER_FIFO_DEPTH` = 4. Draining an AW flit (header.flit_tail=0) locks the arbiter to the W input until the W flit with header.flit_tail=1 drains. AR flits (flit_tail=1) never lock.
-- `VcAllocator`: assigns vc_id and stamps it into the header, per-VC pending queue depth `NMU_ARBITER_FIFO_DEPTH` = 4, drains at most 1 flit per cycle to the NoC, gated on per-VC sender credit.
+- `WormholeArbiter`: one independent instance per request network. REQ has 3 inputs (AW, W, AR); DAT has 2 (AW, W). Each owns its AW->W lock and drains at most 1 flit per cycle, with per-input pending depth `NMU_ARBITER_FIFO_DEPTH` = 4. Draining an AW flit (header.flit_tail=0) locks only that network to W until the flit with header.flit_tail=1 drains.
+- Channel assignment: one independent instance per request network. REQ is single-VC ready/valid.
+  The current C++ DAT allocator uses per-VC pending depth `NMU_ARBITER_FIFO_DEPTH` = 4.
 
-VC candidate set: every VC in {0 .. NUM_VC-1}, with no read/write class split. Only the DAT face carries NUM_VC > 1 (REQ and RSP are single-VC), so the candidate set is the DAT VC set and `DataAw` / `DataW` are its only request-side traffic. Legal NUM_VC values are 1 to 8. The working co-sim configuration set is {1, 2, 4, 8}.
+**Current C++ model.** The VC candidate set is every VC in {0 .. NUM_VC-1}, with no
+read/write class split. Only the DAT face carries NUM_VC > 1 (REQ and RSP are single-VC),
+so `DataAw` / `DataW` are its only request-side traffic. Legal NUM_VC values are 1 to 8.
+The working co-sim configuration set is {1, 2, 4, 8}.
+
+**Target RTL overlay.** `DAT_VC_ALLOC_MODE` defaults to `SHARED`, which preserves the
+current candidate set. `READ_WRITE_SPLIT` requires `DAT_NUM_VC` in {2, 4, 6, 8} and
+restricts NMU `DataAw` / `DataW` to the lower half [0, `DAT_NUM_VC/2`). `DataW` inherits
+the VC selected for its owning `DataAw` in either mode. The mode is system-wide: every
+DAT router output applies the same class mask before assigning or restamping `vc_id`.
+The target allocator reads the heads of the DAT Write class FIFO, selects only among VCs with
+Router credit, stamps `vc_id`, and has no per-VC pending queue. The current C++ model implements
+`SHARED` only and retains per-VC pending queues; target alignment remains tracked in
+`docs/known-limitations.md`.
 
 Fixed VC stamping: header `fixed_vc` = 1 on every ordering_req = 0 AW of either class (the whole same-(dst_id, awid) streak, first flit included) and on the W beats that copy it from their owning AW; ordering_req = 1 AW and AR leave it 0. The rule keys on channel kind and ordering_req, not face -- a `NarrowAw` with ordering_req = 0 rides the single-VC REQ face and still carries fixed_vc = 1, vacuously true there. Downstream routers keep `vc_id` unchanged only where fixed_vc = 1 instead of restamping at VA (docs/router-spec.md R12/SPEC6).
 
@@ -135,13 +178,20 @@ Per-cycle evaluation order inside the model (`Nmu::tick`, this order is the spec
 response faces -> Depacketize -> Rob -> S2 (1-entry register per channel) -> AxiSlavePort -> AXI master
 ```
 
+**Target integration overlay.** RSP and DAT Read enter independent `noc_clk` class FIFOs under
+ready/valid. The NoC-to-AXI assigner depacketizes them and writes the B or R dual-clock FIFO;
+`vc_id` is not used for NI queue selection. B and R may therefore assert `bvalid` and `rvalid` in
+the same `ACLK` cycle and each waits only on its own ready. `DataB` and `DataR` use different
+physical networks. `NarrowB` and `NarrowR` share RSP bandwidth but become independent after B/R
+assignment. The current C++ model does not implement this CDC or asymmetric DAT overlay.
+
 Why a reorder buffer exists: AXI4 requires that responses with the same ID return in issue order. The fabric does not guarantee this. Two same-ID reads to different destinations can return out of order (a near slave answers before a far one), and with multiple VCs even same-destination traffic could overtake if it changed VC mid-stream. The NMU owns same-ID response ordering: it either proves a request cannot be overtaken (bypass) or reserves reorder storage for it before it enters the network.
 
 Admission decision per AW / AR, evaluated per AXI ID (`Rob::push_aw` / `push_ar`):
 
 **IMPORTANT** (unique classification, exactly one branch applies, in this priority):
 1. Idle-ID bypass: the ID's order list is empty (nothing in flight for this ID). No slot, ordering_req=0, and the sticky flag resets (fresh streak).
-2. Same-destination bypass: the ID is not sticky-fallen-back AND dst_id equals the previous accepted push's dst_id for this ID and direction. No slot, ordering_req=0.
+2. Same-ordering-domain bypass: the ID is not sticky-fallen-back AND `{dst_id, dst_port_id, AXI class}` equals the previous accepted push's key for this ID and direction. No slot, ordering_req=0.
 3. Fall-back: allocate slots, ordering_req=1, and set the sticky flag. Once sticky, every later push of this ID allocates until the ID goes idle again (branch 1 is the only reset).
 
 A collective AW (Section 2.8) is admitted only through branch 1, and while one is in flight nothing else for that ID is admitted at all.
@@ -150,11 +200,11 @@ Example, ID = 3'h3, write direction: AW#1 dst 8'h02 (list empty, branch 1, bypas
 
 Slot pools, per direction: B pool depth `NMU_ROB_B_DEPTH` = 128, R pool depth `NMU_ROB_R_DEPTH` = 128. An AW reserves 1 slot (B is one beat). An AR reserves ARLEN+1 consecutive slots (one per R beat), refused when free space is short. The allocator is a high-water stack: one allocation bit marks each reserved range's top slot, free space is the slot count above the highest set bit (leading-zero-count in RTL), the next base is depth minus free space, and space returns only from the top (Appendix 7.1 walks it with numbers). ordering_tag stamps the base slot. On the response side, B fills its slot, the i-th R beat of a burst fills base+i, and beats release to the master only while the ID's oldest outstanding transaction is being served (per-ID issue order, one order list per ID per direction).
 
-`RobMode` selects the R side only. `RobMode::Enabled`: R responses use the slot pool as above. `RobMode::Disabled` (`nmu.READ_ROB_ENABLED: 0`): the R RoB is off and same-ID read ordering is enforced by a per-ID single-outstanding interlock, a second AR for an ID stalls until the first read's rlast returns. The B-side RoB always runs in both modes, writes never use an interlock. Wherever this document says "RobMode", it governs reads only.
+`RobMode` selects the R side only. RTL exposes the elaboration-time bit parameter `READ_ROB_ENABLED`, defaulted from `NMU_READ_ROB_ENABLED_DFLT`, and selects the two structural paths with `generate if`; no preprocessor conditional controls this choice. `RobMode::Enabled`: R responses use the slot pool as above. `RobMode::Disabled` (`READ_ROB_ENABLED = 0`): the R RoB is off. Each AXI ID keeps an outstanding counter and one latched ordering-domain key `{dst_id, dst_port_id, AXI class}`. An idle ID accepts any AR and latches its key. A non-idle ID accepts another AR only when the key matches and the counter is below `NMU_MAX_TXNS_PER_ID`; otherwise it stalls until the counter returns to zero. Acceptance increments the counter and retirement of an R beat with `rlast` decrements it. Every Disabled-mode AR carries `ordering_req=0` and reserves no R slot. The B-side RoB always runs in both modes as a per-ID metadata-only RoB: it preserves issue order within an ID while permitting responses of different IDs to pass independently. Wherever this document says "RobMode", it governs reads only.
 
-Per-ID transaction gate, both modes' write side and Enabled reads: at most `NMU_MAX_TXNS_PER_ID` = 32 outstanding transactions per ID per direction (order-list depth). A burst is one entry regardless of ARLEN. An entry is taken when the request is accepted and released when the response is accepted at the AXI side, B on its single beat and R on rlast. The 33rd same-ID AW is refused until one completes, even with free slots, which backpressures through the AxiSlavePort queue to awready / arready.
+Per-ID transaction gate, both directions and both R modes: at most `NMU_MAX_TXNS_PER_ID` = 32 outstanding transactions per ID. A burst is one transaction regardless of ARLEN. An entry or counter unit is taken when the request is accepted and released when the response is accepted at the AXI side, B on its single beat and R on rlast. A 33rd same-ID request is refused until one completes, which backpressures through the AxiSlavePort queue to awready / arready.
 
-There is no aggregate pool above the per-ID gate, so the order list is the admission bound and in-flight requests cap at `NMU_MAX_TXNS_PER_ID` x 2^`AXI_ID_WIDTH` = 32 x 8 = 256 writes per direction, and at 1 x 8 = 8 reads under `RobMode::Disabled`, where the per-ID single-outstanding interlock replaces the order-list depth. Two limiters coexist on the write side and on Enabled reads, the per-ID order-list depth and the RoB slot pool, and which one binds depends on the traffic: a bypassed transaction takes a list entry and reserves no slot, so a stream that stays in branches 1 and 2 meets only the per-ID gate.
+There is no aggregate pool above the per-ID gate, so in-flight requests cap at `NMU_MAX_TXNS_PER_ID` x 2^`AXI_ID_WIDTH` = 32 x 8 = 256 per direction. Two limiters coexist on the write side and on Enabled reads, the per-ID order-list depth and the RoB slot pool, and which one binds depends on the traffic: a bypassed transaction takes a list entry and reserves no slot, so a stream that stays in branches 1 and 2 meets only the per-ID gate. Disabled reads have no slot-pool limiter but cannot cross an ordering-domain boundary until that ID becomes idle.
 
 ### 2.6 Worked example: 2-beat write burst
 
@@ -177,27 +227,37 @@ Later one B flit returns on the RSP face {axi_ch = 4'd8 (DataB), bid = 3'h5, bre
 
 ### 2.7 Parameters
 
-Single source `specgen/source/constants.yaml`, generated into `ni_params.h` and `ni_params_pkg.sv` (drift-gated by `codegen.py --check`). Defaults below are the shipped values.
+Functional parameters use `specgen/source/constants.yaml`, generated into `ni_params.h` and
+`ni_params_pkg.sv` (drift-gated by `codegen.py --check`). The two `*_SAM_REG_TYPE` entries are
+RTL module parameters because they select physical timing cuts rather than topology or protocol
+behavior. Defaults below are the shipped values.
 
 | Parameter | Default | Legal range | Consumed by |
 |---|---|---|---|
-| AXI_ID_WIDTH | 3 | 1..32 (implementation locked at 3) | ID fields, RoB per-ID arrays (8 IDs) |
+| AXI_ID_WIDTH | 3 | target 1..8; current model locked at 3 | NMU AXI and NoC-carried ID fields, RoB per-ID arrays |
 | AXI_ADDR_WIDTH | 48 | 1..64 | Address fields |
 | AXI_DATA_WIDTH | 512 | {32,64,128,256,512,1024} | wdata / rdata, WSTRB_WIDTH = 64 |
 | AXI_AWUSER_WIDTH | 58 | 10..64 | AWUSER slave-port field and the DPI unpack mask: 8 b user + 2 b collective_op + 48 b collective address mask (Section 2.8) |
-| NOC_DAT_NUM_VC | 1 | 1 to 8 | `VcAllocator`, DAT credit vectors |
-| NOC_REQ_FLIT_WIDTH | 136 | 64..1024 | REQ egress flit port |
-| NOC_RSP_FLIT_WIDTH | 126 | 64..1024 | RSP ingress flit port |
-| NOC_DAT_FLIT_WIDTH | 633 | 64..1024 | DAT flit ports, both directions |
-| NOC_ROUTER_VC_DEPTH | 8 | 1..16 | DAT request sender credit seed per VC |
+| NOC_DAT_NUM_VC | 1 | 1 to 8 | Current C++ model `VcAllocator` and DAT credit vectors |
+| DAT_NUM_VC [target RTL] | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector width |
+| DAT_VC_ALLOC_MODE [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | `VcAllocator` eligible mask; system-wide with DAT router VA |
+| NOC_REQ_FLIT_WIDTH | 136 | derived as `133 + AXI_ID_WIDTH` | REQ egress flit port |
+| NOC_RSP_FLIT_WIDTH | 126 | derived as `123 + AXI_ID_WIDTH` | RSP ingress flit port |
+| NOC_DAT_FLIT_WIDTH | 633 | derived maximum, 633 for `AXI_ID_WIDTH` 1..8 | DAT flit ports, both directions |
+| NOC_ROUTER_VC_DEPTH | 8 | 1..16 | Router LOCAL input VC FIFO depth and NMU DAT sender-credit seed |
+| NI_CDC_FIFO_DEPTH [target RTL] | 8 | {4,8,16} | Common AW/W/AR/B/R dual-clock FIFO depth |
+| `NI_CLASS_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
 | NMU_ROB_B_DEPTH | 128 | 1..256 | B slot pool |
 | NMU_ROB_R_DEPTH | 128 | 1..256 | R slot pool |
+| READ_ROB_ENABLED | 1 | {0,1} | RTL `generate if`: Normal R RoB or RoB-less per-ID ordering-domain counters |
 | NMU_MAX_TXNS_PER_ID | 32 | 1..256 | Per-ID order-list depth |
-| NMU_QUEUE_DEPTH | 16 | 1..1024 | AxiSlavePort AW/W/AR/B/R FIFOs |
+| NMU_QUEUE_DEPTH [current model] | 16 | 1..1024 | Single-clock AxiSlavePort AW/W/AR/B/R queues |
 | NMU_DEPKT_Q_DEPTH | 16 | 1..1024 | Depacketize B/R queues |
-| NMU_ARBITER_FIFO_DEPTH | 4 | 1..64 | Wormhole per-input and VC pending queues |
+| NMU_ARBITER_FIFO_DEPTH [current model] | 4 | 1..64 | Wormhole per-input and VC pending queues; not target NI VC storage |
+| AW_SAM_REG_TYPE | 0 | {0,1,2} | AW decode-to-RoB slice: bypass, simple register, full skid |
+| AR_SAM_REG_TYPE | 0 | {0,1,2} | AR decode-to-RoB slice, independently selected |
 
-Runtime configuration per instance: src_id, SAM config path, RobMode and RoB depth overrides come through `cmodel_nmu_create` / `cmodel_nmu_create_ex` (Section 3.3). The generated testbench sets src_id = {y[3:0], x[3:0]} per node and forwards the plusargs `+sam_config=`, `+b_rob_depth=`, `+r_rob_depth=`, `+max_txns_per_id=`.
+C++ model runtime configuration per instance: src_id, SAM config path, RobMode and RoB depth overrides come through `cmodel_nmu_create` / `cmodel_nmu_create_ex` (Section 3.3). The generated testbench sets src_id = {y[3:0], x[3:0]} per node and forwards the plusargs `+sam_config=`, `+b_rob_depth=`, `+r_rob_depth=`, `+max_txns_per_id=`. These plusargs configure the reference model only; the RTL image uses the generated package selected at elaboration.
 
 ### 2.8 Collective writes
 
@@ -239,7 +299,7 @@ n is capped at X_WIDTH + Y_WIDTH = 8, so the enumeration is at most 256 SAM look
 1. An incoming collective is admitted only when the ID's write order list is empty. It then takes the idle-ID bypass: ordering_req = 0, no RoB slot, in both `RobMode` settings.
 2. While the front entry of an ID's order list is collective, nothing for that ID is admitted. Testing the front is enough, because a collective only ever enters an empty list and is therefore the only entry.
 
-Gate 2 is what closes the same-destination bypass: without it a later same-ID AW whose destination equals the collective's `dst_id` would stream past it with no slot and no ordering. The collective still takes one entry of the ID's write order list like any AW, released when its merged `B` retires.
+Gate 2 is what closes the same-ordering-domain bypass: without it a later same-ID AW with the collective's `{dst_id, dst_port_id, AXI class}` key would stream past it with no slot and no ordering. The collective still takes one entry of the ID's write order list like any AW, released when its merged `B` retires.
 
 **Merged B.** The merged `B` returns through the ordinary B ingress and releases the interlock exactly like a unicast `B`: the NMU stamps ordering_tag before fanout and the fabric's merge preserves it, so the response path needs no collective state. The `B` carries `collective_op` = MULTICAST and the echoed node mask; neither perturbs the `bid` / `bresp` decode.
 
@@ -247,7 +307,7 @@ Exactly one `B` per collective AW is a structural invariant of the merge, and tw
 
 ## 3. Inputs and Outputs
 
-All ports below are the real `nmu_wrap` ports (`ref_model/top/nmu_wrap.sv:54-77`). AXI signals are fields of the packed structs `ni_signals_pkg::axi_req_t` / `axi_rsp_t`, plus a dedicated `awuser_i` port (the generated `axi_req_t` has no awuser field). The three NoC faces are scalar signals, not structs: REQ and RSP are ready/valid, DAT is credit in both directions. The `axi_req_t` struct carries `awregion` / `arregion`, but they are not in the DPI signature: the model sees region = 0 and stamps 0 into the flit. No AXI user signals other than `awuser_i` exist on the wire face, the flit's user fields are stamped 0 and response user fields are dropped.
+All ports below are the current C++/DPI `nmu_wrap` ports (`ref_model/top/nmu_wrap.sv:54-77`). AXI signals are fields of the packed structs `ni_signals_pkg::axi_req_t` / `axi_rsp_t`, plus a dedicated `awuser_i` port (the generated `axi_req_t` has no awuser field). The three NoC faces are scalar signals, not structs: REQ and RSP are ready/valid, DAT is credit in both directions. The `axi_req_t` struct carries `awregion` / `arregion`, but they are not in the DPI signature: the model sees region = 0 and stamps 0 into the flit. No AXI user signals other than `awuser_i` exist on the wire face, the flit's user fields are stamped 0 and response user fields are dropped. The target DAT receive and clock-domain deltas are stated below the output table.
 
 ### 3.1 Inputs
 
@@ -300,6 +360,18 @@ Every output is a registered signal: it changes only at posedge clk_i and reflec
 | tx_dat_flit_o | 633 | DAT request flit. 0 when valid is low. |
 | rx_dat_crdvalid_o | DAT_NUM_VC | Per-VC one-cycle consumer credit pulse: bit v high means the NMU consumed one DAT response flit from VC v. At most one pulse per VC per cycle (pending consumptions queue up and drain one per cycle). |
 
+The table above is the current C++/DPI interface. The target RTL changes only the DAT receive
+backpressure surface: `rx_dat_crdvalid_o` is removed and `rx_dat_ready_o` is added. A `DataR` flit
+transfers from the Router when `rx_dat_valid_i && rx_dat_ready_o`; ready reflects DAT Read class
+FIFO capacity. DAT transmit keeps `tx_dat_crdvalid_i` because the destination Router owns the
+credited per-VC FIFO. The target also exposes separate `ACLK`/`ARESETn` and
+`noc_clk`/`noc_rst_n` domains around the five AXI channel async FIFOs.
+
+Both resets are generated above the NMU from one common system reset. Each reset asserts
+asynchronously and deasserts synchronously in its own clock domain; release skew is legal. The NMU
+has no `sys_rst_n` port and does not support one-sided reset recovery. A reset discards all queued
+and in-flight NMU state, including FIFO contents, RoB/order state and credit counters.
+
 ### 3.3 DPI functions
 
 The SV wrap holds no behavior. Each posedge it runs the 3-call discipline: `cmodel_nmu_set_inputs` (latch wires, no state change), `cmodel_nmu_tick` (advance the model one cycle), `cmodel_nmu_get_outputs` (copy the output latch), then registers the outputs nonblocking. Declared in `ref_model/dpi/cmodel_dpi.h:151-179`.
@@ -307,7 +379,7 @@ The SV wrap holds no behavior. Each posedge it runs the 3-call discipline: `cmod
 | Function | Signature (summary) | Semantics |
 |---|---|---|
 | cmodel_nmu_create | `unsigned long long (const char* name, int src_id, int dat_num_vc, const char* config_path)` | Constructs the instance, RobMode::Enabled (R side), default depths. `dat_num_vc` sizes the DAT face only; REQ and RSP are fixed single-VC. `config_path` is required: NULL or empty throws inside `NmuWrap::init`, which the DPI boundary catches into the error latch and returns handle 0. Returns the 64-bit handle for ctx_i. |
-| cmodel_nmu_create_ex | `unsigned long long (const char* name, int src_id, int dat_num_vc, int rob_enabled, int b_rob_depth, int r_rob_depth, int max_txns_per_id, const char* config_path)` | As create, plus R-RoB enable and depth overrides. The generated testbench calls this in both RoB modes: it is the only entry point carrying the overrides, and the B-side RoB runs whatever `rob_enabled` says (Section 2.5). |
+| cmodel_nmu_create_ex | `unsigned long long (const char* name, int src_id, int dat_num_vc, int rob_enabled, int b_rob_depth, int r_rob_depth, int max_txns_per_id, const char* config_path)` | As create, plus R-RoB enable and depth overrides. The generated testbench calls this in both RoB modes: it is the only entry point carrying the overrides, and the B-side RoB runs regardless of `rob_enabled` (Section 2.5). |
 | cmodel_nmu_set_inputs | `(ctx, AXI args incl. a 58 b awuser, then the three NoC faces: tx_req_ready, rx_rsp_valid + flit, rx_dat_valid + flit, tx_dat_crdvalid)` | Latches inputs only. Packing: 8-bit fields in word[0] low byte, addresses 2 words little-endian, data 16 words little-endian, wstrb 2 words, awuser 2 words, flits little-endian at their own network's word count (REQ 5, RSP 4, DAT 20), credit vector 1 word bit-per-VC. |
 | cmodel_nmu_tick | `(ctx)` | One full model cycle. One call = one clock edge. |
 | cmodel_nmu_get_outputs | `(ctx, AXI response args, tx_req_valid + flit, rx_rsp_ready, tx_dat_valid + flit, rx_dat_crdvalid)` | Copies the output latch. bresp / rresp masked with 2'b11. |
@@ -325,7 +397,7 @@ An invalid handle raises a categorized model error which the testbench error pol
 5. Output idle value: bid, bresp, rid, rdata, rresp, rlast are 0 when their valid is low. `tx_req_flit_o` and `tx_dat_flit_o` are 0 when their valid is low. Credit outputs are 0 in non-pulse cycles.
 6. Reset: rst_ni is given only once, at the beginning of simulation, synchronous active-low. While rst_ni is low all outputs are 0 (the wrap clears its output registers, the model starts reset by construction). There is no mid-run reset.
 7. Handshake gaps: awready and arready are one-shot, they assert only after their valid is observed and drop the cycle after the handshake, so consecutive same-channel address handshakes are at least 2 cycles apart (handshakes on cycles 2, 4, 6 of the Section 6 waveform pattern). AW acceptance is not gated on the previous write's W burst finishing (multi-outstanding AW is supported and w-owed counts accumulate). wready is pre-asserted while owed W beats remain and FIFO space exists, so W beats can stream back-to-back, 1 per cycle. An incoming request credit pulse is usable in the same model cycle (replenished before the tick). At most one response credit pulse per VC per cycle is emitted.
-8. Latency: measured from the positive edge ending the input's handshake cycle to the first cycle the corresponding output valid is high, in an otherwise idle NMU with credit available. AW handshake to its AW flit on the egress face: exactly 3 cycles. Response B flit to bvalid: exactly 3 cycles. Response R flit to rvalid: exactly 2 cycles with the R RoB Disabled, exactly 3 cycles with it Enabled. Under load these are lower bounds, backpressure adds cycles without an upper bound.
+8. Latency: measured from the positive edge ending the input's handshake cycle to the first cycle the corresponding output valid is high, in an otherwise idle NMU with credit available. With `AW_SAM_REG_TYPE=0`, AW handshake to its AW flit on the egress face is exactly 3 cycles; values 1 and 2 add one cycle. `AR_SAM_REG_TYPE` changes the AR path by the same amount. Response B flit to bvalid is exactly 3 cycles. Response R flit to rvalid is exactly 2 cycles with the R RoB Disabled, exactly 3 cycles with it Enabled. Under load these are lower bounds, backpressure adds cycles without an upper bound.
 
 ### 3.5 Input guarantees
 
@@ -339,7 +411,7 @@ The implementation does not handle the following, they are guaranteed not to hap
 | G4 | The SAM itself is well-formed: nonzero sizes, 4 KiB aligned base and size, no overlap, dst inside the mesh. | Checked once at load (`SamTable::validate`). |
 | G5 | valid, once asserted, holds with stable payload until ready (both directions of the AXI face). | AXI4 A3.2.1. The one-shot ready policy depends on it: ready asserts one cycle after valid is first seen. |
 | G6 | W beat counts match their AWs (exactly awlen+1 beats, wlast on the final beat, no spurious W). | AXI4 legality is the master's job. The owed-W counter floors at 0 and does not reject an unexpected W. |
-| G7 | On DAT, the router never pulses more request credits than flits it drained, and never presents a response flit without holding a credit for it. | Credit conservation: per VC, sender credit + in-flight flits = seed (`NOC_ROUTER_VC_DEPTH` = 8). A credit lie downstream of the `VcAllocator` aborts (`VcAllocator::tick`). |
+| G7 | On DAT request injection, the Router never returns more credits than LOCAL input VC slots it freed. On target DAT response ejection, the Router holds valid/flit until NMU ready; the current model instead guarantees a response sender credit. | Request credit conservation uses `NOC_ROUTER_VC_DEPTH` = 8. Target response safety follows ready/valid; current-model credit lies abort in `VcAllocator::tick`. |
 | G8 | awburst / arburst = 2'b11 never occurs, and header.axi_ch values 4'd10 to 4'd15 never occur. | Reserved encodings. |
 | G9 | DAT_NUM_VC is 1 to 8 and the elaborated `noc_credit_t` width equals DAT_NUM_VC. | Out-of-range DAT_NUM_VC aborts at `VcAllocator` construction, width mismatch is `$fatal` at elaboration (`nmu_wrap.sv`). |
 | G10 | A collective is never issued by a peripheral. | Collectives are a tile-to-tile primitive (`noc-target-spec.md` Scope). The fork spreads along the issuer's row and the join collects in its column, and a peripheral hangs off a boundary port, outside both. A peripheral is never a member either: its address space declares no coordinate ranges, so it is not a collective target. Aborts (`collective_translate`, on the issuer's `port_id`). |
@@ -359,24 +431,27 @@ Each item names its verification and the failure condition. "ctest" items run in
 9. One beat, one flit, address forwarded: each accepted AW / W / AR beat emits exactly one flit, and the address payload carries the request address as it arrived. awregion / arregion and all user fields are carried in the flit and are 0 at the co-sim boundary. Verified: `TEST(AddrTrans, TileBaseStaysInTheForwardedAddress)`, `TEST(SamTable, PackedTranslateForwardsTheAddressUnchanged)`. Failure: an altered address in the payload, or wrong dst_id.
 10. header.flit_tail stamping: AW = 0, W = wlast, AR = 1. Verified: `TEST(NmuPacketize, WHeaderFlitTailMatchesWlast)`, malformed stamping aborts in the wormhole arbiter (`WormholeArbiter::tick` defensive guards). Failure: assert abort or a wormhole packet that never closes.
 11. AW before W: a W flit never enters the network before its AW flit. The RoB refuses W beats while no AW-accepted burst owes beats, and W flits inherit dst_id / ordering_req / ordering_tag from the AW-ordered metadata FIFO. Verified: `TEST(NmuRob, Disabled_WCreditBlocksWBeforeAw)`, `TEST(NmuPacketize, WMetaFifoInheritsAwDst)`, `TEST(NmuReqBridge, PushWBackpressuresOnEmptyMeta)`. Failure: W flit precedes its AW flit or carries wrong metadata.
-12. Wormhole atomicity: after an AW flit drains, only W flits of that burst drain until the header.flit_tail = 1 W flit, AR flits wait. Verified: `TEST(NocWormholeArbiter, ArCannotInterleaveDuringLock)`, `MultiBeatWBurstFlowsAndUnlocks` (`ref_model/c_model/tests/router/test_wormhole_arbiter.cpp`). Failure: any foreign flit between AW and its final W.
-13. IMPORTANT wormhole tie-break: when unlocked, inputs (0 = AW, 1 = W, 2 = AR) are scanned round-robin starting at the input after the last drained one, first non-empty input wins, 1 flit per cycle. Example: pointer at 0 with AW and AR both pending drains AW (input 0), locks to W, and after the wlast W flit drains from input 1 the pointer is 2, so AR wins the next free cycle even if a new AW is pending. Verified: `TEST(NocWormholeArbiter, AwTriggersLock)` and the co-sim throughput scenarios. Failure: wrong winner in the tie case.
+12. Wormhole atomicity: after an AW flit drains on REQ or DAT, only W flits of that burst drain on that same network until the header.flit_tail = 1 W flit; the other physical network remains independently grantable. Verified: `TEST(NocWormholeArbiter, ArCannotInterleaveDuringLock)`, `MultiBeatWBurstFlowsAndUnlocks` (`ref_model/c_model/tests/router/test_wormhole_arbiter.cpp`), plus `TEST(NmuDatFace, ReqBackpressureDoesNotStallDat)` and `DatBackpressureDoesNotStallReq` for cross-network independence. Same-cycle dual-egress coverage is `[TBD]`. Failure: any foreign flit between an AW and its final W on one network, or backpressure crossing from one already-buffered network path into the other.
+13. IMPORTANT wormhole tie-break: each network owns an independent round-robin pointer. REQ scans inputs 0 = AW, 1 = W, 2 = AR; DAT scans inputs 0 = AW, 1 = W. The scan starts after that network's last drained input and the first non-empty input wins, at most 1 flit per network per cycle. Example on REQ: pointer at 0 with AW and AR pending drains AW, locks to W, and after wlast drains from input 1 the pointer is 2, so AR wins the next free REQ cycle even if a new AW is pending. Verified: `TEST(NocWormholeArbiter, AwTriggersLock)` and the co-sim throughput scenarios. Failure: wrong winner or shared arbitration state between REQ and DAT.
 14. SAM lookup: destination is the first entry (list order) whose [base, base+size) contains the address, output {dst_id, class, addr}. Verified: `TEST(SamTable, PackedTranslateForwardsTheAddressUnchanged)`, `TEST(SamTable, TranslateIsInjectiveAcrossSpacesOfOneNode)`, `TEST(SamYaml, SpaceAttributeSelectsClass)` (both spaces of one node). Failure: wrong dst_id, or an address altered on the way through.
 15. SAM validation: a loaded SAM is rejected at load if any entry is zero-size, has a base or size that is not 4 KiB aligned, has base + size overflowing 64 b, or names an out-of-mesh dst; if a node appears more than once in one space; if the memory space does not cover every mesh node exactly once; or if any two ranges overlap. Verified: `TEST(SamValidator, RejectsZeroSize)`, `RejectsNon4KBSize`, `RejectsBasePlusSizeOverflow`, `RejectsDstOutsideMesh`, `RejectsDuplicateNode`, `RejectsMissingNode`, `RejectsOverlap` (`ref_model/c_model/tests/nmu/test_sam_table.cpp`). Failure: bad SAM accepted.
-16. Same-ID response ordering: B and R beats presented to the master for one AXI ID follow the issue order of their requests, in every mode (B side always via the RoB, R side via slot pool when Enabled, via the single-outstanding interlock when Disabled). Cross-ID order and write-to-read same-address order are NOT guaranteed by this block. Verified: `TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady)`, `Enabled_MixedList_OrderPreserved`, `Disabled_StallReleaseOnRlast`, and end-to-end by the co-sim scoreboard compare. Failure: any same-ID response inversion.
-17. IMPORTANT admission classification: exactly one of {idle-ID bypass, same-destination bypass, fall-back allocate} applies per AW / AR, in that priority, per the Section 2.5 tree, with the sticky flag reset only by the idle-ID branch. Example: Section 2.5 five-AW trace, AW#4 allocates although its destination matches AW#3. Verified: `TEST(RobSameDestBypass, SameDestStreakBypassesAll)`, `DestChangeTriggersStickyFallback`, `TEST(NmuRob, Enabled_IdleIdBypass_FirstTxnPerIdAllocatesNoSlot)`. Failure: wrong branch taken.
+16. Same-ID response ordering: B and R beats presented to the master for one AXI ID follow the issue order of their requests, in every mode (B side always via the RoB, R side via slot pool when Enabled, via ordering-domain admission when Disabled). Cross-ID order and write-to-read same-address order are NOT guaranteed by this block. Verified for the current model by the existing Enabled tests; Disabled ordering-domain coverage is `[TBD]` until the model is aligned. Failure: any same-ID response inversion.
+17. IMPORTANT admission classification: exactly one of {idle-ID bypass, same-ordering-domain bypass, fall-back allocate} applies per AW / AR, in that priority, per the Section 2.5 tree, with the sticky flag reset only by the idle-ID branch. The key is `{dst_id, dst_port_id, AXI class}`. Example: Section 2.5 five-AW trace, AW#4 allocates although its destination matches AW#3 because the ID is already sticky. Existing destination/class tests remain applicable; `dst_port_id` coverage is `[TBD]` until the model is aligned. Failure: wrong branch taken.
 18. Slot reservation: AW takes 1 slot, AR takes arlen+1 consecutive slots, base = pool depth - free space, refused when free space is short, and refusal mutates no state. Free space is the count above the highest allocated range top (high-water stack, Appendix 7.1). Verified: `TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst)`, `Enabled_LzcAllocator_IsAStack`, `Enabled_PushAw_PoolFull_ReturnFalseAtomic`, `Enabled_PushAr_DownstreamBackpressure_AtomicRollback`. Failure: wrong base, overlapping ranges, or state change on refusal.
 19. No free slot, no request: an ordering_req = 1 flit never enters the network without its slots already reserved, so a returning tagged response always finds its slot. Verified: `TEST(NmuRobDeath, Enabled_PopBWithUnallocatedOrderingTag_Abort)` (the model aborts on a tag with no slot). Failure: model abort on response arrival.
 20. IMPORTANT per-ID release: responses release to the master only from the head of the ID's order list. A ready RoB'd entry behind an incomplete older entry waits, and a bypassed (ordering_req = 0) head is popped by its own response (B, or R with rlast) before anything behind it releases. Example: ID 3 issues bypassed AW#1 then RoB'd AW#2, B#2 arrives first and is held in slot, B#1 arrives and releases, then B#2 releases, master sees B#1 then B#2. Verified: `TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady)`, `Enabled_PerBeatRelease_HeadBurstStreams`, `Enabled_BypassedBeat_ReleasesNoSlot`. Failure: release past a blocked head.
-21. RobMode scope: `RobMode::Disabled` disables the R-side slot pool only, replacing it with a per-ID single-outstanding read interlock (a second same-ID AR is refused until the first read's rlast). The B-side RoB runs unconditionally in both modes. Verified: `TEST(NmuRob, Disabled_StallReleaseOnRlast)` and B-path tests passing under Disabled construction (`nmu.READ_ROB_ENABLED: 0`). Failure: a Disabled-mode B bypassing order, or a Disabled-mode second same-ID AR entering the network early.
+21. RobMode scope: `RobMode::Disabled` disables the R-side slot pool only. A same-ID AR with the same `{dst_id, dst_port_id, AXI class}` key is accepted until `NMU_MAX_TXNS_PER_ID`; a different key is refused until the ID becomes idle. The B-side RoB runs unconditionally in both modes. Verification is `[TBD]`: cover same-key acceptance, each key-field mismatch stalling, counter-full stalling, and release on `rlast`. Failure: a cross-domain AR enters early, a legal same-domain AR stalls below the limit, or B ordering changes with the R mode.
 22. Per-ID transaction gate: at most max_txns_per_id (default 32 = 0x20) outstanding transactions per ID per direction, enforced before slot availability, refusal is stateless. Example: 32 outstanding ID-7 writes refuse the 33rd AW even with 31 free B slots. Verified: `TEST(NmuRob, Enabled_MaxTxnsPerIdGate_RefusesWithFreeSlotsAvailable)`, `Enabled_MaxTxnsPerIdDefaultIsThirtyTwo`. Failure: 33rd same-ID acceptance.
+Items 23-25 verify the current `SHARED` C++ model. Target `READ_WRITE_SPLIT` coverage is
+`[TBD]` until the model and RTL implement the Section 2.4 overlay.
+
 23. VC range: every flit carries vc_id in {0 .. DAT_NUM_VC - 1}, with no per-class restriction — AW, W and AR draw from the same candidate set. With DAT_NUM_VC = 1 all flits carry vc_id = 0, which is also what REQ and RSP always carry. Verified: `TEST(NmuVcAllocator, Degenerate_NumVc1_AllModesPassthrough)`, `TEST(NmuVcAllocatorRoundRobin, DistinctReadIdsSpreadAcrossVcs)`. Failure: a flit outside the configured VC set.
 24. IMPORTANT VC selection, per AW / AR flit, first matching rule wins: (a) W flits always take the VC of their AW (no selection). (b) DAT_NUM_VC = 1: VC0. (c) ordering_req = 0 AW whose ID has a recorded destination equal to the flit's dst_id: reuse the recorded VC, and if that VC lacks space or credit the flit stalls, it is never rerouted. (d) otherwise: scan all DAT_NUM_VC VCs round-robin from the selection pointer, first VC with pending space and credit wins, pointer moves past the winner. The (dst_id, VC) record is written on every accepted ordering_req = 0 AW of that ID and persists for the whole run until overwritten by the next such accept, it is never invalidated. AR flits and ordering_req = 1 flits always use rule (d) and never write the record. Example (DAT_NUM_VC = 4, pointer at 0): AW ID 5 dst 8'h12 ordering_req = 0 takes VC0 and records (8'h12, VC0), a second identical AW after the first burst's wlast reuses VC0 even though VC1 is idle, an AW ID 5 dst 8'h07 misses the record and round-robins to VC1. Verified: `TEST(NmuVcAllocatorRoundRobin, SameWriteIdDifferentDestRoundRobins)`, `RobbedFlitsRoundRobinRegardlessOfDest`, `NumVc1SameIdSameDestUnaffected`, `TEST(NmuVcAllocator, WFollowsAW_ReusedFixedVc)`. Header `fixed_vc` follows the same ordering_req = 0 / 1 split (2.4): 1 on every ordering_req = 0 AW of the streak and its W beats, 0 on ordering_req = 1 AW and on AR. Verified: `TEST_P(NmuVcAllocatorParam, FixedVcStampedOnOrderedAwStreak)`, `TEST_P(NmuVcAllocatorParam, FixedVcClearOnRobbedAwAndAr)`. Failure: wrong VC in any listed case, a mid-streak reroute, or wrong fixed_vc bit.
 25. IMPORTANT VC drain tie-break: at most 1 flit per cycle leaves for the NoC, chosen by a single global round-robin over all DAT_NUM_VC VCs starting at the pointer, first VC that is non-empty and has sender credit wins, pointer set to winner+1. Example (DAT_NUM_VC = 4, pointer 2, flits pending on VC1 and VC3): VC3 wins (scan 2, 3), pointer becomes 0, VC1 wins next cycle. Verified: `TEST(NmuVcAllocatorRoundRobin, DistinctReadIdsSpreadAcrossVcs)` and co-sim link utilization scenarios. Failure: two flits in one cycle, a starved non-empty credited VC, or wrong winner in the tie case.
 26. DAT request credit: the per-VC sender counter is seeded to NOC_ROUTER_VC_DEPTH = 8, decrements per emitted flit, increments per pulse on `tx_dat_crdvalid_i`, and a pulse arriving in cycle N is usable in cycle N. Invariant per VC: credit + un-credited in-flight flits = 8, and the NMU never emits on a VC with counter 0. REQ has no credit counter, it grants against `tx_req_ready_i`. Verified: `TEST(NmuDatCreditConservation, BackpressureStallsAtSeedThenReopens)` (`ref_model/c_model/tests/nmu/test_nmu_credit.cpp`), `TEST(RouterWrap, DatLocalCreditReturnReplenishesRouter)`. Failure: a 9th un-credited flit on one VC, or a stall with credit available.
-27. Response ingress: the NMU accepts every flit presented on either response face (RSP `ready` is tied true, DAT has no ready wire), demuxes B / R into queues of depth NMU_DEPKT_Q_DEPTH = 16 each, and holds at most one pending flit when the target queue is full. That pending flit blocks all later response flits behind it regardless of channel (single-ingress head-of-line blocking, as built). Verified: `TEST(NmuDepacketize, PendingFlitHolBlockingBFullStallsR)`, `DemuxMixedFlitsByAxiCh`. Failure: a dropped response flit, or R progress past a stalled pending flit.
+27. Response ingress (current model): the NMU accepts every flit presented on either response face (RSP `ready` is tied true, DAT has no ready wire), demuxes B / R into queues of depth NMU_DEPKT_Q_DEPTH = 16 each, and holds at most one pending flit when the target queue is full. That pending flit blocks all later response flits behind it regardless of channel (single-ingress head-of-line blocking, as built). Verified: `TEST(NmuDepacketize, PendingFlitHolBlockingBFullStallsR)`, `DemuxMixedFlitsByAxiCh`. Failure: a dropped response flit, or R progress past a stalled pending flit. Target DAT ingress instead handshakes with `rx_dat_ready_o` before accepting the flit.
 28. Held-valid responses: bvalid / rvalid with all payload fields hold unchanged until the cycle their ready is sampled high, then either the next beat or valid = 0 appears (rule P4). Verified: co-sim (the AXI master BFM samples with randomized ready delays, scoreboard compare) and `TEST(NmuWrap, single_aw_w_two_phase_handshake)`. Failure: valid deasserted or payload changed before ready.
-29. DAT response credit return: one pulse on `rx_dat_crdvalid_o[v]` per `DataR` flit consumed from VC v, at most one pulse per VC per cycle, pending pulses accumulate and drain in later cycles, none is lost. RSP returns no credit — `rx_rsp_ready_o` is tied true (SPEC 27) and the face has no credit pin. Verified: `TEST(NmuDatCreditConservation, ConsumerPulseAccumulatesMultiConsumePerTick)`. Failure: pulse count not equal to consumed-flit count over any window.
+29. DAT response credit return (current model only): one pulse on `rx_dat_crdvalid_o[v]` per `DataR` flit consumed from VC v, at most one pulse per VC per cycle, pending pulses accumulate and drain in later cycles, none is lost. RSP returns no credit — `rx_rsp_ready_o` is tied true (SPEC 27) and the face has no credit pin. Verified: `TEST(NmuDatCreditConservation, ConsumerPulseAccumulatesMultiConsumePerTick)`. Failure: pulse count not equal to consumed-flit count over any window. Target RTL supersedes this rule with `rx_dat_ready_o` as described in Section 3.2.
 30. Unloaded latencies: the rule P8 values (AW handshake to AW flit = 3 cycles, B flit to bvalid = 3 cycles, R flit to rvalid = 2 cycles Disabled / 3 cycles Enabled) are exact in an idle, credit-available NMU. These counts are asserted by construction: they follow from the fixed `Nmu::tick` stage order (Section 2.4) and the one-cycle wrap output register (rule P3), not from a dedicated cycle-count test. `TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml)` confirms an AW flit emerges within a bounded window; no ctest pins the exact cycle count. Failure: any deviation from the tick-order-derived count.
 
 ## 5. Block Diagram
@@ -390,10 +465,10 @@ TESTBENCH (generated tb_top, one per topology)
 |  +--------------------- nmu_wrap (DPI: NmuWrap -> Nmu) ----------------+  |
 |  |                                                                     |  |
 |  |  REQ path (1 flit/cycle out)                                        |  |
-|  |  AW/W/AR -> AxiSlavePort -> Rob -------> S1 ------> Packetize       |  |
-|  |             (5 FIFOs x16)   (admission,  (1-entry   (flit build,    |  |
-|  |                              SAM, slot    reg per    w_meta FIFO)   |  |
-|  |                              alloc)       channel)      |           |  |
+|  |  AW/AR -> AxiSlavePort -> SAM -> RegSlice -> Rob -> S1 -> Packetize |  |
+|  |    W --------(5 FIFOs x16)--------bypass----^     (1-entry reg/ch)  |  |
+|  |                      (parallel) (type 0/1/2) (admission, slot alloc)|  |
+|  |                                                     (flit build)    |  |
 |  |                                            AW   W   AR  v           |  |
 |  |                                          WormholeArbiter(3in,{AW->W})| |
 |  |                                                   |                 |  |

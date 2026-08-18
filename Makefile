@@ -19,7 +19,7 @@ SIM_VERILATOR := sim/verilator
 SIM_VCS       := sim/vcs
 
 .PHONY: help build build-cmodel build-yamlcpp build-verilator test \
-        pytest check \
+        pytest check docker-build docker-shell docker-test docker-pytest docker-sim-setup docker-sim-smoke docker-sim-tier2 \
         clean clean-cmodel clean-verilator clean-vcs clean-generated
 
 help:
@@ -40,6 +40,15 @@ help:
 	@echo "  make test             run c_model ctest suite"
 	@echo "  make pytest           specgen + sim/tools suites, golden drift gate"
 	@echo "  make check            both of the above -- run this before committing"
+	@echo ""
+	@echo "Docker:"
+	@echo "  make docker-build     build noc-dev Docker image"
+	@echo "  make docker-shell     shell in noc-dev image with this repo mounted"
+	@echo "  make docker-test      run full c_model ctest suite inside noc-dev image"
+	@echo "  make docker-pytest    run specgen + sim/tools pytest suites inside noc-dev image"
+	@echo "  make docker-sim-setup prepare sim-only deps inside noc-dev image, ctest bypassed"
+	@echo "  make docker-sim-smoke run 2x2 verify inside noc-dev image, ctest bypassed"
+	@echo "  make docker-sim-tier2 legacy alias for docker-sim-smoke (2x2 verify)"
 	@echo ""
 	@echo "Clean:"
 	@echo "  make clean                  everything (build/ + per-sim output/ + generated stimulus)"
@@ -145,6 +154,7 @@ pytest:
 	@status=0; \
 	(cd specgen && $(PYTHON3) -m pytest tests/ -q) || status=1; \
 	(cd sim/tools && $(PYTHON3) -m pytest . -q) || status=1; \
+	git add --refresh -- specgen/generated || status=1; \
 	exit $$status
 
 # Run before committing. The SAM parity proof lives half in each suite: ctest
@@ -154,6 +164,39 @@ pytest:
 # dst_id(), say) moves both sides of the Python-side cross-format check
 # together, leaves pytest green, and shows up in ctest alone.
 check: test pytest
+
+# --- docker ---
+
+DOCKER ?= docker
+DOCKER_IMAGE ?= noc-dev:verilator-5.048
+DOCKER_BUILD_VOLUME ?= noc-dev-build-cache
+DOCKER_SIM_VOLUME ?= noc-dev-sim-cache
+DOCKER_CCACHE_VOLUME ?= noc-dev-ccache
+DOCKER_SIM_BUILD_ROOT ?= /home/agent/noc_sim_build
+DOCKER_PROJECT_DIR ?= $(shell cygpath -m "$(CURDIR)" 2>/dev/null || printf '%s\n' "$(CURDIR)")
+DOCKER_NO_PATHCONV ?= MSYS_NO_PATHCONV=1
+DOCKER_RUN = $(DOCKER_NO_PATHCONV) $(DOCKER) run --rm -v "$(DOCKER_PROJECT_DIR):/workspace" -v "$(DOCKER_BUILD_VOLUME):/home/agent/noc_build" -v "$(DOCKER_CCACHE_VOLUME):/home/agent/.cache/ccache" -w /workspace $(DOCKER_IMAGE)
+DOCKER_SIM_RUN = $(DOCKER_NO_PATHCONV) $(DOCKER) run --rm -v "$(DOCKER_PROJECT_DIR):/workspace" -v "$(DOCKER_SIM_VOLUME):$(DOCKER_SIM_BUILD_ROOT)" -v "$(DOCKER_CCACHE_VOLUME):/home/agent/.cache/ccache" -w /workspace -e BUILD_ROOT=$(DOCKER_SIM_BUILD_ROOT) $(DOCKER_IMAGE)
+
+docker-build:
+	$(DOCKER) build -f docker/noc-dev/Dockerfile -t $(DOCKER_IMAGE) .
+
+docker-shell:
+	$(DOCKER_NO_PATHCONV) $(DOCKER) run --rm -it -v "$(DOCKER_PROJECT_DIR):/workspace" -v "$(DOCKER_BUILD_VOLUME):/home/agent/noc_build" -v "$(DOCKER_CCACHE_VOLUME):/home/agent/.cache/ccache" -w /workspace $(DOCKER_IMAGE) bash
+
+docker-test:
+	$(DOCKER_RUN) bash -lc 'make test'
+
+docker-pytest:
+	$(DOCKER_RUN) bash -lc 'make pytest'
+
+docker-sim-setup:
+	$(DOCKER_SIM_RUN) bash -lc 'make build-yamlcpp BUILD_ROOT=$$BUILD_ROOT CMAKE_EXTRA=-DBUILD_TESTING=OFF'
+
+docker-sim-smoke:
+	$(DOCKER_SIM_RUN) bash -lc 'set -euo pipefail; make build-yamlcpp BUILD_ROOT=$$BUILD_ROOT CMAKE_EXTRA=-DBUILD_TESTING=OFF; rm -f sim/filelist_*.f sim/tb/test/tb_top_*.sv sim/tb/soc/tb_top_dma_*.sv; rm -rf "$$BUILD_ROOT"/verilator/obj_dir_*; make sim BUILD_ROOT=$$BUILD_ROOT CONFIG=mesh_2x2 PATTERN=neighbor'
+
+docker-sim-tier2: docker-sim-smoke
 
 # Simulation runs from sim/verilator, whose Makefile reaches output/ by relative
 # path, so these forward with -C rather than include. CONFIG, PATTERN and the
@@ -206,4 +249,3 @@ clean-verilator:
 
 clean-vcs:
 	$(MAKE) -C $(SIM_VCS) clean
-

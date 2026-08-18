@@ -67,53 +67,6 @@ inline void declare_space_coords(SamTable& table, unsigned x_dim, unsigned y_dim
            "sam_yaml: the peripheral space must not be collective-eligible");
 }
 
-// Does this address space appear in the map at all? Memory always does; config
-// is optional (spec §5.1 covers the spaces a topology declares).
-inline bool space_present(const SamTable& table, axi::Space space) {
-    for (const auto& e : table.entries()) {
-        if (e.space == space) return true;
-    }
-    return false;
-}
-
-// What offset decode requires of a map (spec §5.1). The mode itself is named
-// routing.use_id_table (false = offset).
-//
-// Table decode holds the coordinate ranges per address-map entry, offset decode
-// one pair global to the map (upstream RouteCfg.XYAddrOffsetX/Y, floo_pkg.sv).
-// One global pair reaches one field position, so offset decode is legal only
-// where every space puts its node index at the same address bits. Each
-// addr_range authors its own stride, so that is a property of the file and not
-// of the format: a config giving its two spaces different strides is legal
-// under table decode and refused here.
-//
-// On a map meeting §5.1 both modes decode every address to the same node and
-// the same node-local offset, so the mode changes which maps are legal rather
-// than how an address is read, and the model validates it here instead of
-// carrying a second lookup that would return the same answer. The 2N range
-// compares a table decoder costs against one slice is a hardware difference.
-inline void check_offset_ranges(const SamTable& table) {
-    const SpaceCoords* first = nullptr;
-    // The tile spaces only. Offset decode is a claim about where a node stride
-    // puts the node index, and a peripheral region has no node stride -- it is
-    // placed in declaration order at its own size, one region per peripheral.
-    // Including it would abort on a legal peripheral topology.
-    for (axi::Space space : {axi::Space::Config, axi::Space::Memory}) {
-        if (!space_present(table, space)) continue;
-        const SpaceCoords* c = table.collective_coords(space);
-        assert(c && "routing: use_id_table false needs every space to meet spec 5.1");
-        if (c == nullptr) std::abort();
-        if (first == nullptr) {
-            first = c;
-            continue;
-        }
-        assert(c->x_range.offset == first->x_range.offset &&
-               c->y_range.offset == first->y_range.offset &&
-               "routing: use_id_table false holds one range pair for the whole map, so "
-               "every space must use the same node stride");
-    }
-}
-
 // --- FlooNoC-shaped config (sim/configs/*.yml) ---------------------------
 //
 // Twin of sim/tools/address_map.py's pack_config(). The two expansions must
@@ -305,14 +258,11 @@ inline SamTable load_config_table(const YAML::Node& root) {
     SamTable table(std::move(es));
     table.validate(x_dim, y_dim);
     declare_space_coords(table, x_dim, y_dim);
-    // routing.use_id_table names the two decode modes: true (the default) is
-    // table decode, false is the address-offset slice, whose validation is ours
-    // and not upstream's -- upstream's non-table path is a bit-slice and
-    // nothing more.
     YAML::Node routing = root["routing"];
     const bool use_id_table =
         !routing || !routing["use_id_table"] || routing["use_id_table"].as<bool>();
-    if (!use_id_table) check_offset_ranges(table);
+    assert(use_id_table && "routing: use_id_table must be true; offset decode is deferred");
+    if (!use_id_table) std::abort();
     return table;
 }
 

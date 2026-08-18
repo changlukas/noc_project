@@ -168,7 +168,7 @@ and is currently unstated.
 
 | Item | Change |
 |---|---|
-| §5 freedom from deadlock | Disambiguate "one virtual channel per network channel". Request and response already occupy separate physical networks; a reviewer reads the current wording as one channel total, which contradicts established AXI-over-NoC results |
+| §5 freedom from deadlock | Resolved: the target now states the acyclic `REQ -> DAT -> RSP` message dependency separately from routing deadlock and DAT VC count |
 | §5 or §8 | State the multicast anti-blocking rule. A row multicast that drops a copy and continues is a two-branch worm at every hop, and branch blocking is a documented wormhole multicast hazard independent of turns. Either asynchronous replication or a guaranteed ejection sink at every destination NI |
 | §5 or §8 | State the reduction concurrency restriction. A combine point holds a partial operand while waiting for its sibling, a dependency the turn model does not cover. The comparable design permits one reduction per router at a time and still offers no proof |
 | §8 `collective_op` | State the fixed combine order invariant for `REDUCE` |

@@ -477,8 +477,7 @@ sim-injection-sweep:
 # the full co-sim build.  Expected output: "TOOLCHAIN OK"
 hello:
 	echo "module empty_tb; initial \$$finish; endmodule" > /tmp/empty_tb.sv
-	$(VERILATOR) --cc --exe --build --top-module empty_tb \
-	    -CFLAGS "-std=c++17" /tmp/empty_tb.sv \
+	$(VERILATOR) --binary --top-module empty_tb /tmp/empty_tb.sv \
 	    --Mdir /tmp/empty_tb_obj
 	/tmp/empty_tb_obj/Vempty_tb && echo "TOOLCHAIN OK"
 

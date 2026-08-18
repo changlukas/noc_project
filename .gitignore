@@ -16,6 +16,9 @@ ref_model/c_model/build/
 # Temporary files
 *.tmp
 *.log
+/node_modules/
+/.sandcastle/.env
+/.sandcastle/logs/
 
 # Co-sim runtime artifacts (per-instance variants since multi-instance DPI refactor)
 master_wrap_read_dump*.txt

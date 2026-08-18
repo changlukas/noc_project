@@ -60,8 +60,8 @@ exit logic. `ref_model/top/noc_fabric.sv` holds N nodes (`ni_wrap` = NMU + NSU +
 inter-router links through a `genvar` generate loop. Boundary directions are
 tied off; a tied-off direction driving a valid flit is a `$fatal`.
 
-`router_wrap` carries three physical networks, each with its own flit width
-(`ni_params_pkg`: REQ 136 b, RSP 126 b, DAT 633 b):
+`router_wrap` carries three physical networks, each with its current generated flit width
+(`ni_params_pkg`, `AXI_ID_WIDTH = 3`: REQ 136 b, RSP 126 b, DAT 633 b):
 
 | network | flow control | carries |
 |---|---|---|
@@ -310,7 +310,7 @@ network_type: "axi"
 
 routing:
   route_algo: "XY"
-  use_id_table: true          # table decode; false is the address-offset slice
+  use_id_table: true          # required; offset decode is deferred
 
 endpoints:
   - name: "tile"
@@ -351,7 +351,13 @@ The SAM is a first-match `{base, size, dst_id}` range table, expanded from
 these ranges by two readers that must agree rule for rule: `sim/tools/
 address_map.py` `pack_config()` at generate time, and `nmu/sam_yaml.hpp`
 `load_config_table()` at simulation time through `+sam_config`. The generator
-places each request at `base(dst) + offset` and the NMU SAM translates the
+currently emits the testbench endpoint-window view into `topology_pkg.sv`; RTL
+handoff extends that same package with the NI's SAM and coordinate
+metadata. The C++ model keeps the runtime loader because it cannot consume an
+SV package. No synthesizable block parses YAML or exposes a runtime SAM
+programming interface. Both readers reject `routing.use_id_table: false` until
+offset decode is implemented. The generator places each request at
+`base(dst) + offset` and the NMU SAM translates the
 address back to `dst_id`, so a divergence would leave the generated package and
 the generated stimulus agreeing with each other and disagreeing with the runtime
 translator. `sim/configs/sam_rules.golden` is where the two meet:
@@ -367,8 +373,10 @@ index is not the routing id, which uses a fixed shift: `dst_id = (y << X_WIDTH)
 node a `0x100000000` block holding a `0x2000000` memory aperture at offset 0 and
 a `0x1000` config aperture at `0x2000000`. `TILE_TARGETS` is therefore 2
 everywhere, and the endpoint carries one decode path, the two-window one. The
-windows are per node and global — nothing rebases, so the tile decodes on the
-same bases the SAM matched. A disagreement between the two shows up as an
+windows are per node and global. Unicast addresses do not rebase; a multicast
+replica changes only the request class's Config or Memory coordinate field at the destination
+NSU, preserving the global map and the shared node-local offset. The two spaces may place their
+fields at different address bits. A disagreement between the two shows up as an
 address outside both windows, which DECERRs; the endpoint's `DECERR_FAULT_BIT`
 fault injection and the RRESP fatal in `sim/tb/test/user_node_endpoint.sv` check
 that path.
@@ -417,7 +425,7 @@ supplied to each rather than drawn once and shared.
 | VCS flow | build-only; no directed run target, never executed on a real VCS install. |
 | Deferred header fields | QoS, route parity, and flit ECC are unbuilt and have no header field at all: the 48 b header is fully assigned (`PADDING_FIELDS_COUNT` = 0) and carries no width-0 placeholder for them. |
 | Conformity exclusions | exclusive access is unit-level only; SLVERR unexercised; single-clock CDC approximation (see Conformity scope). |
-| NI ingress backpressure unmodelled | not modeled on any network as of S3a: `ready` tied true / DAT merge self-credits, ingress queues unbounded, LOCAL stall metrics 0 by construction. Reassessed at S3b: request-class (`DataAw`/`DataW`) and response-class (`DataR`) messages now share DAT VCs post-collapse. This stays deadlock-safe SOLELY because ingress queues are unbounded and always accept. Any future work that bounds ingress queues must first re-open message-class separation (or an equivalent VC-classing scheme). |
+| Target NI ingress backpressure unmodelled | current model ties ready true or self-credits through the DAT merge, so LOCAL stall metrics remain 0 by construction. Target Router-to-NI DAT ejection instead uses ready/valid into separate DAT Write and DAT Read class FIFOs; NI-to-Router DAT injection remains per-VC credit-controlled by Router input FIFO capacity. The model therefore cannot verify target LOCAL stalls, asymmetric DAT flow control, or Router-only VC FIFO ownership. |
 | SimpleRouter multi-read ruling (S3b) | grants up to one flit per OUTPUT per tick from the same input FIFO, matching the credit `Router`. Mainline `floo_router.sv` has one FIFO read port, a resource limit, not a protocol requirement. Kept as a deliberate c_model-optimistic divergence: multi-output fan-out from one input in a single tick that RTL would need more than one cycle for. |
 | `ready_slack` calibration deferred (S3b) | `SimpleRouterConfig::ready_slack` default (2) is PROVISIONAL, never measured against a real wire loop. The compliant-sender high-water mark sits exactly at FIFO depth (zero spare). Needs a measured wire-loop experiment before the default is load-bearing. |
 | vc{2,4,8} re-baseline (S3b) | the VA stage reassigns the downstream VC per hop for `fixed_vc=0` traffic. Co-sim/perf numbers on vc{2,4,8} topologies shift by construction versus pre-S3b. Matrix green after S3b means re-baselined, not bit-identical to the earlier numbers. |

@@ -37,7 +37,8 @@ compute tile per node on a 2D mesh, standard AXI4 at every endpoint.
 - Support AXI Outstanding / Interleaving / Out-of-Order
 - 2x2 to 16x16 mesh, 256 nodes
 - Write multicast / Response reduction support
-- 1 to 8 virtual channels, credit-based on `DAT`, ready/valid on `REQ` / `RSP`
+- 1 to 8 virtual channels on `DAT`, default 2, with selectable shared or equal Read/Write-split
+  allocation; credit-based on `DAT`, ready/valid on `REQ` / `RSP`
 - XY routing on all three networks, wormhole switching for the one multi-flit packet type
   (`AW`+`W`; every response packet is single-flit). Deadlock-free for unicast and
   non-overlapping multicast trees; concurrent overlapping multicasts are serialized by
@@ -87,7 +88,7 @@ compute tile per node on a 2D mesh, standard AXI4 at every endpoint.
           └───────┘   └───────┘   └───────┘   └───────┘
 
           every link, per direction, flit wires only
-          REQ 136 b + RSP 126 b + DAT 633 b
+          default: REQ 136 b + RSP 126 b + DAT 633 b
           4 x 4 shown, 16 x 16 max
 ~~~
 
@@ -100,7 +101,7 @@ Inside one node:
    │  Compute   │   AXI4   │   │   Network      │       │    Router    │  REQ  ══▶
    │  tile      │ ────────────▶│   interface    │──────▶│  XY route    │
    │            │  addr 48 │   │                │       │  VC allocate │  RSP  ══▶
-   │  (master)  │  ID 3    │   │  address map   │       │  replicate   │  DAT  ══▶
+   │  (master)  │ ID 1..8  │   │  address map   │       │  replicate   │  DAT  ══▶
    │            │◀═════════════│  packetize     │◀──────│  merge       │  ◀══ 4 neighbours
    │            │          │   │  depacketize   │       │              │
    └────────────┘          │   │  response order│       │              │
@@ -121,9 +122,13 @@ Physically separate networks, not virtual channels on a shared link:
 
 | Physical link | Size | Narrow class | Data class |
 |---|---|---|---|
-| `REQ` | 136 b | `Aw`, `Ar`: 48 b address. `W`: 64 b data | `Ar`: 48 b address |
-| `RSP` | 126 b | `R`: 64 b data. `B`: 2 b response | `B`: 2 b response |
-| `DAT` | 633 b | - | `Aw`: 48 b address. `W`, `R`: 512 b data |
+| `REQ` | `133 + AXI_ID_WIDTH` b (default 136 b) | `Aw`, `Ar`: 48 b address. `W`: 64 b data | `Ar`: 48 b address |
+| `RSP` | `123 + AXI_ID_WIDTH` b (default 126 b) | `R`: 64 b data. `B`: 2 b response | `B`: 2 b response |
+| `DAT` | 633 b for `AXI_ID_WIDTH` 1..8 | - | `Aw`: 48 b address. `W`, `R`: 512 b data |
+
+Physical widths are elaboration-time derivatives of the packet layout, not independent tuning
+parameters. The 585-bit `DataW` payload is wider than `DataAw` and `DataR` throughout the legal
+ID range, so DAT remains 633 bits while REQ and RSP track `AXI_ID_WIDTH`.
 
 One `DAT` network, not a request and response pair, even though it carries request-direction
 `DataW` and response-direction `DataR`:
@@ -140,9 +145,11 @@ One `DAT` network, not a request and response pair, even though it carries reque
 - Owns the system address map (SAM): global config space and global memory space
 - Address lookup selects the destination node and the AXI class, config space narrow, memory
   space data
-- Addresses are global end to end: the NMU names a destination and forwards `AxADDR` unchanged,
-  the NSU presents that same address to the AXI slave. Address decode below the node boundary
-  belongs to the endpoint, on the bases the map already assigned
+- Unicast addresses are global end to end: the NMU names a destination and forwards `AxADDR`
+  unchanged, and the NSU presents that same address to the AXI slave. For a multicast AW, each
+  destination NSU overwrites only the address's node-coordinate field with its own coordinate;
+  every other bit stays unchanged. No path subtracts the matched SAM region base. Address decode
+  below the node boundary belongs to the endpoint, on the bases the map already assigned
 - Packetizes, depacketizes, orders responses
 
 **Router.** Route selection, multicast replication, response aggregation. No AXI address
@@ -186,7 +193,7 @@ the AXI slave.
 |---|---|
 | AXI4 response contract | One `B` per `Aw`, and an error `BRESP` takes precedence when a multicast write is answered by several slaves |
 | Ordering | Responses reach a master in AXI order within an ID in every configuration |
-| Deadlock-free | Guaranteed at one virtual channel per network channel, with multicast enabled |
+| Deadlock-free | XY routing removes routing cycles. The AXI message dependency is acyclic, `REQ -> DAT -> RSP`; DAT VC count does not provide this guarantee |
 | Write data pairing | A slave pairs each write request with its own write data, whatever the mix of sources |
 | Credit capacity | A credit-controlled receiver holds, per virtual channel, at least one flit of buffer for each cycle of buffer turnaround time. Below that capacity a link idles with no contention present |
 
@@ -205,16 +212,96 @@ the AXI slave.
 | Signal | Source | Description |
 |---|---|---|
 | `ACLK` | Clock source | AXI domain clock. AXI port signals are sampled on its rising edge |
-| `ARESETn` | Reset source | AXI domain reset, active low, asynchronous |
+| `ARESETn` | Reset source | AXI domain reset, active low; asynchronous assert and synchronous deassert on `ACLK` |
 | `noc_clk` | Clock source | NoC domain clock, 1 GHz target |
-| `noc_rst_n` | Reset source | NoC domain reset, active low, asynchronous |
+| `noc_rst_n` | Reset source | NoC domain reset, active low; asynchronous assert and synchronous deassert on `noc_clk` |
 
-The two domains are asynchronous. The crossing sits at the AXI boundary of the network interface.
+The two domains are asynchronous. The five existing AXI channel FIFOs are the CDC boundary; the NI
+does not add a second complete-flit CDC stage. All SAM, ordering, packetization, depacketization,
+channel assignment, VC selection and NoC class queues operate in `noc_clk` after this boundary.
+
+System integration derives `ARESETn` and `noc_rst_n` from one common active-low system reset using
+one reset synchronizer per clock domain. The synchronizers reside above the NI; NMU and NSU do not
+have a `sys_rst_n` port. Assertion reaches both domains asynchronously. Deassertion is synchronized
+independently, so release skew between the two domains is legal and the async FIFOs must tolerate
+it. Independent AXI-domain or NoC-domain reset and one-sided reset recovery are unsupported. A
+system reset clears all five AXI async FIFOs, all four NoC class FIFOs, ordering and RoB state, and
+credit counters; in-flight transactions are discarded rather than preserved or replayed.
+
+| AXI channel FIFO | NMU direction | NSU direction |
+|---|---|---|
+| AW | `ACLK` to `noc_clk` | `noc_clk` to `ACLK` |
+| W | `ACLK` to `noc_clk` | `noc_clk` to `ACLK` |
+| AR | `ACLK` to `noc_clk` | `noc_clk` to `ACLK` |
+| B | `noc_clk` to `ACLK` | `ACLK` to `noc_clk` |
+| R | `noc_clk` to `ACLK` | `ACLK` to `noc_clk` |
+
+Each AXI interface therefore has five dual-clock FIFOs. Their entries are AXI channel records, not
+physical flits. `NI_CDC_FIFO_DEPTH` is their common entry count. The NoC side has four logical
+`noc_clk` class FIFOs: REQ, RSP, DAT Write and DAT Read. `NI_CLASS_FIFO_DEPTH`, default 8 with
+legal values 4, 8 and 16, is their common entry count. They are not CDC FIFOs and are not
+replicated per VC.
+
+| NoC class FIFO | NMU direction | NSU direction | AXI objects |
+|---|---|---|---|
+| REQ | transmit | receive | Narrow AW/W/AR and Data AR |
+| RSP | receive | transmit | all B and Narrow R |
+| DAT Write | transmit | receive | Data AW/W |
+| DAT Read | receive | transmit | Data R |
+
+On injection, the AXI-to-NoC assigner selects REQ, RSP, DAT Write or DAT Read after packetization.
+REQ and RSP use ready/valid. For DAT, sender-side Credit Management holds one counter per Router VC,
+applies `DAT_VC_ALLOC_MODE`, selects an eligible credited VC, stamps `vc_id`, and decrements that
+counter when the flit is sent. `DataW` inherits its owning `DataAw` VC through WLAST. The NI has no
+per-VC queue; the selected Router LOCAL input VC FIFO owns the credited storage.
+
+On ejection, the Router presents REQ, RSP and DAT to the NI with ready/valid. The NoC-to-AXI
+assigner classifies the accepted flit and writes the corresponding AXI channel FIFO. It does not
+demultiplex into VC queues, and `vc_id` has no NI queue-selection role after acceptance. DAT ready
+is derived from the destination DAT Write or DAT Read class FIFO capacity.
+
+At the NSU, REQ Narrow and DAT Data write flits enqueue independently before the one downstream
+AXI AW/W interface. The NoC-to-AXI AW assignment selects the only admissible class or round-robins
+when both are admissible. Every accepted AW appends `{class, burst_beats}` to a W-order FIFO. AW may
+continue to accept later transactions while W serves the FIFO head class through its final beat;
+if that class has no W beat ready, the other class cannot bypass it. This permits multiple AW
+transactions to remain outstanding without mispairing or interleaving their W data.
+
+The first RTL does not implement NoC QoS. It retains `AWQOS` and `ARQOS` on the AXI interface and
+transports them in the AW and AR payloads, but `AxQOS` does not select a VC or affect router
+arbitration. The NoC header remains 48 bits. A future DAT-only, best-effort priority design is
+recorded in `trade-off.md`; it is not part of this target.
+
+AW-order metadata selects the W path for the whole burst, and the physical-channel arbiter locks
+from AW through its WLAST beat. The Read/Write DAT split therefore does not permit W interleaving
+or a later write burst to bypass the active burst. The five independent AXI channel async FIFOs
+provide the required channel concurrency before packetization; there is no additional CDC queue.
+Within one AXI channel FIFO, Narrow and Data records remain in acceptance order, so a blocked head
+may delay the other class until classification. Separate class FIFOs remove cross-class coupling
+only after that point.
+
+Narrow and Data writes share the external AXI AW/W channels through the async boundary and up to
+classification and capture in `noc_clk`.
+An AW-order context FIFO records each accepted AW's NoC class and route; every W beat follows the
+context at the FIFO head, which retires on WLAST. After packetization, Narrow AW/W uses the REQ TX
+pipeline and Data AW/W uses the DAT Write TX pipeline. Their channel assignment, class FIFO, flow
+control and physical output are independent, so REQ and DAT may each emit one write flit in the same
+`noc_clk` cycle. Each physical network has its own AW-to-WLAST lock. Backpressure on one network
+must not stall the other after classification into the separate NoC class FIFOs.
+Parallel drain may change arrival order across Narrow and Data address spaces, which are distinct
+ordering domains. It must not reorder writes within one `{AXI ID, dst_id, dst_port_id, AXI class}`
+domain. The NMU B ordering state returns same-ID responses in issue order.
+
+At the NMU response side, B and R use independent async FIFOs and may assert `BVALID` and `RVALID`
+in the same cycle. `DataB` on RSP and `DataR` on DAT have independent physical and class queues.
+`NarrowB` and `NarrowR` share the single-flit RSP link and cannot traverse that link in the same
+cycle, but once assigned to B and R neither AXI response channel waits on the other's handshake.
 
 ### 4.2 AXI channel signals
 
-The NMU and NSU ports carry the same AXI4 channel set at the §5 widths, so the tables below
-cover both.
+Each NMU and NSU exposes exactly one AXI4 interface. Both ports carry the same channel set at the
+§5 widths, including a fixed 512-bit data bus; Narrow and Data are internal NoC traffic classes,
+not separate AXI interfaces.
 
 **Write address channel**
 
@@ -238,8 +325,8 @@ cover both.
 
 | Signal | Width | Source | Description |
 |---|---:|---|---|
-| `WDATA` | 64 or 512 | Master | Write data, 64 b narrow class, 512 b data class |
-| `WSTRB` | 8 or 64 | Master | Write strobes |
+| `WDATA` | 512 | Master | Write data. A Narrow transfer carries the addressed 64 b lane in the Narrow NoC payload; a Data transfer carries all 512 b |
+| `WSTRB` | 64 | Master | Write strobes. Narrow packetization selects the 8 strobes for the addressed 64 b lane |
 | `WLAST` | 1 | Master | Write last, the last transfer in a write burst |
 | `WUSER` | 8 | Master | User signal |
 | `WVALID` | 1 | Master | Write data valid |
@@ -278,7 +365,7 @@ cover both.
 | Signal | Width | Source | Description |
 |---|---:|---|---|
 | `RID` | 3 | Slave | Read ID tag |
-| `RDATA` | 64 or 512 | Slave | Read data, 64 b narrow class, 512 b data class |
+| `RDATA` | 512 | Slave | Read data. A Narrow response is restored into its addressed 64 b lane; a Data response carries all 512 b |
 | `RRESP` | 2 | Slave | Read response |
 | `RLAST` | 1 | Slave | Read last, the last transfer in a read burst |
 | `RUSER` | 8 | Slave | User signal |
@@ -288,36 +375,51 @@ cover both.
 ### 4.3 NoC link interface
 
 - Each link carries the three physical networks, each an independent signal group per direction.
-- `REQ` and `RSP` use ready/valid flow control, per the §3 simple router mode. A flit transfers
-  on a cycle where valid and ready are both high.
-- `DAT` uses credit-based flow control with no ready signal, per the standard router mode. A
-  flit transfers on a cycle where valid is high and the transmitter holds a credit for the
-  target virtual channel. The receiver returns one credit per virtual channel as a buffer frees.
+- `REQ` and `RSP` use ready/valid flow control. A flit transfers when valid and ready are both high.
+- DAT between routers uses per-VC credit flow control in both directions.
+- The Router LOCAL DAT port is asymmetric: NI-to-Router injection uses per-VC credit because the
+  Router input owns VC FIFOs; Router-to-NI ejection uses ready/valid because the NI owns only shared
+  class FIFOs and no per-VC storage.
 - Driven signals reset low.
 
-A port carries one transmit and one receive instance of every network's signal group. Directions
-below are from the port's own view. No wire is shared between the two instances.
+The table below is the NI-facing contract. Directions are from the NI's view.
 
 | Signal | Width | Direction | Description |
 |---|---:|---|---|
-| `TXREQFLIT` | 136 | Output | `REQ` transmit flit, header and payload |
+| `TXREQFLIT` | `133 + AXI_ID_WIDTH` | Output | `REQ` transmit flit, header and payload |
 | `TXREQVALID` | 1 | Output | `REQ` transmit valid |
 | `TXREQREADY` | 1 | Input | `REQ` transmit ready, from the receiver |
-| `RXREQFLIT` | 136 | Input | `REQ` receive flit |
+| `RXREQFLIT` | `133 + AXI_ID_WIDTH` | Input | `REQ` receive flit |
 | `RXREQVALID` | 1 | Input | `REQ` receive valid |
 | `RXREQREADY` | 1 | Output | `REQ` receive ready |
-| `TXRSPFLIT` | 126 | Output | `RSP` transmit flit, header and payload |
+| `TXRSPFLIT` | `123 + AXI_ID_WIDTH` | Output | `RSP` transmit flit, header and payload |
 | `TXRSPVALID` | 1 | Output | `RSP` transmit valid |
 | `TXRSPREADY` | 1 | Input | `RSP` transmit ready, from the receiver |
-| `RXRSPFLIT` | 126 | Input | `RSP` receive flit |
+| `RXRSPFLIT` | `123 + AXI_ID_WIDTH` | Input | `RSP` receive flit |
 | `RXRSPVALID` | 1 | Input | `RSP` receive valid |
 | `RXRSPREADY` | 1 | Output | `RSP` receive ready |
 | `TXDATFLIT` | 633 | Output | `DAT` transmit flit, flit type in `axi_ch`, see §6 |
 | `TXDATVALID` | 1 | Output | `DAT` transmit valid |
-| `TXDATCRDVALID` | `NUM_VC` | Input | `DAT` credit valid, credit return from the receiver, one bit per virtual channel |
+| `TXDATCRDVALID` | `DAT_NUM_VC` | Input | Router input-FIFO credit return, one pulse per freed VC slot |
 | `RXDATFLIT` | 633 | Input | `DAT` receive flit |
 | `RXDATVALID` | 1 | Input | `DAT` receive valid |
-| `RXDATCRDVALID` | `NUM_VC` | Output | `DAT` credit valid, credit return to the sender |
+| `RXDATREADY` | 1 | Output | NI class-FIFO capacity for Router-to-NI DAT ejection |
+
+For NI-to-Router DAT injection, Credit Management initializes every sender counter from
+`NOC_ROUTER_VC_DEPTH`, the actual depth of the Router LOCAL input VC FIFO. A transfer consumes one
+credit for the selected VC; a `TXDATCRDVALID` pulse restores one credit when the Router drains that
+VC slot. The NI must not transmit with a zero counter, and a counter must not underflow or exceed
+the Router depth.
+
+For Router-to-NI DAT ejection, a transfer occurs only when `RXDATVALID` and `RXDATREADY` are both
+high. No NI receive-credit counter or `RXDATCRDVALID` exists. Inter-router DAT ports retain the
+symmetric per-VC credit signals specified by the Router.
+
+The five AXI channel async FIFOs use `NI_CDC_FIFO_DEPTH`, default 8 with legal values 4, 8 and 16.
+The implementation derives Gray-pointer widths from this entry count. These FIFOs absorb clock-ratio
+variation and temporary AXI backpressure; they do not define the number of outstanding AXI
+transactions. Outstanding capacity is owned separately by the per-ID order lists, RoBs and NSU
+Response Queue.
 
 ---
 
@@ -328,7 +430,6 @@ below are from the port's own view. No wire is shared between the two instances.
 | Attribute | Value | Comments |
 |---|---|---|
 | Address width | 48 b | - |
-| ID width | 3 b | - |
 | `AWUSER` width | 58 b | 50 bits hold collective attributes, see §6 |
 | `ARUSER`, `WUSER`, `RUSER`, `BUSER` width | 8 b | - |
 | Narrow class data width | 64 b | - |
@@ -336,22 +437,50 @@ below are from the port's own view. No wire is shared between the two instances.
 
 **Configuration options**
 
+The authored configuration is one YAML file. Before RTL elaboration, the project generator emits
+its topology, SAM entries and coordinate metadata into `topology_pkg.sv`; the NI and
+router consume those values as elaboration-time constants. Synthesizable RTL does not parse YAML
+and has no CSR path for changing the SAM at runtime. The C++ reference model loads the same YAML
+at simulation startup, and the verification flow checks the generated and runtime views for parity.
+
 | Feature | Parameter | Values (default) | Comments |
 |---|---|---|---|
 | Topology | Mesh X and Y dimension | 2-16 (4) | Square meshes only. 256 nodes maximum, set by the 8-bit node ID |
-| AXI interface | Endpoint interfaces | 1, 2 (1) | One interface carries both classes, with the class selected by the SAM address space. Two carry one class each |
-| Flow control | `NUM_VC`, virtual channels per network channel | 1-8 (1) | Sets the §4.3 credit signal width |
-| Ordering | Outstanding transactions per ID | 1-32 (32) | 1 when same-ID response reordering is disabled. A master holds at most 256 in total, one per `ordering_tag`, see §6 |
-| Ordering | Same-ID response reordering | enabled, disabled (enabled) | The §3 ordering requirement holds in either setting |
-| Address map | SAM address spaces | config, memory | Config space selects the narrow class, memory space the data class. Uniform across nodes, loaded at runtime |
+| AXI interface | Endpoint interfaces | 1 | One fixed 512-bit interface carries both classes; the SAM address space selects the internal NoC class |
+| AXI interface | `AXI_ID_WIDTH` | 1-8 (3) | NMU AXI ID and NoC-carried ID width; REQ/RSP flit widths derive from it at elaboration |
+| Flow control | `DAT_NUM_VC` | 1-8 (2) | Total DAT VC count and the Section 4.3 credit signal width; mode-specific legality applies below |
+| Flow control | `DAT_VC_ALLOC_MODE` | `SHARED`, `READ_WRITE_SPLIT` (`SHARED`) | System-wide eligible-VC policy for NI allocators and DAT router VA |
+| Flow control | `NOC_ROUTER_VC_DEPTH` | 1-16 (8) | Router DAT input FIFO depth and NI-to-Router sender-credit seed |
+| CDC | `NI_CDC_FIFO_DEPTH` | 4, 8, 16 (8) | Common entry count of the AW/W/AR/B/R dual-clock FIFOs on each AXI interface |
+| NoC class queues | `NI_CLASS_FIFO_DEPTH` | 4, 8, 16 (8) | Common entry count of the REQ/RSP/DAT Write/DAT Read synchronous FIFOs |
+| Ordering | Outstanding transactions per ID | 1-32 (32) | Applies to both R modes. A master holds at most `32 x 2^AXI_ID_WIDTH` in total, 256 at the default; Enabled requests that require reordering additionally reserve an `ordering_tag`, see §6 |
+| Ordering | `READ_ROB_ENABLED` | enabled, disabled (enabled) | Selects the R path at elaboration with `generate if`. Disabled permits a same-ID streak only within one `{dst_id, dst_port_id, AXI class}` ordering domain. B always uses a per-ID metadata-only RoB. The §3 ordering requirement holds in either setting |
+| Address map | SAM address spaces | config, memory | Config space selects the narrow class, memory space the data class. Uniform across nodes and fixed for one elaborated RTL image |
 | Address map | Space region size | power of two | - |
-| Address map | Destination decode | table, offset (table) | Table decode matches an address against the SAM regions. Offset decode reads the node coordinates from fixed address bit ranges. See §5.1 |
+| Address map | Destination decode | table | First-match range lookup returns `dst_id`, `dst_port_id` and AXI class. Offset decode is a deferred area optimization, not part of the current RTL target. See §5.1 |
+| NMU timing | `AW_SAM_REG_TYPE` | 0, 1, 2 (0) | AW SAM-output slice: bypass, simple register, or full skid buffer |
+| NMU timing | `AR_SAM_REG_TYPE` | 0, 1, 2 (0) | AR SAM-output slice, independent of AW |
+
+`DAT_VC_ALLOC_MODE=SHARED` allows `DAT_NUM_VC` from 1 to 8 and lets `DataAw`, `DataW` and `DataR`
+use every VC. `DAT_VC_ALLOC_MODE=READ_WRITE_SPLIT` requires an even `DAT_NUM_VC` in {2, 4, 6, 8};
+the lower half serves `DataAw`/`DataW` and the upper half serves `DataR`. The NI allocator and every
+DAT router output VA apply this same class mask. Illegal combinations fail elaboration.
+
+`DataW` inherits the VC selected for its owning `DataAw` in both modes. The modes change only the
+eligible Router VC set: the NI still has one DAT Write and one DAT Read class FIFO and no per-VC
+queue. One shared VC remains protocol-deadlock-free. Split mode reduces cross-class contention in
+the Router but may strand Router VC capacity under asymmetric traffic. The first RTL does not map
+`AxQOS` to these VCs and uses no QoS-aware arbitration.
 
 ### 5.1 Address map requirements
 
+`routing.use_id_table` must be `true`. The generator and C++ loader reject `false` so a config
+cannot select an offset-decode path that the RTL does not implement.
+
 A space the map declares must give every node exactly one region. A region is a node's
 allocation, not an endpoint's: several endpoints may share one. A space that leaves a node
-without one is rejected at load. A map may omit a space entirely.
+without one is rejected by both the RTL-package generator and the C++ model loader. A map may
+omit a space entirely.
 
 Four further conditions decide whether that space is also a collective target. Its regions must
 
@@ -362,14 +491,15 @@ Four further conditions decide whether that space is also a collective target. I
 
 The node index then occupies a contiguous address field at `log2(node_stride)`, `clog2(x_dim)`
 bits of X below `clog2(y_dim)` bits of Y, and a mask over that field names an aligned set of
-nodes at one shared node-local offset. `node_stride` is the power-of-two block a node's regions,
-across every space the map declares, are laid out inside. Where a space is packed with its stride
-equal to its region size the two coincide. A space meeting all four conditions is a legal
-collective target. A space failing any of them is a legal unicast target and not a collective
-target.
+nodes at one shared node-local offset. `node_stride` is the power-of-two spacing between adjacent
+node regions within that space. It is uniform within one collective-capable space but may differ
+between spaces. Where a space is packed with its stride equal to its region size the two coincide.
+A space meeting all four conditions is a legal collective target. A space failing any of them is
+a legal unicast target and not a collective target.
 
 **Mesh dimensions are powers of two**, so the coordinate field is exactly as wide as the
-dimension and every index a mask names is a node. The topology loader refuses anything else.
+dimension and every index a mask names is a node. The generator and C++ loader refuse anything
+else.
 
 **Peripherals.** A peripheral shares the coordinate of the router it hangs off and is told apart
 by the port, `dst_port_id`: 0 is the tile on the router's LOCAL port, non-zero a boundary port.
@@ -388,16 +518,24 @@ Two things follow for the conditions above.
 memory space data. This is one compare per space, not per node, and it is independent of how the
 destination is reached.
 
-**Destination.** Two ways to reach it, both requiring XY routing and both supporting collectives.
+**Destination.** The NMU first-match range lookup returns the entry's `dst_id`, `dst_port_id` and
+AXI class. Each tile space derives its own coordinate ranges from its declared stride; those ranges
+support collective address-mask translation and may differ between spaces. A future offset decoder
+would require one fixed coordinate field across the whole map, but the current target does not
+implement that optimization.
 
-| | Where the coordinate ranges come from | Region size across spaces |
-|---|---|---|
-| Table decode | each address-map entry carries its own range pair | may differ per space |
-| Offset decode | one range pair, global to the map | must be equal, one pair reaches one field position |
+The AW and AR decoders are parallel combinational range comparators. Their independent
+elaboration-time `*_SAM_REG_TYPE` parameters select the boundary between decode and RoB admission:
 
-The conditions above make both modes read the same address map, so the choice is where the
-ranges are held rather than how the map is laid out. The mode is declared with the address map
-and validated against it at load.
+| Value | Datapath | Zero-stall latency | Backpressure behavior |
+|---:|---|---:|---|
+| 0 | combinational bypass | no added cycle | ready may remain combinational |
+| 1 | one output register | +1 cycle | one bubble may follow a stall |
+| 2 | output plus skid register | +1 cycle | registered backpressure, sustains one request per cycle |
+
+These are physical timing parameters, not topology properties, so they do not appear in the YAML.
+W does not perform a SAM lookup and has no corresponding parameter. A register slice carries the
+complete accepted beat and its decode metadata; while stalled it holds both unchanged.
 
 ---
 
@@ -422,8 +560,15 @@ and validated against it at load.
 
 **Flit payload.**
 
-`addr` in `Aw` and `Ar` carries the node-local offset, `AWADDR` / `ARADDR` minus the matched SAM
-region base.
+The field tables below show the default `AXI_ID_WIDTH = 3` layout. For another legal value, the
+generator changes each `id` field width and shifts the following fields; it then derives the
+physical network widths from the resulting maximum payload. Software must consume generated field
+positions rather than hard-code these default offsets.
+
+`addr` in `Aw` and `Ar` carries the global `AWADDR` / `ARADDR` accepted by the NMU; the NMU does
+not subtract the matched SAM region base. A destination NSU presents a unicast address unchanged.
+For a multicast `Aw`, each destination NSU overwrites only the node-coordinate field with its own
+coordinate before issuing `AWADDR`. `Ar` is always unicast.
 
 `Aw`, 88 b:
 
@@ -520,17 +665,20 @@ The `AWUSER` mask is an address mask:
 - A set bit marks the matching `AWADDR` bit as don't care, `n` set bits name `2^n` addresses
 - Set bits are limited to the node-index field of the address, so the named addresses differ
   only in destination node. §5.1 gives the region conditions that put that field in place
-- The node-index field sits at `log2(node_stride)`, the same bits in every space: §5.1 defines
-  `node_stride` across every space a map declares, not per space
+- The node-index field sits at `log2(node_stride)` for the address's matched space. Different
+  spaces may place it at different bits; the matched SAM rule supplies the corresponding X/Y
+  ranges
 - The NMU translates the address mask into the 8 b flit `collective_mask` at SAM lookup and
   rejects a mask outside these constraints. Nothing downstream of the NMU sees an address mask,
-  a global address, or an address space: a router is given `dst_id`, `collective_mask` and the
-  node-local address only
-- Every replica carries the same node-local offset. Nodes of a multicast group share one local
-  address map, and each aperture covers the full burst footprint
+  or an address space: a router is given `dst_id`, `collective_mask` and the original global
+  address in the AW payload, and performs no address arithmetic
+- Every replica leaves the router with the same AW payload. Each destination NSU overwrites the
+  coordinate field with its own node coordinate, so all non-coordinate bits, including the
+  node-local offset, remain equal. Each destination aperture covers the full burst footprint
 
-**Header overhead and W/R utilization.** Header overhead counts the 48 b header over the flit
-width. W and R utilization count the AXI data field over the flit width.
+**Header overhead and W/R utilization at the default `AXI_ID_WIDTH = 3`.** Header overhead counts
+the 48 b header over the flit width. W and R utilization count the AXI data field over the flit
+width.
 
 | Network | Header overhead | `W` utilization | `R` utilization |
 |---|---:|---:|---:|
@@ -544,12 +692,23 @@ one flit per write burst and amortizes over the burst length.
 
 ### 6.1 AXI4 Compliance and Ordering
 
+The interface rules follow the [AMBA AXI and ACE Protocol Specification, IHI 0022H,
+Chapters A3, A5 and A6](https://developer.arm.com/-/media/Arm%20Developer%20Community/PDF/IHI0022H_amba_axi_protocol_spec.pdf).
+
 - Full AXI4: INCR, WRAP, and FIXED bursts, narrow and unaligned transfers, `AxLOCK`,
   `AxCACHE`, `AxPROT`, `AxQOS`, `AxREGION`, `xUSER`
 - `AxLOCK` is unicast only, a collective transaction is not an exclusive access
 - `AWUSER`: 8 b opaque in the flit payload, 50 b collective attributes consumed by the NMU,
   the address mask translated into the flit header, a slave receives the 8 b alone
-- Different IDs complete in any order, same ID completes in issue order
+- Each AXI channel uses its own VALID/READY handshake. Once asserted, VALID and its payload remain
+  stable until the handshake; a source does not wait for READY before asserting VALID
+- The CDC partition permits independent channel handshakes and introduces no combinational path
+  between `ACLK` and `noc_clk`
+- AXI4 write data has no WID. Accepted AW descriptors define W association in AW acceptance order;
+  an emitted AW locks its physical NoC channel through the matching WLAST beat
+- A B response is not presented before both its AW handshake and final W/WLAST handshake complete
+- Different IDs may complete in any order. B responses with one BID and R responses with one RID
+  complete in issue order; AXI defines no B-to-R response ordering
 
 ---
 
@@ -572,15 +731,15 @@ All figures assume AXI and NoC on one 1 GHz clock, the 512 b data class, and 4 K
 A physical network carries one flit per cycle per direction and a flit holds at most one beat of
 AXI payload.
 
-**AXI interface**, per port:
+**AXI interface**, one 512 b port per endpoint:
 
-- Narrow `W`, `R`: 64 b @ 1 GHz = **8 GB/s** each
-- Data `W`, `R`: 512 b @ 1 GHz = **64 GB/s** each
+- Physical `W`, `R` bus: 512 b @ 1 GHz = **64 GB/s** each
+- Narrow useful payload: 64 b per beat, limited by `REQ` / `RSP` to **8 GB/s** each
 
 **NoC channel**, per link direction:
 
-- `REQ`: flit 136 b @ 1 GHz = 17.0 GB/s channel, 8 GB/s payload
-- `RSP`: flit 126 b @ 1 GHz = 15.75 GB/s channel, 8 GB/s payload
+- `REQ`: default flit 136 b @ 1 GHz = 17.0 GB/s channel, 8 GB/s payload
+- `RSP`: default flit 126 b @ 1 GHz = 15.75 GB/s channel, 8 GB/s payload
 - `DAT`: flit 633 b @ 1 GHz = 79.1 GB/s channel, **64 GB/s** payload
 
 - `NarrowW` rides `REQ`, `NarrowR` rides `RSP`: concurrent.
@@ -634,7 +793,7 @@ outstanding depth runs out:
 
 - Read data owns the response-direction `DAT`: 100 % payload efficiency
 - An out-of-order read reserves reorder-buffer space for its whole burst before it issues
-- An in-order read, same destination, skips the buffer
+- An in-order read within one `{dst_id, dst_port_id, AXI class}` ordering domain skips the buffer
 
 Out-of-order read depth, 64 B per beat, against the 32-request cap and the 8 KB buffer:
 

@@ -4,6 +4,16 @@ Block-level design spec for the per-node mesh router of the NoC C++ behavior mod
 The reader implements an RTL block whose cycle behavior is checked against this model
 by the existing testbench. As-built references:
 
+The target LOCAL DAT ready/valid overlay is not implemented by the current model. Cycle-exact RTL
+comparison for that port starts only after the model and wrapper are aligned; N/E/S/W credit
+behavior remains the as-built reference.
+
+The target Router belongs entirely to the `noc_clk` domain and receives only `noc_rst_n`. System
+integration derives that reset and each NI's `ARESETn` from one common system reset; assertion is
+asynchronous and deassertion is synchronized to the destination clock. The Router has no
+`sys_rst_n` port. The current C++/DPI model retains the single synchronous initial-reset behavior
+specified below.
+
 | Layer | File |
 |---|---|
 | Router core (per network) | `ref_model/c_model/include/router/router.hpp` |
@@ -37,6 +47,11 @@ per cycle.
 | RSP | 126 | [125:48], 78 b | ready/valid, 1 VC |
 | DAT | 633 | [632:48], 585 b | credit, `NUM_VC` 1..8 |
 
+This table is the current `AXI_ID_WIDTH = 3` model layout. Target RTL derives REQ as
+`133 + AXI_ID_WIDTH` bits and RSP as `123 + AXI_ID_WIDTH` bits. DAT remains 633 bits for the legal
+ID range 1..8 because `DataW` remains its maximum payload. A router configuration consumes these
+derived package widths; it does not select flit widths independently.
+
 **Packet and wormhole switching.** An AXI transaction is packetized by the NI into one
 or more flits sharing the same header `dst_id`. The header bit `flit_tail` marks packet
 boundaries: `flit_tail = 1'b0` on every flit except the final one, `flit_tail = 1'b1` on the final
@@ -68,6 +83,11 @@ output, and increments by 1 for each single-cycle credit pulse the receiver retu
 after draining one flit from that input FIFO. Example with depth 8: a sender can fire 8
 back-to-back flits on VC 0, must then idle at credit 0, and resumes one flit per
 returned pulse.
+
+The paragraph above is the inter-router rule and the current C++ model's uniform five-port rule.
+Target RTL makes one LOCAL-output exception: Router-to-NI DAT ejection uses ready/valid because the
+NI has no per-VC FIFO. NI-to-Router DAT injection remains credit-controlled; its credited storage
+is this Router's LOCAL input VC FIFO.
 
 REQ and RSP use ready/valid instead. `ready` is an almost-full early ready computed off
 current occupancy, `ready = (occupancy + ready_slack <= depth)`, so it deasserts
@@ -146,6 +166,11 @@ hop instead of 3 (`SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`).
 | 2. Grant | per-output wormhole lock + RR state + credit counters | per output: pick one (input, VC) candidate, assign the output-side VC `out_vc` (VA, section 2.5), pop its FIFO front, decrement `credit_[out][out_vc]`, restamp header `vc_id = out_vc`, push into the output FIFO, schedule one credit pulse (input-side VC) to the upstream of that input |
 | 3. Link | per-output FIFO, depth `NOC_ROUTER_OUTPUT_FIFO_DEPTH` = 2 | drive at most one flit from each output FIFO onto the link |
 
+In target RTL, stage 2 checks per-VC credit for N/E/S/W outputs. For LOCAL output it checks output
+FIFO space but does not decrement a per-VC credit counter. Stage 3 holds the LOCAL flit stable until
+the NI asserts DAT ready. Input processing is unchanged: LOCAL DAT arrivals are filed by `vc_id`
+and their dequeue returns the matching credit to the injecting NI.
+
 The model evaluates stages in reverse order (3, then 2, then 1) within one tick
 (`router.hpp:201-288`). Two observable consequences:
 
@@ -206,6 +231,13 @@ After the scan picks a candidate, stage 2 assigns the OUTPUT-side VC `out_vc`
 | `fixed_vc = 0`, preferred full, `flit_tail = 1` | the highest-index other VC with credit (FVADA overflow) |
 | `fixed_vc = 0`, preferred full, `flit_tail = 0` | none — a wormhole head never overflows off its preferred VC; the candidate is not grantable |
 
+**Target RTL overlay.** Before the table above is applied, `DAT_VC_ALLOC_MODE` defines
+the eligible output-VC set. `SHARED` admits all DAT VCs. `READ_WRITE_SPLIT` admits the
+lower half for `DataAw` / `DataW` and the upper half for `DataR`. A `fixed_vc = 1` flit
+must already name a class-eligible VC; a mismatch is illegal. Preferred selection and
+FVADA overflow scan only the eligible set. Every DAT router output uses the same mode.
+The current C++ router implements `SHARED` only.
+
 The grant decrements `credit_[out][out_vc]` and restamps `vc_id = out_vc` into the
 departing header. The credit pulse to the upstream carries the INPUT-side VC (the
 FIFO slot freed), which after VA can differ from the VC consumed downstream. With
@@ -247,8 +279,9 @@ to EAST and a packet to NORTH from two inputs proceed in parallel.
 
 ### 2.7 Credit flow control rules (DAT only)
 
-Counter granularity is per (output port, VC): `credit_[out][vc]`. REQ and RSP have no
-counters; they gate on the almost-full `ready` of section 2.1.
+In the current C++ model, counter granularity is per (output port, VC):
+`credit_[out][vc]`. Target RTL retains these counters only for N/E/S/W DAT outputs; LOCAL DAT
+output gates on NI ready. REQ and RSP have no counters.
 
 1. **Seed**: every counter starts at `NOC_ROUTER_VC_DEPTH` = 8, equal to the
    downstream input VC FIFO depth (`router.hpp:91`).
@@ -256,9 +289,9 @@ counters; they gate on the almost-full `ready` of section 2.1.
    `router.hpp:262-263`), not at link traversal. With seed 8, eight grants toward one
    (output, VC) with no returns leave the counter at 0 and stall further grants on
    that VC.
-3. **Increment**: by 1 per received credit pulse on that (output, VC). A pulse means
-   the downstream entity (neighbor router stage-2 dequeue, or the local NI consuming
-   an ejected flit) freed one slot.
+3. **Increment**: by 1 per received credit pulse on that (output, VC). On target RTL this applies
+   to N/E/S/W neighbor-router outputs only. The current model also applies it to LOCAL when the NI
+   consumes an ejected flit.
 4. **Pulse generation**: when this router's stage 2 pops one flit from input FIFO
    (p, v), it owes one pulse to the upstream of port p on VC v. The pulse is
    registered: dequeue in cycle N, pulse leaves the core at cycle N+1, and after the
@@ -424,10 +457,11 @@ and its `SimpleRouterForkWedge` twin, and by the co-sim `multicast` pattern
 
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
-| `DAT_NUM_VC` | `ni_params_pkg::NOC_DAT_NUM_VC_DFLT` = 1 | 1..8 (= 2^VC_ID_WIDTH) | VCs on the DAT link. REQ/RSP are fixed single-VC. Set in `specgen/source/constants.yaml` (`noc.DAT_NUM_VC`), not a run knob. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != DAT_NUM_VC`. |
-| `REQ_FLIT_WIDTH` | 136 | 64..1024 | REQ flit bus width, bits |
-| `RSP_FLIT_WIDTH` | 126 | 64..1024 | RSP flit bus width, bits |
-| `DAT_FLIT_WIDTH` | 633 | 64..1024 | DAT flit bus width, bits |
+| `DAT_NUM_VC` | current 1; target 2 | 1..8 (= 2^VC_ID_WIDTH); Split requires {2,4,6,8} | VCs on the DAT link. REQ/RSP are fixed single-VC. The current value comes from `ni_params_pkg::NOC_DAT_NUM_VC_DFLT`; target alignment remains pending. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != DAT_NUM_VC`. |
+| `DAT_VC_ALLOC_MODE` [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | Eligible-VC mask applied by every DAT output VA; not implemented by the current C++ router. |
+| `REQ_FLIT_WIDTH` | 136 | `133 + AXI_ID_WIDTH` | Derived REQ flit bus width, bits |
+| `RSP_FLIT_WIDTH` | 126 | `123 + AXI_ID_WIDTH` | Derived RSP flit bus width, bits |
+| `DAT_FLIT_WIDTH` | 633 | 633 for `AXI_ID_WIDTH` 1..8 | Derived DAT flit bus width, bits |
 | `LINK_PORTS` | 5 | fixed 5 | port array size = {LOCAL, NORTH, EAST, SOUTH, WEST} |
 
 Router model configuration, fixed at `cmodel_router_create` time:
@@ -457,10 +491,10 @@ to 0, outputs must stay 0 (SPEC 17).
 
 ### 3.3 Signal tables
 
-Every network's pins are ONE uniform per-port array indexed {LOCAL, N, E, S, W}: LOCAL
-carries this node's own NI traffic, N/E/S/W the inter-router links. There is no separate
-`noc_nmu_*` / `noc_nsu_*` pin group. `noc_types_pkg::noc_credit_t` =
-`{credit[DAT_NUM_VC-1:0]}`, one bit per VC.
+The current C++/DPI wrapper uses one uniform per-port array indexed {LOCAL, N, E, S, W}: LOCAL
+carries this node's own NI traffic, N/E/S/W the inter-router links. Target RTL retains the common
+flit arrays but gives LOCAL DAT output the ready signal described below instead of a credit-return
+input. `noc_types_pkg::noc_credit_t` = `{credit[DAT_NUM_VC-1:0]}`, one bit per VC.
 
 > REQ/RSP `ready` is advisory, not a same-cycle accept: the sender grants against a `ready` sampled ~2 registrations earlier, and the receiver pushes unconditionally on `valid`, so a real transfer is `valid` alone.
 
@@ -491,8 +525,14 @@ Outputs (all registered, reset to 0):
 | `tx_dat_flit` | 633 x 5 | DAT flit toward port p. All zeros when `tx_dat_valid[p]` is low. |
 | `rx_dat_crdvalid` | DAT_NUM_VC x 5 | Per-VC credit pulse to the sender at port p: this node drained one flit from its p-direction DAT input FIFO, VC v. |
 
-NI-edge flow control (LOCAL port, who answers whom): on REQ/RSP the receiver drives the
-`ready` back; on DAT the entity that consumes a flit returns its credit.
+The tables above are the current C++/DPI uniform-port interface. Target RTL keeps
+`tx_dat_crdvalid` and `rx_dat_crdvalid` on N/E/S/W. At LOCAL, `tx_dat_crdvalid[LOCAL]` is replaced
+by scalar `tx_dat_ready_local`: the NI accepts `tx_dat_valid/flit[LOCAL]` only when ready is high.
+`rx_dat_crdvalid[LOCAL]` remains, because it returns credit when the Router drains a DAT flit that
+the NI injected into the LOCAL input VC FIFO.
+
+Target NI-edge flow control (LOCAL port, who answers whom): REQ/RSP use ready/valid. DAT injection
+uses Router credits; DAT ejection uses NI ready.
 
 | Flow | Flit pin | Back-pressure pin (opposite direction) |
 |---|---|---|
@@ -501,11 +541,11 @@ NI-edge flow control (LOCAL port, who answers whom): on REQ/RSP the receiver dri
 | NSU injects RSP | `rx_rsp_valid/flit[LOCAL]` | `rx_rsp_ready[LOCAL]` (router -> NSU) |
 | Router ejects RSP to NMU | `tx_rsp_valid/flit[LOCAL]` | `tx_rsp_ready[LOCAL]` (NMU -> router, tied true) |
 | NI injects DAT | `rx_dat_valid/flit[LOCAL]` | `rx_dat_crdvalid[LOCAL]` (router -> NI) |
-| Router ejects DAT to the NI | `tx_dat_valid/flit[LOCAL]` | `tx_dat_crdvalid[LOCAL]` (NI -> router) |
+| Router ejects DAT to the NI | `tx_dat_valid/flit[LOCAL]` | `tx_dat_ready_local` (NI -> router) |
 
-The LOCAL DAT port is shared: `dat_merge_wrap` sits between it and the NMU/NSU DAT pins,
-merging `DataAw`/`DataW` from the NMU with `DataR` from the NSU on egress and demuxing on
-`axi_ch` on ingress.
+The current model's LOCAL DAT port is shared through `dat_merge_wrap`. Target integration keeps
+the same class merge/demux function but no longer synthesizes NI-side VC storage or a LOCAL-output
+credit return.
 
 Fabric wiring between nodes pairs opposite ports: node i's `rx_*_valid/flit[NORTH]` comes
 from its north peer's `tx_*_valid/flit[SOUTH]`, and node i's `tx_dat_crdvalid[NORTH]`
@@ -604,9 +644,9 @@ router obligation.
 | G1 | Never two flits on one input port of one network in one cycle | abort, `router.hpp:194-197` |
 | G2 | Every valid DAT flit has `vc_id < DAT_NUM_VC`; REQ/RSP flits carry `vc_id` = 0 | abort, `router.hpp:182-185`; SVA `link_perf_monitor.sv:69-72` |
 | G3 | Every valid flit has `dst_id` inside the mesh (`dst_x < mesh_x_dim`, `dst_y < mesh_y_dim`). The NMU SAM lookup validates destinations at packetize time, so an out-of-mesh `dst_id` cannot happen | abort, `router.hpp:65-68` |
-| G4 | On DAT, no sender drives a flit on VC v while its credit for that (port, VC) is 0 | input FIFO overflow assert, `router.hpp:284-286`; SVA `link_perf_monitor.sv:61-64` |
+| G4 | On DAT N/E/S/W and NI-to-Router LOCAL injection, no sender drives a flit on VC v while its credit for that (port, VC) is 0. Target Router-to-NI LOCAL ejection instead requires ready | input FIFO overflow assert, `router.hpp:284-286`; SVA `link_perf_monitor.sv:61-64` |
 | G5 | Packets are well-formed per (input, VC): after a head (`flit_tail=0`), every following flit on that (input, VC) routes to the same output until a tail (`flit_tail=1`) closes the packet. Guaranteed because all flits of a packet share `dst_id` | abort, `router.hpp:228-234` |
-| G6 | On DAT, no credit pulse arrives beyond the outstanding flit count (counter never exceeds the seed of 8) | abort, `router.hpp:111-114` |
+| G6 | On credit-controlled DAT directions, no credit pulse arrives beyond the outstanding flit count (counter never exceeds the seed of 8). No target LOCAL-output counter exists | abort, `router.hpp:111-114` |
 | G7 | Every response flit has `flit_tail = 1'b1` — every B and every R beat is a single-flit packet, on RSP and on DAT alike | consequence: only an AW+W request packet ever holds a wormhole lock across cycles |
 | G8 | `rst_ni` is given once at simulation start; the handle from `cmodel_router_create` is valid and constant | tb_top sequencing, `gen_tb_top.py` |
 | G9 | Boundary-direction inputs are tied to 0 and never pulse | generated tie-off, `gen_tb_top.py` |
@@ -647,7 +687,7 @@ Verified by ctest `RouterDatapath.HeaderTransparency` (byte-for-byte compare of 
 whole flit at `DAT_NUM_VC = 1`, where the restamp is the identity) and by the co-sim
 scoreboard readback. Failure: any flipped bit outside `vc_id`.
 
-SPEC 6 (VC handling). A `fixed_vc = 1` flit keeps its header `vc_id` end to end:
+SPEC 6 (VC handling). In the current `SHARED` C++ model, a `fixed_vc = 1` flit keeps its header `vc_id` end to end:
 filed under it at stage 1, onward credit consumed on it, departs with it. A
 `fixed_vc = 0` flit is filed under its arrival `vc_id`, then the VA stage assigns
 the departure VC (preferred map + FVADA overflow, section 2.5), consumes credit on
@@ -658,7 +698,9 @@ consumed on the assigned VC, upstream pulse on the arrival VC),
 `RouterVaFvada.PreferredThenHighestIndexOverflowThenStall` (assignment order), and
 `RouterVaFabric.MultiHopPinnedVcPreservedUnderContention` (pin across hops).
 Failure: a pinned flit's `vc_id` differs between ingress and egress, or credit
-activity on a VC the flit was not assigned to.
+activity on a VC the flit was not assigned to. Target `READ_WRITE_SPLIT` must additionally
+reject a pinned class/VC mismatch and restrict preferred/FVADA selection to the Section 2.5
+eligible set; coverage is `[TBD]` until the model and RTL implement the overlay.
 
 SPEC 7 (credit decrement point, DAT). The per-(output, VC) counter is seeded to
 `NOC_ROUTER_VC_DEPTH` and decremented exactly at the grant event (admission into the
@@ -748,6 +790,10 @@ Router construction. Verified by ctest death tests
 `RouterRouteComputeDeath.DstOutsideMeshAborts`, `RouterDatapathDeath.BadVcIdAborts`.
 Failure: construction succeeds on `dat_num_vc` outside 1..8, a zero depth, or an
 out-of-mesh coordinate.
+
+The target RTL also rejects `DAT_VC_ALLOC_MODE=READ_WRITE_SPLIT` unless `DAT_NUM_VC` is
+one of {2, 4, 6, 8}. This elaboration guard is `[TBD]`; the current C++ model has no mode
+parameter.
 
 SPEC 20 (multicast fork). A head flit with `collective_op != UNICAST` leaves on the
 multi-hot branch set of `route_mask_fork` instead of the one-hot `route_compute` result;
