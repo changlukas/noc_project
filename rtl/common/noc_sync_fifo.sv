@@ -21,7 +21,8 @@ module noc_sync_fifo #(
     output wire T      m_data_o
 );
 
-    localparam int unsigned FIFO_ADDR_W = NOC_FIFO_DEPTH > 1 ? $clog2(NOC_FIFO_DEPTH) : 1;
+    localparam int unsigned CL_NOC_FIFO_DEPTH =
+        NOC_FIFO_DEPTH > 1 ? $clog2(NOC_FIFO_DEPTH) : 1;
 
     if (NOC_FIFO_DEPTH != 4 && NOC_FIFO_DEPTH != 8 && NOC_FIFO_DEPTH != 16) begin : gen_invalid_depth
         initial $fatal(0, "Error: NOC_FIFO_DEPTH must be 4, 8, or 16 (instance %m)");
@@ -29,7 +30,7 @@ module noc_sync_fifo #(
 
     logic fifo_full;
     logic fifo_empty;
-    logic [FIFO_ADDR_W-1:0] fifo_usage;
+    logic [CL_NOC_FIFO_DEPTH-1:0] fifo_usage;
 
     fifo_v3 #(
         .FALL_THROUGH ( 1'b0           ),

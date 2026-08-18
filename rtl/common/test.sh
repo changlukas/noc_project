@@ -36,7 +36,7 @@ task_sources=(
 
 task_verilator=(
     verilator --timing --assert -Wall -Wno-fatal -Wno-DECLFILENAME -Wno-TIMESCALEMOD
-    -Wno-UNUSEDPARAM -Wno-UNUSEDSIGNAL -DCOMMON_CELLS_ASSERTS_OFF
+    -Wno-UNUSEDPARAM -Wno-UNUSEDSIGNAL -Wno-SYNCASYNCNET
     -I"$task_common_cells/include" --top-module tb_common_primitives
 )
 

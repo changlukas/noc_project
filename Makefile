@@ -238,6 +238,7 @@ sim-gen:
 clean: clean-cmodel clean-verilator clean-vcs clean-generated
 	rm -rf $(BUILD_ROOT)
 	rm -f master_wrap_read_dump*.txt
+	rm -f core core.*
 
 clean-cmodel:
 	rm -rf $(CMODEL_BUILD)

@@ -11,6 +11,8 @@ module tb_common_primitives #(
     logic src_clk_i = 1'b0;
     logic dst_clk_i = 1'b0;
     logic rst_ni = 1'b0;
+    logic src_rst_ni = 1'b0;
+    logic dst_rst_ni = 1'b0;
 
     logic       sync_s_valid;
     logic       sync_s_ready;
@@ -66,12 +68,12 @@ module tb_common_primitives #(
         .AXI_FIFO_DEPTH ( AXI_FIFO_DEPTH )
     ) i_axi_async_fifo (
         .src_clk_i,
-        .src_rst_ni  ( rst_ni      ),
+        .src_rst_ni,
         .src_valid_i ( cdc_s_valid ),
         .src_ready_o ( cdc_s_ready ),
         .src_data_i  ( cdc_s_data  ),
         .dst_clk_i,
-        .dst_rst_ni  ( rst_ni      ),
+        .dst_rst_ni,
         .dst_valid_o ( cdc_m_valid ),
         .dst_ready_i ( cdc_m_ready ),
         .dst_data_o  ( cdc_m_data  )
@@ -123,6 +125,11 @@ module tb_common_primitives #(
     always #4ns src_clk_i <= ~src_clk_i;
     always #7ns dst_clk_i <= ~dst_clk_i;
 
+    initial begin
+        #100us;
+        $fatal(1, "Timed out waiting for common primitive test completion");
+    end
+
     function automatic logic [7:0] sequence_data(
         input logic [7:0] base,
         input int unsigned index
@@ -162,6 +169,16 @@ module tb_common_primitives #(
         end
     endtask
 
+    task automatic sync_receive(input logic [7:0] expected);
+        begin
+            wait (sync_m_valid);
+            assert (sync_m_data == expected)
+                else $fatal(1, "Synchronous FIFO expected %0h, got %0h", expected, sync_m_data);
+            @(posedge clk_i);
+            #1ps;
+        end
+    endtask
+
     initial begin
         sync_s_valid = 1'b0;
         sync_s_data = '0;
@@ -180,16 +197,32 @@ module tb_common_primitives #(
         skid_m_ready = 1'b0;
 
         repeat (3) @(posedge clk_i);
+        #1ps;
         rst_ni = 1'b1;
+        @(posedge src_clk_i);
+        #1ps;
+        src_rst_ni = 1'b1;
+        repeat (2) @(posedge dst_clk_i);
+        #1ps;
+        dst_rst_ni = 1'b1;
+
+        assert (!sync_m_valid && !cdc_m_valid && !simple_m_valid && !skid_m_valid)
+            else $fatal(1, "Primitive output valid was not cleared by reset");
 
         // The synchronous FIFO is non-fall-through and preserves every entry.
         for (int unsigned index = 0; index < NOC_FIFO_DEPTH; index++) begin
             sync_send(sequence_data(8'h10, index));
         end
         assert (!sync_s_ready) else $fatal(1, "Synchronous FIFO did not become full");
+        repeat (3) begin
+            assert (sync_m_valid && sync_m_data == 8'h10)
+                else $fatal(1, "Synchronous FIFO changed its stalled head transaction");
+            @(posedge clk_i);
+            #1ps;
+        end
         sync_m_ready = 1'b1;
         for (int unsigned index = 0; index < NOC_FIFO_DEPTH; index++) begin
-            wait (sync_m_valid && sync_m_data == sequence_data(8'h10, index)); @(posedge clk_i);
+            sync_receive(sequence_data(8'h10, index));
         end
         @(negedge clk_i);
         sync_m_ready = 1'b0;
@@ -198,6 +231,13 @@ module tb_common_primitives #(
         // The Gray-pointer FIFO crosses unrelated clocks without reordering.
         for (int unsigned index = 0; index < AXI_FIFO_DEPTH; index++) begin
             cdc_send(sequence_data(8'h20, index));
+        end
+        wait (cdc_m_valid);
+        repeat (3) begin
+            assert (cdc_m_valid && cdc_m_data == 8'h20)
+                else $fatal(1, "CDC FIFO changed its stalled head transaction");
+            @(posedge dst_clk_i);
+            #1ps;
         end
         cdc_m_ready = 1'b1;
         for (int unsigned index = 0; index < AXI_FIFO_DEPTH; index++) begin

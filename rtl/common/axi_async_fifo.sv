@@ -23,16 +23,16 @@ module axi_async_fifo #(
     output wire T      dst_data_o
 );
 
-    localparam int unsigned LOG_DEPTH = $clog2(AXI_FIFO_DEPTH);
+    localparam int unsigned CL_AXI_FIFO_DEPTH = $clog2(AXI_FIFO_DEPTH);
 
     if (AXI_FIFO_DEPTH != 4 && AXI_FIFO_DEPTH != 8 && AXI_FIFO_DEPTH != 16) begin : gen_invalid_depth
         initial $fatal(0, "Error: AXI_FIFO_DEPTH must be 4, 8, or 16 (instance %m)");
     end
 
     cdc_fifo_gray #(
-        .T          ( T         ),
-        .LOG_DEPTH  ( LOG_DEPTH ),
-        .SYNC_STAGES( 2         )
+        .T           ( T                 ),
+        .LOG_DEPTH   ( CL_AXI_FIFO_DEPTH ),
+        .SYNC_STAGES ( 2                 )
     ) i_cdc_fifo_gray (
         .src_rst_ni,
         .src_clk_i,
