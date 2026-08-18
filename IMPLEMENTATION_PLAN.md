@@ -12,8 +12,8 @@ Status: Complete
 ## Stage 2: Shared Foundation And DV Plans
 Goal: Integrate and verify the pinned common_cells FIFO/register primitives and approve one verification plan for each major block.
 Success Criteria: Project adapters for the synchronous FIFO, AXI async FIFO, and register primitives pass across legal modes without reimplementing the library; Router, NMU, and NSU DV plans identify assertions, reference-model obligations, coverage, provenance, and per-package acceptance evidence.
-Progress: Shared primitives and the NMU/NSU verification plans are complete; the Router verification plan remains.
-Status: In Progress
+Progress: Shared primitives and the NMU, NSU, and Router verification plans are complete.
+Status: Complete
 
 ## Stage 3: Block RTL
 Goal: Implement and verify Router, NMU, and NSU through independently reviewable work packages.
