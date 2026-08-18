@@ -117,6 +117,8 @@ excluded explicitly rather than hidden by loose scoreboarding.
 
 The acceptance order is unit DV, hybrid block co-sim, full-RTL `2x2 verify`, then the full-RTL
 `4x4 verify` milestone. Every ready/valid hybrid boundary receives randomized stall injection.
+The NMU-specific N0/N1/N2 tests, comparison exclusions, overtaking evidence, F0 adapter checks, and
+non-vacuous pass criteria are defined in `docs/nmu-verification-plan.md`.
 The NSU-specific S0/S1 tests, comparison exclusions, F0 adapter checks, and non-vacuous pass criteria
 are defined in `docs/nsu-verification-plan.md`.
 
@@ -169,16 +171,17 @@ their transitive sources and include order from `rtl/Bender.yml`. Production bui
 exact revision and do not copy or rewrite the files. The upstream license is
 [Solderpad Hardware License v0.51](https://github.com/pulp-platform/common_cells/blob/9ca8a7655f741e7dd5736669a20a301325194c28/LICENSE).
 
-Issue #12 inspected two additional source trees for NSU planning. The classifications below govern
-this plan and do not change the license of any source:
+Issues #11 and #12 inspected two additional source trees for NI verification planning. The
+classifications below govern those plans and do not change the license of any source:
 
 | ID | source and inspected revision | classification and permitted use | license obligation |
 |---|---|---|---|
-| P1 | FlooNoC at `cb7b2ba3fd4b7eac340a4117ffba05c2a9757699`; inspected `floo_meta_buffer.sv` and `floo_axi_chimney.sv` | production-approved external reference; architecture and behavior may inform reviewed production work, but issue #12 copies or instantiates no RTL | inspected files carry `SPDX-License-Identifier: SHL-0.51`; preserve their copyright/SPDX notices and the repository's Solderpad Hardware License v0.51 terms in any separately approved reuse |
-| P2 | Taxi at `d5d38c268e1ec5a0bf55ea59b6c25fb59c7b73ad`; inspected AXI/stream register and async-FIFO test methods | reference-only; test intent may inform project-owned DV, but its RTL must not be copied, adapted, or instantiated in production | inspected sources carry `SPDX-License-Identifier: CERN-OHL-S-2.0`; retain all notices in the reference tree and do not rewrite or remove them |
+| P1 | FlooNoC at `cb7b2ba3fd4b7eac340a4117ffba05c2a9757699`; inspected `floo_rob.sv`, `floo_rob_wrapper.sv`, `tb_floo_rob.sv`, `floo_meta_buffer.sv`, and `floo_axi_chimney.sv` | production-approved external reference; architecture, behavior, and test intent may inform reviewed production work, but issues #11 and #12 copy or instantiate no RTL | inspected files carry `SPDX-License-Identifier: SHL-0.51`; preserve their copyright/SPDX notices and the repository's Solderpad Hardware License v0.51 terms in any separately approved reuse |
+| P2 | Taxi at `d5d38c268e1ec5a0bf55ea59b6c25fb59c7b73ad`; inspected AXI/stream register RTL plus register and async-FIFO test methods | reference-only; general test intent may inform project-owned DV, but its RTL must not be copied, adapted, or instantiated in production | inspected sources carry `SPDX-License-Identifier: CERN-OHL-S-2.0`; retain all notices in the reference tree and do not rewrite or remove them |
 
-The project-owned C++ NSU model is a conditional executable oracle rather than a third-party source.
-Its target-aligned and excluded comparison areas are listed in `docs/nsu-verification-plan.md`.
+The project-owned C++ NMU and NSU models are conditional executable oracles rather than third-party
+sources. Their target-aligned and excluded comparison areas are listed in
+`docs/nmu-verification-plan.md` and `docs/nsu-verification-plan.md`.
 
 Upstream references:
 
