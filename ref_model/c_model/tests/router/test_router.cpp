@@ -23,6 +23,10 @@ RouterConfig center_cfg() {
     RouterConfig cfg;
     cfg.x = 1;
     cfg.y = 1;  // center of default 4x4
+    // Most legacy datapath cases below isolate vc0. Tests that exercise
+    // multi-VC arbitration override this explicitly through two_vc_cfg() or
+    // their parameterized RouterConfig.
+    cfg.num_vc = 1;
     return cfg;
 }
 
@@ -171,6 +175,12 @@ TEST(RouterConstructionDeath, BadParametersAbort) {
     RouterConfig bad_depth = center_cfg();
     bad_depth.vc_depth = 0;
     EXPECT_DEATH(Router r(bad_depth), "depth");
+}
+
+TEST(RouterConstruction, DefaultDatVcCountMatchesGeneratedContract) {
+    RouterConfig cfg{};
+    EXPECT_EQ(cfg.num_vc, ni::NOC_DAT_NUM_VC);
+    EXPECT_EQ(cfg.num_vc, 2u);
 }
 
 TEST(RouterDatapath, ZeroLoadLatencyIsThreeTicks) {
@@ -510,8 +520,8 @@ TEST(RouterWormhole, OpenPacketHoldsOutputAndBlocksOtherVc) {
 }
 
 // --- Per-VC independence --------------------------------------------------
-// All three tests need >=2 VCs; the generated default NOC_DAT_NUM_VC is 1, so
-// each builds its RouterConfig with num_vc = 2. The two per-VC tests drive
+// All three tests explicitly require two VCs. Keep that requirement local even
+// though the generated NOC_DAT_NUM_VC default is currently 2. The two per-VC tests drive
 // fixed_vc=1 (pinned) flits: their premise is a 1:1 input-VC/output-VC
 // mapping, which post-VA only the fixed_vc bypass guarantees.
 

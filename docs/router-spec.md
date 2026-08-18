@@ -8,6 +8,9 @@ The target LOCAL DAT ready/valid overlay is not implemented by the current model
 comparison for that port starts only after the model and wrapper are aligned; N/E/S/W credit
 behavior remains the as-built reference.
 
+The production top is `router`. Its wrapper-facing ports, fixed five-port hierarchy, and reviewed
+child boundaries are frozen in `rtl/README.md`; this document remains authoritative for behavior.
+
 The target Router belongs entirely to the `noc_clk` domain and receives only `noc_rst_n`. System
 integration derives that reset and each NI's `ARESETn` from one common system reset; assertion is
 asynchronous and deassertion is synchronized to the destination clock. The Router has no
@@ -457,8 +460,8 @@ and its `SimpleRouterForkWedge` twin, and by the co-sim `multicast` pattern
 
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
-| `DAT_NUM_VC` | current 1; target 2 | 1..8 (= 2^VC_ID_WIDTH); Split requires {2,4,6,8} | VCs on the DAT link. REQ/RSP are fixed single-VC. The current value comes from `ni_params_pkg::NOC_DAT_NUM_VC_DFLT`; target alignment remains pending. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != DAT_NUM_VC`. |
-| `NOC_DAT_VC_MODE` [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | Eligible-VC mask applied by every DAT output VA; not implemented by the current C++ router. |
+| `NOC_DAT_NUM_VC` (`DAT_NUM_VC` wrapper alias) | 2 | 1..8 (= 2^VC_ID_WIDTH); Split requires {2,4,6,8} | VCs on the DAT link. REQ/RSP are fixed single-VC. `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t)` disagrees. |
+| `NOC_DAT_VC_MODE` | SHARED (0) | {SHARED (0), READ_WRITE_SPLIT (1)} | Eligible-VC mask applied by every target DAT output VA; current C++ router implements SHARED only. |
 | `REQ_FLIT_WIDTH` | 136 | `133 + AXI_ID_WIDTH` | Derived REQ flit bus width, bits |
 | `RSP_FLIT_WIDTH` | 126 | `123 + AXI_ID_WIDTH` | Derived RSP flit bus width, bits |
 | `DAT_FLIT_WIDTH` | 633 | 633 for `AXI_ID_WIDTH` 1..8 | Derived DAT flit bus width, bits |

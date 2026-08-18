@@ -257,7 +257,7 @@ TEST(RouterWrap, CornerNodeRoutesPerDirectionIndependently) {
 // steady level.
 TEST(RouterWrap, DatLocalInputDrainEmitsCreditPulse) {
     RouterWrap a;
-    a.init(/*x_coord=*/0);
+    a.init(/*x=*/0, /*y=*/0, /*mesh_x=*/2, /*mesh_y=*/1, /*dat_num_vc=*/1);
     RouterInputs in{};
     in.rx_dat_valid[LOCAL] = true;
     in.rx_dat_flit[LOCAL] = flit_to_bytes(make_dat_r(/*dst=*/0x00));  // LOCAL-bound
@@ -283,7 +283,7 @@ TEST(RouterWrap, DatLocalInputDrainEmitsCreditPulse) {
 // dat_router().receive_credit(LOCAL) must restore the counter.
 TEST(RouterWrap, DatLocalCreditReturnReplenishesRouter) {
     RouterWrap a;
-    a.init(/*x_coord=*/0);
+    a.init(/*x=*/0, /*y=*/0, /*mesh_x=*/2, /*mesh_y=*/1, /*dat_num_vc=*/1);
     const std::size_t seed = a.dat_router().credit(LOCAL, /*vc=*/0);
     ASSERT_GT(seed, 0u) << "router LOCAL output credit must seed > 0";
 
@@ -323,7 +323,7 @@ TEST(RouterWrap, DatLocalCreditReturnReplenishesRouter) {
 // untouched.
 TEST(RouterWrap, DatCornerNodeCreditDoesNotCrossDirections) {
     RouterWrap a;
-    a.init(/*x=*/1, /*y=*/1, /*mesh_x=*/2, /*mesh_y=*/2);
+    a.init(/*x=*/1, /*y=*/1, /*mesh_x=*/2, /*mesh_y=*/2, /*dat_num_vc=*/1);
     const std::size_t west_seed = a.dat_router().credit(WEST, /*vc=*/0);
     const std::size_t south_seed = a.dat_router().credit(SOUTH, /*vc=*/0);
     ASSERT_GT(west_seed, 0u);

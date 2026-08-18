@@ -1,6 +1,9 @@
 # Design: Network Slave Unit (NSU)
 
-Top module: `nsu_wrap` (`ref_model/top/nsu_wrap.sv`), driving a cycle-accurate C++ model core (`ref_model/c_model/include/nsu/`) through the DPI handle ABI. This document specifies that as-built model and target RTL overlays. Existing co-sim checks the as-built model; target CDC, Router-only VC ownership and asymmetric LOCAL DAT flow control require model alignment before cycle-exact RTL comparison.
+Model top module: `nsu_wrap` (`ref_model/top/nsu_wrap.sv`), driving a cycle-accurate C++ model core (`ref_model/c_model/include/nsu/`) through the DPI handle ABI. This document specifies that as-built model and target RTL overlays. Existing co-sim checks the as-built model; target CDC, Router-only VC ownership and asymmetric LOCAL DAT flow control require model alignment before cycle-exact RTL comparison.
+
+The production top is `nsu`. Its wrapper-facing ports, clock/reset ownership, and reviewed child
+boundaries are frozen in `rtl/README.md`; this document remains authoritative for behavior.
 
 ## 2. Design Description
 
@@ -305,12 +308,11 @@ at simulation startup. Synthesizable RTL receives the same fields from generated
 | `NSU_META_BUFFER_MAX_OUTSTANDING` | 32 | 1 to 256 | MetaBuffer shared pool, per direction |
 | `NSU_META_BUFFER_MAX_UNIQUE_IDS` | 1 | {1, 8} only, constructor throws otherwise | id remap in Depacketize |
 | `NSU_ARBITER_FIFO_DEPTH` [current model] | 4 | 1 to 64 | wormhole and VC-arbiter pending depths; not target NI VC storage |
-| `NOC_DAT_NUM_VC` | 1 | 1 to 8 | Current C++ model DAT VC count and credit vector widths |
-| `DAT_NUM_VC` [target RTL] | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector widths |
-| `NOC_DAT_VC_MODE` [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | `DataR` eligible mask; system-wide with DAT router VA |
+| `NOC_DAT_NUM_VC` | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector widths; wrapper-local `DAT_NUM_VC` is an alias |
+| `NOC_DAT_VC_MODE` | SHARED (0) | {SHARED (0), READ_WRITE_SPLIT (1)} | Target `DataR` eligible mask; system-wide with DAT router VA; current model implements SHARED only |
 | `NOC_ROUTER_VC_DEPTH` | 8 | 1 to 16 | Router LOCAL input VC FIFO depth and NSU DAT response sender-credit seed |
-| `AXI_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | common AW/W/AR/B/R dual-clock FIFO depth |
-| `NOC_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
+| `AXI_FIFO_DEPTH` | 8 | {4,8,16} | common AW/W/AR/B/R dual-clock FIFO depth |
+| `NOC_FIFO_DEPTH` | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
 | `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 136 / 126 / 633 | target `133 + AXI_ID_WIDTH` / `123 + AXI_ID_WIDTH` / 633 | per-network flit containers and DPI marshalling |
 | `AXI_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 48 / 512 | target ID 1..8, current model locked at 3 / 1..64 / {32,64,128,256,512,1024} | NoC-carried ID, beat structs and DPI |
 | create-time `src_id` | 0 | 8 bit | stamped into every response flit `src_id` |

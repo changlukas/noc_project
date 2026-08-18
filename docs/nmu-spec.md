@@ -2,6 +2,9 @@
 
 The NMU is the master-side network interface of the NoC. It sits between exactly one external 512-bit AXI4 master interface and the router mesh: it converts AXI4 request beats (AW / W / AR) into NoC flits, and converts response flits (B / R) back into AXI4 response beats. Narrow and Data are internal NoC traffic classes selected by the SAM, not separate AXI interfaces. This document specifies the as-built C++ behavior model (`ref_model/c_model/include/nmu/`), its wrap (`ref_model/c_model/include/wrap/nmu_wrap.hpp`), and target RTL overlays. Existing co-sim checks the as-built model; target CDC, Router-only VC ownership and asymmetric LOCAL DAT flow control require model alignment before cycle-exact RTL comparison.
 
+The production top is `nmu`. Its wrapper-facing ports, clock/reset ownership, and reviewed child
+boundaries are frozen in `rtl/README.md`; this document remains authoritative for behavior.
+
 ## 2. Design Description
 
 ### 2.1 Packetization
@@ -238,15 +241,14 @@ behavior. Defaults below are the shipped values.
 | AXI_ADDR_WIDTH | 48 | 1..64 | Address fields |
 | AXI_DATA_WIDTH | 512 | {32,64,128,256,512,1024} | wdata / rdata, WSTRB_WIDTH = 64 |
 | AXI_AWUSER_WIDTH | 58 | 10..64 | AWUSER slave-port field and the DPI unpack mask: 8 b user + 2 b collective_op + 48 b collective address mask (Section 2.8) |
-| NOC_DAT_NUM_VC | 1 | 1 to 8 | Current C++ model `VcAllocator` and DAT credit vectors |
-| DAT_NUM_VC [target RTL] | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector width |
-| NOC_DAT_VC_MODE [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | `VcAllocator` eligible mask; system-wide with DAT router VA |
+| NOC_DAT_NUM_VC | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector width; wrapper-local `DAT_NUM_VC` is an alias |
+| NOC_DAT_VC_MODE | SHARED (0) | {SHARED (0), READ_WRITE_SPLIT (1)} | Target `VcAllocator` eligible mask; system-wide with DAT router VA; current model implements SHARED only |
 | NOC_REQ_FLIT_WIDTH | 136 | derived as `133 + AXI_ID_WIDTH` | REQ egress flit port |
 | NOC_RSP_FLIT_WIDTH | 126 | derived as `123 + AXI_ID_WIDTH` | RSP ingress flit port |
 | NOC_DAT_FLIT_WIDTH | 633 | derived maximum, 633 for `AXI_ID_WIDTH` 1..8 | DAT flit ports, both directions |
 | NOC_ROUTER_VC_DEPTH | 8 | 1..16 | Router LOCAL input VC FIFO depth and NMU DAT sender-credit seed |
-| AXI_FIFO_DEPTH [target RTL] | 8 | {4,8,16} | Common AW/W/AR/B/R dual-clock FIFO depth |
-| `NOC_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
+| AXI_FIFO_DEPTH | 8 | {4,8,16} | Common AW/W/AR/B/R dual-clock FIFO depth |
+| `NOC_FIFO_DEPTH` | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
 | NMU_ROB_B_DEPTH | 128 | 1..256 | B slot pool |
 | NMU_ROB_R_DEPTH | 128 | 1..256 | R slot pool |
 | READ_ROB_ENABLED | 1 | {0,1} | RTL `generate if`: Normal R RoB or RoB-less per-ID ordering-domain counters |

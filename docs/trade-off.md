@@ -425,6 +425,16 @@ requirement. Extending QoS to REQ/RSP is a separate architecture decision.
 
 Direct `AxQOS`-to-`vc_id` mapping is rejected for this extension. Default `AxQOS = 0` traffic would
 collapse onto VC0 and waste the remaining VCs. `READ_WRITE_SPLIT` partitions by AXI direction, not
-QoS, and does not change this decision. The current C++ model's `DAT_NUM_VC = 1` default still
-differs from the approved target default of 2; that parameter and mode alignment is independent of
-QoS.
+QoS, and does not change this decision. The C++ model and generated wrappers now take the approved
+`NOC_DAT_NUM_VC = 2` default; model implementation of the non-default split mode remains separate
+from QoS.
+
+## Production shared primitive policy
+
+Production RTL obtains synchronous FIFO, asynchronous FIFO, and reusable register-slice storage
+from the exact external revision in `rtl/Bender.yml`; source and license evidence is recorded only
+in the Provenance section of `docs/verification-environment.md`. Project adapters may translate
+types and handshakes but may not reproduce storage arrays, pointers, CDC synchronizers, or generic
+register-slice state. A custom primitive is rejected unless a concrete library gap and replacement
+semantics are approved in this file before implementation. Block-specific architectural state is
+outside this restriction.

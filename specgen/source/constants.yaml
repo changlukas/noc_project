@@ -10,7 +10,7 @@ axi:
     description: "AXI transaction ID width at the NI interface and in the flit"
     default: 3
     min: 1
-    max: 32
+    max: 8
     # This is the OUTPUT width of the axi_id_remap in the tile endpoint
     # (sim/tb/user_node_endpoint.sv, i_noc_id_remap), not a share of a wider
     # tile id: the remap compresses the tile-side id space into this one, so
@@ -20,10 +20,9 @@ axi:
     # and the things downstream take their bound FROM it. Both
     # nsu.META_BUFFER_MAX_UNIQUE_IDS and the endpoint remap's
     # AxiSlvPortMaxUniqIds cap at 2^ID_WIDTH.
-    # NOTE: spec range is 1..32 per AXI4 IHI 0022 §A2.2.1; the c_model derives
-    # its per-ID container sizes from this value (AXI_ID_SPACE static_assert in
-    # c_model/include/axi/types.hpp), so widening costs 2^ID_WIDTH entries per
-    # structure.
+    # NOTE: the production contract intentionally caps this at 8. The current
+    # c_model remains a fixed 3-bit instance; every non-default production
+    # instance must regenerate the REQ/RSP packet widths coherently.
     sv_symbol: AXI_ID_WIDTH_DFLT
     cpp_symbol: AXI_ID_WIDTH
   INITIATOR_ID_WIDTH:
@@ -81,13 +80,45 @@ axi:
     # which is what caps this at 64.
     sv_symbol: AXI_AWUSER_WIDTH_DFLT
     cpp_symbol: AXI_AWUSER_WIDTH
+  FIFO_DEPTH:
+    type: int
+    units: entries
+    description: "Common depth of the five AXI-channel asynchronous FIFOs in an NMU or NSU"
+    default: 8
+    allowed: [4, 8, 16]
+    sv_symbol: AXI_FIFO_DEPTH_DFLT
+    cpp_symbol: AXI_FIFO_DEPTH
 
 noc:
+  DAT_VC_MODE_SHARED:
+    type: int
+    units: mode
+    description: "Encoding of the SHARED DAT VC allocation policy"
+    default: 0
+    allowed: [0]
+    sv_symbol: NOC_DAT_VC_MODE_SHARED
+    cpp_symbol: NOC_DAT_VC_MODE_SHARED
+  DAT_VC_MODE_READ_WRITE_SPLIT:
+    type: int
+    units: mode
+    description: "Encoding of the READ_WRITE_SPLIT DAT VC allocation policy"
+    default: 1
+    allowed: [1]
+    sv_symbol: NOC_DAT_VC_MODE_READ_WRITE_SPLIT
+    cpp_symbol: NOC_DAT_VC_MODE_READ_WRITE_SPLIT
+  DAT_VC_MODE:
+    type: int
+    units: mode
+    description: "DAT VC allocation policy: 0 = SHARED, 1 = READ_WRITE_SPLIT"
+    default: 0
+    allowed: [0, 1]
+    sv_symbol: NOC_DAT_VC_MODE_DFLT
+    cpp_symbol: NOC_DAT_VC_MODE
   DAT_NUM_VC:
     type: int
     units: count
     description: "Number of virtual channels per NoC link (DAT network; REQ/RSP are single-VC, see REQ_NUM_VC/RSP_NUM_VC)"
-    default: 1
+    default: 2
     min: 1
     max: 8
     sv_symbol: NOC_DAT_NUM_VC_DFLT
@@ -137,6 +168,14 @@ noc:
     max: 1024
     sv_symbol: NOC_DAT_FLIT_WIDTH_DFLT
     cpp_symbol: NOC_DAT_FLIT_WIDTH
+  FIFO_DEPTH:
+    type: int
+    units: entries
+    description: "Common depth of the REQ, RSP, DAT Write and DAT Read synchronous NoC-class FIFOs in an NMU or NSU"
+    default: 8
+    allowed: [4, 8, 16]
+    sv_symbol: NOC_FIFO_DEPTH_DFLT
+    cpp_symbol: NOC_FIFO_DEPTH
   ROUTER_VC_DEPTH:
     type: int
     units: flits

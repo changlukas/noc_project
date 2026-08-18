@@ -76,7 +76,8 @@ class NmuWrap {
     // reinterpret as DAT_NUM_VC per specgen T1 note). queue_depth = one per
     // AXI channel.
     void init(const char* config_path, uint8_t src_id = 0, uint8_t port_id = 0,
-              uint8_t dat_num_vc = 1, std::size_t queue_depth = ni::NMU_QUEUE_DEPTH,
+              uint8_t dat_num_vc = ::ni::NOC_DAT_NUM_VC,
+              std::size_t queue_depth = ni::NMU_QUEUE_DEPTH,
               nmu::RobMode rob_mode = nmu::DEFAULT_ROB_MODE,
               std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
               std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
@@ -326,7 +327,7 @@ class NmuWrap {
     uint32_t w_expected() const { return w_expected_; }
 
   private:
-    uint8_t dat_num_vc_ = 1;
+    uint8_t dat_num_vc_ = ::ni::NOC_DAT_NUM_VC;
     std::unique_ptr<nmu::NmuStandalone> nmu_;
     NmuInputs in_{};
     NmuOutputs out_{};

@@ -142,6 +142,15 @@ per-package version, upstream commit, and the one flagged local modification
 external IP; the rest of this document describes the environment in the
 DUT's own vocabulary.
 
+The production RTL primitive dependency is separate from that vendored DV closure. It pins
+[`common_cells` 1.39.0](https://github.com/pulp-platform/common_cells/tree/9ca8a7655f741e7dd5736669a20a301325194c28)
+at commit `9ca8a7655f741e7dd5736669a20a301325194c28`, matching
+`/references/FlooNoC/Bender.yml` and `/references/FlooNoC/Bender.lock`. The selected primitive
+interfaces are `fifo_v3`, `cdc_fifo_gray`, `stream_register`, and `spill_register`; Bender resolves
+their transitive sources and include order from `rtl/Bender.yml`. Production builds fetch that
+exact revision and do not copy or rewrite the files. The upstream license is
+[Solderpad Hardware License v0.51](https://github.com/pulp-platform/common_cells/blob/9ca8a7655f741e7dd5736669a20a301325194c28/LICENSE).
+
 Upstream references:
 
 - IHI 0022H, AMBA AXI protocol specification (Arm Ltd.), cited by section
