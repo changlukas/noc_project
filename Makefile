@@ -18,7 +18,7 @@ CMODEL_BUILD     = $(BUILD_ROOT)/cmodel
 SIM_VERILATOR := sim/verilator
 SIM_VCS       := sim/vcs
 
-.PHONY: help build build-cmodel build-yamlcpp build-verilator test \
+.PHONY: help build build-cmodel build-yamlcpp build-verilator test rtl-common-lint rtl-common-test \
         pytest check docker-build docker-shell docker-test docker-pytest docker-sim-setup docker-sim-smoke docker-sim-tier2 \
         clean clean-cmodel clean-verilator clean-vcs clean-generated
 
@@ -38,6 +38,8 @@ help:
 	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
+	@echo "  make rtl-common-lint  lint the production common primitive adapters"
+	@echo "  make rtl-common-test  lint and behavior-test the common primitive adapters"
 	@echo "  make pytest           specgen + sim/tools suites, golden drift gate"
 	@echo "  make check            both of the above -- run this before committing"
 	@echo ""
@@ -141,6 +143,12 @@ build-verilator: build-yamlcpp
 test: build-cmodel
 	@cd $(CMODEL_BUILD) && ctest --output-on-failure
 
+rtl-common-lint:
+	@bash rtl/common/test.sh lint
+
+rtl-common-test:
+	@bash rtl/common/test.sh test
+
 PYTHON3 ?= python3
 
 # Python suites: specgen (codegen/golden drift gate -- a stale golden, e.g. an
@@ -230,6 +238,7 @@ sim-gen:
 clean: clean-cmodel clean-verilator clean-vcs clean-generated
 	rm -rf $(BUILD_ROOT)
 	rm -f master_wrap_read_dump*.txt
+	rm -f core core.*
 
 clean-cmodel:
 	rm -rf $(CMODEL_BUILD)

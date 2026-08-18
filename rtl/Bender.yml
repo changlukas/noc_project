@@ -7,3 +7,8 @@ dependencies:
   common_cells:
     git: https://github.com/pulp-platform/common_cells.git
     rev: 9ca8a7655f741e7dd5736669a20a301325194c28
+
+sources:
+  - common/noc_sync_fifo.sv
+  - common/axi_async_fifo.sv
+  - common/noc_reg_slice.sv
