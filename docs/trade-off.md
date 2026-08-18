@@ -439,6 +439,12 @@ register-slice state. A custom primitive is rejected unless a concrete library g
 semantics are approved in this file before implementation. Block-specific architectural state is
 outside this restriction.
 
+For register slices, implementation starts by comparing the reference-only source behavior and
+tests, then maps the required semantics onto the production-approved primitive. Interface-specific
+`*_REG_TYPE` parameters use 0 for bypass, 1 for a simple register, and 2 for a skid buffer. Each
+parameter keeps its separately approved default; this rule does not introduce a global default or
+permit reference-only source in the production build.
+
 ## Model-facing REQ/RSP held-valid adaptation
 
 REQ and RSP retain standard held ready/valid semantics: a transfer occurs only on
