@@ -16,7 +16,7 @@ Covered (IHI 0022H):
 
 | area | sections | where exercised |
 |---|---|---|
-| VALID/READY handshake, stall, backpressure | A3.2 | unit tests + wire-level co-sim (held-valid latches in both NI wraps) |
+| VALID/READY handshake, stall, backpressure | A3.2 | focused model-egress regression + wire-level co-sim (approved held-valid spill registers on model-facing REQ/RSP) |
 | Burst types INCR/WRAP/FIXED, length, alignment, 4 KB boundary | A3.4.1 | `protocol_rules.hpp` checks + unit tests + burst stimulus |
 | Per-ID response ordering: same-ID R returns in AR-issue order; W follows AW (no WID in AXI4) | A5.3 | RoB / interlock design + integration tests + co-sim scoreboard |
 | Response codes; DECERR on out-of-bounds access | A3.4.4 | memory model returns DECERR past its bounds; unit tests |
@@ -92,8 +92,9 @@ directed driver --> master_dv --> NMU --> routers --> NSU --> slave_dv --> tile-
                      (scoreboard taps master_dv)
 ```
 
-Every node carries the same endpoint layout; the fabric and the NI wraps
-(`ni_wrap`, `router_wrap`) hold no verification code.
+Every node carries the same endpoint layout. The model-facing `nmu_wrap`, `nsu_wrap`, and
+`router_wrap` contain only DPI marshalling, registered sampling, checks, and the REQ/RSP held-valid
+adaptation described below; production RTL under `rtl/` contains none of that verification logic.
 
 ### Hybrid block co-simulation
 
@@ -116,6 +117,21 @@ excluded explicitly rather than hidden by loose scoreboarding.
 
 The acceptance order is unit DV, hybrid block co-sim, full-RTL `2x2 verify`, then the full-RTL
 `4x4 verify` milestone. Every ready/valid hybrid boundary receives randomized stall injection.
+
+### Model-facing REQ/RSP egress
+
+The C++ models produce one-cycle REQ/RSP pop strobes. Each model-facing source captures its strobe
+in the approved `common_cells` `spill_register` and returns the primitive's input capacity to the
+model. The RTL-facing source therefore holds valid and flit until `valid && ready`; it never forces
+ready high. Because the C++ Router ingress consumes pulses, `router_wrap` presents it with one
+injection pulse per wire handshake. NMU RSP and NSU REQ ingress are always-ready in the current
+model. DAT bypasses this adaptation and retains credit flow control.
+
+`sim/tools/test_model_egress_hold.py` drives the previously lossy sequence directly: a fake C++ NMU
+emits a REQ strobe, RTL-side ready falls before acceptance, and valid plus payload must remain
+stable for three stalled cycles. It then sends 16 ordered flits through randomized ready stalls and
+checks exactly-once delivery. Wrapper assertions check the same held-valid property for NMU REQ,
+NSU RSP, and every Router REQ/RSP port; the co-sim retains randomized consumer stalls.
 
 ## VIP set
 
@@ -303,8 +319,8 @@ end of every run, in all injection modes):
 | counter | source | semantics |
 |---|---|---|
 | `in_fifo_occ_max` / `out_fifo_occ_max` per router | `cmodel_perf_sample_tick` once per clock | max observed input/output FIFO occupancy |
-| `flit_count` per link | `link_perf_monitor` (passive, per inter-router link) | cycles with a valid flit on the wire |
-| `stall_cyc` per link | same | cycles with no flit moving while at least one VC credit counter is zero (credit-deficit backpressure) |
+| `flit_count` per link | `link_perf_monitor` (passive, per inter-router link) | REQ/RSP `valid && ready` transfers; DAT credit-qualified valid strobes |
+| `stall_cyc` per link | same | REQ/RSP `valid && !ready` cycles; DAT idle cycles while at least one VC credit counter is zero |
 
 `link_perf_monitor` also asserts the credit protocol: valid with zero credit
 on that VC, or an out-of-range `vc_id`, is an error.

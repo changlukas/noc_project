@@ -438,3 +438,26 @@ types and handshakes but may not reproduce storage arrays, pointers, CDC synchro
 register-slice state. A custom primitive is rejected unless a concrete library gap and replacement
 semantics are approved in this file before implementation. Block-specific architectural state is
 outside this restriction.
+
+## Model-facing REQ/RSP held-valid adaptation
+
+REQ and RSP retain standard held ready/valid semantics: a transfer occurs only on
+`valid && ready`, and the source keeps valid plus the complete flit stable while stalled. The C++
+model emits one-cycle pop strobes, so the verification-only NMU REQ, NSU RSP, and Router REQ/RSP
+egresses capture those strobes with the approved `common_cells` `spill_register`. The existing DPI
+output register is treated as a pending input stage: another model pop is blocked until that stage
+has entered the spill register. Model-facing Router ingress converts each wire handshake back to
+one C++ injection pulse. DAT does not enter this path and remains credit-controlled.
+
+This follows the upstream stream-cut precedent, which instantiates `spill_register` per elastic
+channel rather than changing ready/valid into a pulse protocol
+([`floo_cut.sv`](https://github.com/pulp-platform/FlooNoC/blob/cb7b2ba3fd4b7eac340a4117ffba05c2a9757699/hw/floo_cut.sv#L43-L69)).
+A standalone flow-control normalizer and a project-local FIFO are rejected. The adaptation stays
+in `ref_model/top/*_wrap.sv`; no production module under `rtl/` contains it.
+
+Pros: stalled flits cannot be dropped or changed; randomized ready stalls remain meaningful; the
+storage and handshake implementation comes from the pinned approved primitive; REQ/RSP wire
+semantics match production RTL without changing the C++ cores. Cons: the model-facing REQ/RSP path
+adds one wire cycle, the pending DPI register can introduce an input bubble, and model-to-model
+Router composition must handshake-qualify ingress before recreating the C++ pulse. These are
+verification timing costs, not production microarchitecture.

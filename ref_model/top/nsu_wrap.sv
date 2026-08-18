@@ -144,6 +144,8 @@ module nsu_wrap #(
     bit                    rx_req_ready_q;
     bit                    tx_rsp_valid_q;
     bit [RSP_FLIT_WIDTH-1:0] tx_rsp_flit_q;
+    logic                  tx_rsp_model_ready;
+    logic                  tx_rsp_spill_ready;
     bit                    tx_dat_valid_q;
     bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q;
     bit [DAT_NUM_VC-1:0]     rx_dat_crdvalid_q;
@@ -225,7 +227,7 @@ module nsu_wrap #(
                 // REQ ingress, RSP egress ready, DAT both directions
                 rx_req_valid_i,
                 rx_req_flit_i,
-                tx_rsp_ready_i,
+                tx_rsp_model_ready,
                 rx_dat_valid_i,
                 rx_dat_flit_i,
                 tx_dat_crdvalid_i,
@@ -336,8 +338,30 @@ module nsu_wrap #(
     // -------------------------------------------------------------------------
 
     assign rx_req_ready_o    = rx_req_ready_q;
-    assign tx_rsp_valid_o    = tx_rsp_valid_q;
-    assign tx_rsp_flit_o     = tx_rsp_flit_q;
+    // Match the one-cycle C++ response strobe to the RTL-side held-valid
+    // contract.  Do not allow another model pop while the DPI staging register
+    // still holds a pulse that the spill register has not sampled.
+    assign tx_rsp_model_ready = tx_rsp_spill_ready && !tx_rsp_valid_q;
+
+    spill_register #(
+        .T(logic [RSP_FLIT_WIDTH-1:0]),
+        .Bypass(1'b0)
+    ) i_tx_rsp_spill_register (
+        .clk_i,
+        .rst_ni,
+        .valid_i(tx_rsp_valid_q),
+        .ready_o(tx_rsp_spill_ready),
+        .data_i(tx_rsp_flit_q),
+        .valid_o(tx_rsp_valid_o),
+        .ready_i(tx_rsp_ready_i),
+        .data_o(tx_rsp_flit_o)
+    );
+
+    assert property (@(posedge clk_i) disable iff (!rst_ni)
+        tx_rsp_valid_o && !tx_rsp_ready_i
+        |=> tx_rsp_valid_o && $stable(tx_rsp_flit_o))
+        else $error("nsu_wrap: RSP changed before valid/ready handshake");
+
     assign tx_dat_valid_o    = tx_dat_valid_q;
     assign tx_dat_flit_o     = tx_dat_flit_q;
     assign rx_dat_crdvalid_o = rx_dat_crdvalid_q;
