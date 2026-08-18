@@ -10,8 +10,8 @@ Success Criteria: The three block contracts are reviewed against their specs and
 Status: Not Started
 
 ## Stage 2: Shared Foundation And DV Plans
-Goal: Verify the shared FIFO/register primitives and approve one verification plan for each major block.
-Success Criteria: FIFO, AXI async FIFO, and register-slice tests pass across legal modes; Router, NMU, and NSU DV plans identify assertions, reference-model obligations, coverage, provenance, and per-package acceptance evidence.
+Goal: Integrate and verify the pinned common_cells FIFO/register primitives and approve one verification plan for each major block.
+Success Criteria: Project adapters for the synchronous FIFO, AXI async FIFO, and register primitives pass across legal modes without reimplementing the library; Router, NMU, and NSU DV plans identify assertions, reference-model obligations, coverage, provenance, and per-package acceptance evidence.
 Status: Not Started
 
 ## Stage 3: Block RTL
