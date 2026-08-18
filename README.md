@@ -264,6 +264,7 @@ python3 specgen/tools/codegen.py --check
 
 - [NMU design spec](docs/nmu-spec.md)
 - [NSU design spec](docs/nsu-spec.md)
+- [NSU RTL verification plan](docs/nsu-verification-plan.md)
 - [Router design spec](docs/router-spec.md)
 - [Response-ordering trade-off record](docs/trade-off.md)
 - [Verification environment](docs/verification-environment.md)
