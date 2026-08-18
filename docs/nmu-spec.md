@@ -158,7 +158,7 @@ read/write class split. Only the DAT face carries NUM_VC > 1 (REQ and RSP are si
 so `DataAw` / `DataW` are its only request-side traffic. Legal NUM_VC values are 1 to 8.
 The working co-sim configuration set is {1, 2, 4, 8}.
 
-**Target RTL overlay.** `DAT_VC_ALLOC_MODE` defaults to `SHARED`, which preserves the
+**Target RTL overlay.** `NOC_DAT_VC_MODE` defaults to `SHARED`, which preserves the
 current candidate set. `READ_WRITE_SPLIT` requires `DAT_NUM_VC` in {2, 4, 6, 8} and
 restricts NMU `DataAw` / `DataW` to the lower half [0, `DAT_NUM_VC/2`). `DataW` inherits
 the VC selected for its owning `DataAw` in either mode. The mode is system-wide: every
@@ -240,13 +240,13 @@ behavior. Defaults below are the shipped values.
 | AXI_AWUSER_WIDTH | 58 | 10..64 | AWUSER slave-port field and the DPI unpack mask: 8 b user + 2 b collective_op + 48 b collective address mask (Section 2.8) |
 | NOC_DAT_NUM_VC | 1 | 1 to 8 | Current C++ model `VcAllocator` and DAT credit vectors |
 | DAT_NUM_VC [target RTL] | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector width |
-| DAT_VC_ALLOC_MODE [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | `VcAllocator` eligible mask; system-wide with DAT router VA |
+| NOC_DAT_VC_MODE [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | `VcAllocator` eligible mask; system-wide with DAT router VA |
 | NOC_REQ_FLIT_WIDTH | 136 | derived as `133 + AXI_ID_WIDTH` | REQ egress flit port |
 | NOC_RSP_FLIT_WIDTH | 126 | derived as `123 + AXI_ID_WIDTH` | RSP ingress flit port |
 | NOC_DAT_FLIT_WIDTH | 633 | derived maximum, 633 for `AXI_ID_WIDTH` 1..8 | DAT flit ports, both directions |
 | NOC_ROUTER_VC_DEPTH | 8 | 1..16 | Router LOCAL input VC FIFO depth and NMU DAT sender-credit seed |
-| NI_CDC_FIFO_DEPTH [target RTL] | 8 | {4,8,16} | Common AW/W/AR/B/R dual-clock FIFO depth |
-| `NI_CLASS_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
+| AXI_FIFO_DEPTH [target RTL] | 8 | {4,8,16} | Common AW/W/AR/B/R dual-clock FIFO depth |
+| `NOC_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
 | NMU_ROB_B_DEPTH | 128 | 1..256 | B slot pool |
 | NMU_ROB_R_DEPTH | 128 | 1..256 | R slot pool |
 | READ_ROB_ENABLED | 1 | {0,1} | RTL `generate if`: Normal R RoB or RoB-less per-ID ordering-domain counters |

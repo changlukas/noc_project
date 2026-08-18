@@ -22,17 +22,17 @@ while buffer and outstanding depths move the queuing part.
 | `AXI_ID_WIDTH` [target derived width] | Outstanding capacity, REQ/RSP area | Sets the NoC-carried ID width and the per-ID state count. REQ flit width is `133 + AXI_ID_WIDTH`; RSP is `123 + AXI_ID_WIDTH`; DAT remains 633 b over the legal range because DataW is wider than DataR | 3 (1 to 8); current model locked at 3 |
 | `AXI_DATA_WIDTH` | Peak bandwidth, area | Sets the data-class payload, hence the DAT flit width (`DAT_FLIT_WIDTH` = 633 b = 48 b header + 585 b payload) and per-router buffer and crossbar area | 512 b (32, 64, 128, 256, 512, 1024) |
 | `REQ_NUM_VC`, `RSP_NUM_VC`, `DAT_NUM_VC` | Peak bandwidth, area | Recover link bandwidth lost to head-of-line blocking, at a buffer cost that is `flit width x depth x NUM_VC` per network. Only DAT is swept by the topology set, REQ and RSP being scalar ready/valid | implemented 1, 1, 1; target 1, 1, 2 (1 to 8) |
-| `DAT_VC_ALLOC_MODE` [target] | Head-of-line blocking, usable capacity | `SHARED` lets every DAT class use every VC. `READ_WRITE_SPLIT` reserves equal lower/upper halves for Write/Read, removing cross-class blocking but potentially stranding capacity under asymmetric traffic | `SHARED` (`SHARED`, `READ_WRITE_SPLIT`); Split requires `DAT_NUM_VC` in {2, 4, 6, 8} |
+| `NOC_DAT_VC_MODE` [target] | Head-of-line blocking, usable capacity | `SHARED` lets every DAT class use every VC. `READ_WRITE_SPLIT` reserves equal lower/upper halves for Write/Read, removing cross-class blocking but potentially stranding capacity under asymmetric traffic | `SHARED` (`SHARED`, `READ_WRITE_SPLIT`); Split requires `DAT_NUM_VC` in {2, 4, 6, 8} |
 | `MESH_X_DIM`, `MESH_Y_DIM` | Latency floor | Set hop count, hence the structural transport term of every latency form in the spec | 4, 4 (2 to 16) |
 | `NOC_ROUTER_VC_DEPTH` | Sustained throughput | Credit seed of the upstream sender on DAT, sized by rule 1 below | 8 (1 to 16) |
-| `NI_CDC_FIFO_DEPTH` [target] | Clock-domain elasticity, area | Common entry count of the AW/W/AR/B/R dual-clock FIFOs on each AXI interface. Absorbs clock-ratio and temporary AXI backpressure rather than live transaction state | 8 (4, 8, 16) |
-| `NI_CLASS_FIFO_DEPTH` [target] | Burst absorption | Common depth of the synchronous `noc_clk` REQ/RSP/DATW/DATR FIFOs after channel assignment; not replicated per VC | 8 (4, 8, 16) |
+| `AXI_FIFO_DEPTH` [target] | Clock-domain elasticity, area | Common entry count of the AW/W/AR/B/R dual-clock FIFOs on each AXI interface. Absorbs clock-ratio and temporary AXI backpressure rather than live transaction state | 8 (4, 8, 16) |
+| `NOC_FIFO_DEPTH` [target] | Burst absorption | Common depth of the synchronous `noc_clk` REQ/RSP/DATW/DATR FIFOs after channel assignment; not replicated per VC | 8 (4, 8, 16) |
 | `ROUTER_OUTPUT_FIFO_DEPTH` | Sustained throughput | Output staging, not credit-counted, absorbs transient output-port contention | 2 (1 to 16) |
 | `MAX_TXNS_PER_ID` | Latency hiding | Bounds outstanding transactions per AXI ID. Nothing sits above it, so it is the master-side admission limit and `MAX_TXNS_PER_ID x 2^AXI_ID_WIDTH` is the whole window. Measured on `mesh_4x4` at 4 VCs, `all_to_all`: exactly its cap at one id per initiator, 31 of 32 at four ids under continuous checked injection, 21 of 32 on the directed run. Whether it binds follows the traffic's id count and load | 32 (1 to 256) |
 | `ROB_B_DEPTH`, `ROB_R_DEPTH` | Latency hiding | Reorder buffer pool depths, bound in-flight write and read responses awaiting in-order return. `ROB_R_DEPTH` is what binds first under sustained load: measured full, 128 of 128, on `mesh_4x4` at 4 VCs, `all_to_all` under continuous checked injection, against 60 on the directed run | 128, 128 (1 to 256) |
 | `META_BUFFER_MAX_OUTSTANDING` | Latency hiding | Slave-side outstanding pool per direction, bounds concurrency the slave sustains | 32 (1 to 256) |
 | `META_BUFFER_MAX_UNIQUE_IDS` | Endpoint concurrency | Distinct AXI IDs the NSU presents downstream. At 1 every transaction reaching a tile carries the same ID, so an endpoint that tracks IDs sees no concurrency to exploit | 1 (1 or 8) |
-| `NMU_QUEUE_DEPTH`, `NSU_QUEUE_DEPTH` [current model] | Burst absorption | Single-clock AXI-channel queue depth in the C++ model; target CDC uses `NI_CDC_FIFO_DEPTH` | 16, 16 (1 to 1024) |
+| `NMU_QUEUE_DEPTH`, `NSU_QUEUE_DEPTH` [current model] | Burst absorption | Single-clock AXI-channel queue depth in the C++ model; target CDC uses `AXI_FIFO_DEPTH` | 16, 16 (1 to 1024) |
 | `NMU_DEPKT_Q_DEPTH` | Burst absorption | Depacketize demux FIFO depth | 16 (1 to 1024) |
 | `NMU_ARBITER_FIFO_DEPTH`, `NSU_ARBITER_FIFO_DEPTH` [current model] | Burst absorption | Current C++ wormhole and VC-arbiter staging depth; not a target NI per-VC FIFO | 4, 4 (1 to 64) |
 
@@ -199,7 +199,7 @@ sustains 98.7 to 99.5 % (measured in `422ccdc`).
 The bandwidth and area parameters, `AXI_DATA_WIDTH` and the per-network `NUM_VC`, are the largest
 knobs on both axes and interact. Router input buffering is their product, so raising the data class
 width and the channel count together raises buffer area faster than either alone.
-`DAT_VC_ALLOC_MODE` does not change the number or depth of NI buffers: it changes only the
+`NOC_DAT_VC_MODE` does not change the number or depth of NI buffers: it changes only the
 eligible-VC mask used by NI injection and every DAT router output VA. The NI has no per-VC receive
 scheduler. Router-to-NI DAT traffic enters the Read or Write class FIFO under ready/valid, while
 Router VC arbitration remains responsible for choosing the ejected flit.

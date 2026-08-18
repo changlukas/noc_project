@@ -231,7 +231,7 @@ After the scan picks a candidate, stage 2 assigns the OUTPUT-side VC `out_vc`
 | `fixed_vc = 0`, preferred full, `flit_tail = 1` | the highest-index other VC with credit (FVADA overflow) |
 | `fixed_vc = 0`, preferred full, `flit_tail = 0` | none — a wormhole head never overflows off its preferred VC; the candidate is not grantable |
 
-**Target RTL overlay.** Before the table above is applied, `DAT_VC_ALLOC_MODE` defines
+**Target RTL overlay.** Before the table above is applied, `NOC_DAT_VC_MODE` defines
 the eligible output-VC set. `SHARED` admits all DAT VCs. `READ_WRITE_SPLIT` admits the
 lower half for `DataAw` / `DataW` and the upper half for `DataR`. A `fixed_vc = 1` flit
 must already name a class-eligible VC; a mismatch is illegal. Preferred selection and
@@ -458,7 +458,7 @@ and its `SimpleRouterForkWedge` twin, and by the co-sim `multicast` pattern
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
 | `DAT_NUM_VC` | current 1; target 2 | 1..8 (= 2^VC_ID_WIDTH); Split requires {2,4,6,8} | VCs on the DAT link. REQ/RSP are fixed single-VC. The current value comes from `ni_params_pkg::NOC_DAT_NUM_VC_DFLT`; target alignment remains pending. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != DAT_NUM_VC`. |
-| `DAT_VC_ALLOC_MODE` [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | Eligible-VC mask applied by every DAT output VA; not implemented by the current C++ router. |
+| `NOC_DAT_VC_MODE` [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | Eligible-VC mask applied by every DAT output VA; not implemented by the current C++ router. |
 | `REQ_FLIT_WIDTH` | 136 | `133 + AXI_ID_WIDTH` | Derived REQ flit bus width, bits |
 | `RSP_FLIT_WIDTH` | 126 | `123 + AXI_ID_WIDTH` | Derived RSP flit bus width, bits |
 | `DAT_FLIT_WIDTH` | 633 | 633 for `AXI_ID_WIDTH` 1..8 | Derived DAT flit bus width, bits |
@@ -791,7 +791,7 @@ Router construction. Verified by ctest death tests
 Failure: construction succeeds on `dat_num_vc` outside 1..8, a zero depth, or an
 out-of-mesh coordinate.
 
-The target RTL also rejects `DAT_VC_ALLOC_MODE=READ_WRITE_SPLIT` unless `DAT_NUM_VC` is
+The target RTL also rejects `NOC_DAT_VC_MODE=READ_WRITE_SPLIT` unless `DAT_NUM_VC` is
 one of {2, 4, 6, 8}. This elaboration guard is `[TBD]`; the current C++ model has no mode
 parameter.
 

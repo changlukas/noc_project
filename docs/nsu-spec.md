@@ -107,7 +107,7 @@ The fabric has exactly one multi-flit packet type, AW+W on the request path, whe
 
 B and R merge through a 2-input round-robin `WormholeArbiter` (input 0 = B, input 1 = R, no channel pairing, at most 1 flit per cycle) into the `VcAllocator`, which assigns the VC. In the current C++ model, the candidate set is every VC in {0 .. `num_vc`-1}, with no read/write class split. Only the DAT face carries `num_vc` > 1 (RSP is single-VC), and DAT carries R only.
 
-**Target RTL overlay.** `DAT_VC_ALLOC_MODE=SHARED` preserves the current R hash over all
+**Target RTL overlay.** `NOC_DAT_VC_MODE=SHARED` preserves the current R hash over all
 DAT VCs. `READ_WRITE_SPLIT` requires `DAT_NUM_VC` in {2, 4, 6, 8}, restricts `DataR` to
 the upper half, and computes `DAT_NUM_VC/2 + ((dst_id ^ rid) % (DAT_NUM_VC/2))`. B stays
 on the single-VC RSP network and is unaffected. Every DAT router output applies the same
@@ -307,10 +307,10 @@ at simulation startup. Synthesizable RTL receives the same fields from generated
 | `NSU_ARBITER_FIFO_DEPTH` [current model] | 4 | 1 to 64 | wormhole and VC-arbiter pending depths; not target NI VC storage |
 | `NOC_DAT_NUM_VC` | 1 | 1 to 8 | Current C++ model DAT VC count and credit vector widths |
 | `DAT_NUM_VC` [target RTL] | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector widths |
-| `DAT_VC_ALLOC_MODE` [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | `DataR` eligible mask; system-wide with DAT router VA |
+| `NOC_DAT_VC_MODE` [target RTL] | SHARED | {SHARED, READ_WRITE_SPLIT} | `DataR` eligible mask; system-wide with DAT router VA |
 | `NOC_ROUTER_VC_DEPTH` | 8 | 1 to 16 | Router LOCAL input VC FIFO depth and NSU DAT response sender-credit seed |
-| `NI_CDC_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | common AW/W/AR/B/R dual-clock FIFO depth |
-| `NI_CLASS_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
+| `AXI_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | common AW/W/AR/B/R dual-clock FIFO depth |
+| `NOC_FIFO_DEPTH` [target RTL] | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
 | `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 136 / 126 / 633 | target `133 + AXI_ID_WIDTH` / `123 + AXI_ID_WIDTH` / 633 | per-network flit containers and DPI marshalling |
 | `AXI_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 48 / 512 | target ID 1..8, current model locked at 3 / 1..64 / {32,64,128,256,512,1024} | NoC-carried ID, beat structs and DPI |
 | create-time `src_id` | 0 | 8 bit | stamped into every response flit `src_id` |
