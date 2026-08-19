@@ -58,8 +58,17 @@ def test_child_record_field_sets():
     text = CHILD_TYPES.read_text(encoding="ascii")
     expected = {
         "nmu_ordering_domain_t": ["dst_id", "dst_port_id", "is_data"],
+        "nmu_route_t": ["domain"],
+        "nmu_aw_route_t": ["route", "user", "collective_op", "collective_mask"],
         "nmu_request_t": ["route", "ordering_req", "ordering_tag"],
         "nmu_response_t": ["is_data", "ordering_req", "ordering_tag"],
+        "nmu_sam_aw_t": ["axi", "awuser"],
+        "nmu_sam_aw_result_t": ["axi", "route"],
+        "nmu_sam_ar_result_t": ["axi", "route"],
+        "nmu_aw_request_t": ["axi", "meta", "user", "collective_op", "collective_mask"],
+        "nmu_ar_request_t": ["axi", "meta"],
+        "nmu_b_response_t": ["axi", "meta"],
+        "nmu_r_response_t": ["axi", "meta"],
         "nmu_rob_order_entry_t": ["base", "beat_count", "ordering_req", "collective"],
         "nmu_b_rob_entry_t": ["occupied", "complete", "beat"],
         "nmu_r_rob_entry_t": ["occupied", "complete", "narrow_lane", "beat"],
@@ -69,6 +78,10 @@ def test_child_record_field_sets():
             "is_data", "local_addr", "len", "size", "burst", "collective_op",
             "collective_mask",
         ],
+        "nsu_aw_request_t": ["axi", "response"],
+        "nsu_ar_request_t": ["axi", "response"],
+        "nsu_b_response_t": ["axi", "response"],
+        "nsu_r_response_t": ["axi", "response"],
     }
     for type_name, fields in expected.items():
         assert _typedef_fields(text, type_name) == fields
