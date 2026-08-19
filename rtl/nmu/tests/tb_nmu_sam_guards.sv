@@ -68,6 +68,7 @@ module tb_nmu_sam_guards #(
 
         case (INVALID_CASE)
             2: begin
+                s_aw = '0;
                 s_aw.axi.awaddr = 48'h0000_01ff_ffc0;
                 s_aw.axi.awlen = 8'd1;
                 s_aw.axi.awsize = 3'd6;
@@ -75,6 +76,7 @@ module tb_nmu_sam_guards #(
                 s_aw_valid = 1'b1;
             end
             3: begin
+                s_ar = '0;
                 s_ar.araddr = 48'h0000_01ff_ffc0;
                 s_ar.arlen = 8'd1;
                 s_ar.arsize = 3'd6;
@@ -82,20 +84,24 @@ module tb_nmu_sam_guards #(
                 s_ar_valid = 1'b1;
             end
             4: begin
+                s_aw = '0;
                 s_aw.axi.awaddr = 48'h0000_0000_0080;
                 s_aw.awuser[9:8] = 2'd2;
                 s_aw_valid = 1'b1;
             end
             5: begin
+                s_aw = '0;
                 s_aw.axi.awaddr = 48'hffff_ffff_f000;
                 s_aw_valid = 1'b1;
             end
             6: begin
+                s_ar = '0;
                 s_ar.araddr = 48'hffff_ffff_f000;
                 s_ar_valid = 1'b1;
             end
             default: begin
-                s_aw.axi.awaddr = 48'h0000_0200_0080;
+                s_aw = '0;
+                s_aw.axi.awaddr = 48'h0004_0000_0080;
                 s_aw.awuser[9:8] = 2'd1;
                 s_aw.awuser[57:10] = 48'h0003_0000_0000;
                 s_aw_valid = 1'b1;

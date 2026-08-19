@@ -19,7 +19,7 @@ fi
 [[ $(git -C "$task_common_cells" rev-parse HEAD) == "$task_revision" ]]
 grep -Fq "$task_revision" "$task_manifest"
 
-task_topology=${SAM_TOPOLOGY:-mesh_2x2}
+task_topology=mesh_2x2
 task_generated="$task_tmp/generated/$task_topology/topology_pkg.sv"
 mkdir -p "$(dirname "$task_generated")"
 python3 "$task_root/sim/tools/gen_tb_top.py" --topology "$task_topology" \
@@ -60,7 +60,7 @@ case "${1:-test}" in
         "${task_verilator[@]}" --binary --Mdir "$task_obj_dir" -o nmu_sam_tb "${task_sources[@]}"
         "$task_obj_dir/nmu_sam_tb"
 
-        for task_topology in mesh_2x2 mesh_2x2_periph; do
+        for task_topology in mesh_2x2 mesh_2x2_periph mesh_4x4 mesh_4x4_periph4; do
             task_generated="$task_tmp/generated/$task_topology/topology_pkg.sv"
             mkdir -p "$(dirname "$task_generated")"
             python3 "$task_root/sim/tools/gen_tb_top.py" --topology "$task_topology" \
@@ -72,6 +72,10 @@ case "${1:-test}" in
                 "$task_root/rtl/nmu/tests/tb_nmu_sam_vectors.sv"
             "$task_obj_dir/nmu_sam_vectors_tb"
         done
+
+        task_topology=mesh_2x2_periph
+        task_generated="$task_tmp/generated/$task_topology/topology_pkg.sv"
+        task_sources[3]="$task_generated"
 
         task_guard_messages=(
             "AW_SAM_REG_TYPE must be 0, 1, or 2"
