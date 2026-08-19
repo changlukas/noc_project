@@ -36,6 +36,8 @@ module nmu_sam #(
 
     localparam int unsigned AXI_ADDR_W = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;
     localparam int unsigned COLLECTIVE_MASK_W = ni_flit_pkg::COLLECTIVE_MASK_WIDTH;
+    // Generated SAM ranges are 4 KiB aligned and sized.
+    localparam int unsigned SAM_REGION_ALIGN_W = 12;
 
     if (AW_SAM_REG_TYPE > 2) begin : gen_invalid_aw_reg_type
         initial $fatal(0, "Error: AW_SAM_REG_TYPE must be 0, 1, or 2 (instance %m)");
@@ -84,6 +86,61 @@ module nmu_sam #(
         return collective_mask;
     endfunction
 
+    function automatic logic [AXI_ADDR_W:0] burst_last_byte(
+        input logic [AXI_ADDR_W-1:0]                    addr,
+        input logic [ni_flit_pkg::AXI_LEN_WIDTH-1:0]   len,
+        input logic [ni_flit_pkg::AXI_SIZE_WIDTH-1:0]  size,
+        input logic [ni_flit_pkg::AXI_BURST_WIDTH-1:0] burst
+    );
+        logic [AXI_ADDR_W:0] extended_addr;
+        logic [AXI_ADDR_W:0] total_bytes;
+
+        extended_addr = {1'b0, addr};
+        total_bytes = '0;
+        total_bytes[ni_flit_pkg::AXI_LEN_WIDTH-1:0] = len;
+        total_bytes = (total_bytes + 1'b1) << size;
+
+        if (burst == 2'd2) begin
+            burst_last_byte = (extended_addr & ~(total_bytes - 1'b1)) + total_bytes - 1'b1;
+        end else begin
+            burst_last_byte = extended_addr + total_bytes - 1'b1;
+        end
+    endfunction
+
+    function automatic logic burst_footprint_error(
+        input logic [AXI_ADDR_W-1:0]                    addr,
+        input logic [ni_flit_pkg::AXI_LEN_WIDTH-1:0]   len,
+        input logic [ni_flit_pkg::AXI_SIZE_WIDTH-1:0]  size,
+        input logic [ni_flit_pkg::AXI_BURST_WIDTH-1:0] burst
+    );
+        logic [AXI_ADDR_W:0] last_byte;
+
+        last_byte = burst_last_byte(addr, len, size, burst);
+        return last_byte[AXI_ADDR_W] ||
+            last_byte[AXI_ADDR_W-1:SAM_REGION_ALIGN_W] !=
+                addr[AXI_ADDR_W-1:SAM_REGION_ALIGN_W];
+    endfunction
+
+    function automatic logic collective_error(
+        input logic [ni_params_pkg::AXI_AWUSER_WIDTH_DFLT-1:0] awuser,
+        input logic                                            awlock,
+        input sam_idx_t                                        sam_idx
+    );
+        logic [AXI_ADDR_W-1:0] address_mask;
+        logic [AXI_ADDR_W-1:0] allowed_address_mask;
+
+        address_mask = awuser[57:10];
+        allowed_address_mask = selector_mask(sam_idx.mask_x) |
+            selector_mask(sam_idx.mask_y);
+        case (awuser[9:8])
+            2'd0: collective_error = address_mask != '0;
+            2'd1: collective_error = address_mask == '0 || awlock ||
+                !sam_idx.collective_en ||
+                (address_mask & ~allowed_address_mask) != '0;
+            default: collective_error = 1'b1;
+        endcase
+    endfunction
+
     sam_idx_t aw_sam_idx;
     logic     aw_lookup_valid;
     logic     aw_lookup_error;
@@ -91,12 +148,11 @@ module nmu_sam #(
     logic     ar_lookup_valid;
     logic     ar_lookup_error;
 
-    logic [AXI_ADDR_W-1:0] aw_address_mask;
-    logic [AXI_ADDR_W-1:0] aw_allowed_address_mask;
-    logic                  aw_collective_error;
+    logic aw_slice_ready;
+    logic ar_slice_ready;
 
-    ni_child_types_pkg::nmu_sam_aw_result_t aw_decoded;
-    ni_child_types_pkg::nmu_sam_ar_result_t ar_decoded;
+    wire ni_child_types_pkg::nmu_sam_aw_result_t aw_decoded;
+    wire ni_child_types_pkg::nmu_sam_ar_result_t ar_decoded;
 
     ni_sam #(
         .SAM_NUM_RULES  ( SAM_NUM_RULES  ),
@@ -107,7 +163,7 @@ module nmu_sam #(
         .SAM            ( SAM            )
     ) i_aw_ni_sam (
         .addr_i         ( s_aw_i.axi.awaddr ),
-        .lookup_en_i    ( s_aw_valid_i      ),
+        .lookup_en_i    ( noc_rst_ni && s_aw_valid_i ),
         .sam_idx_o      ( aw_sam_idx        ),
         .lookup_valid_o ( aw_lookup_valid   ),
         .lookup_error_o ( aw_lookup_error   )
@@ -122,45 +178,28 @@ module nmu_sam #(
         .SAM            ( SAM            )
     ) i_ar_ni_sam (
         .addr_i         ( s_ar_i.araddr ),
-        .lookup_en_i    ( s_ar_valid_i  ),
+        .lookup_en_i    ( noc_rst_ni && s_ar_valid_i ),
         .sam_idx_o      ( ar_sam_idx    ),
         .lookup_valid_o ( ar_lookup_valid ),
         .lookup_error_o ( ar_lookup_error )
     );
 
-    assign aw_address_mask = s_aw_i.awuser[57:10];
-    assign aw_allowed_address_mask = selector_mask(aw_sam_idx.mask_x) |
-        selector_mask(aw_sam_idx.mask_y);
+    assign s_aw_ready_o = noc_rst_ni && aw_slice_ready;
+    assign s_ar_ready_o = noc_rst_ni && ar_slice_ready;
 
-    always_comb begin
-        aw_collective_error = 1'b0;
+    assign aw_decoded.axi = s_aw_i.axi;
+    assign aw_decoded.route.route.domain.dst_id = aw_sam_idx.dst_id;
+    assign aw_decoded.route.route.domain.dst_port_id = aw_sam_idx.dst_port_id;
+    assign aw_decoded.route.route.domain.is_data = aw_sam_idx.is_data;
+    assign aw_decoded.route.user = s_aw_i.awuser[7:0];
+    assign aw_decoded.route.collective_op = s_aw_i.awuser[9:8];
+    assign aw_decoded.route.collective_mask = collective_mask_from_address_mask(
+        s_aw_i.awuser[57:10], aw_sam_idx);
 
-        case (s_aw_i.awuser[9:8])
-            2'd0: aw_collective_error = aw_address_mask != '0;
-            2'd1: aw_collective_error = aw_address_mask == '0 || s_aw_i.axi.awlock ||
-                !aw_sam_idx.collective_en ||
-                (aw_address_mask & ~aw_allowed_address_mask) != '0;
-            default: aw_collective_error = 1'b1;
-        endcase
-    end
-
-    always_comb begin
-        aw_decoded = '0;
-        aw_decoded.axi = s_aw_i.axi;
-        aw_decoded.route.route.domain.dst_id = aw_sam_idx.dst_id;
-        aw_decoded.route.route.domain.dst_port_id = aw_sam_idx.dst_port_id;
-        aw_decoded.route.route.domain.is_data = aw_sam_idx.is_data;
-        aw_decoded.route.user = s_aw_i.awuser[7:0];
-        aw_decoded.route.collective_op = s_aw_i.awuser[9:8];
-        aw_decoded.route.collective_mask = collective_mask_from_address_mask(
-            aw_address_mask, aw_sam_idx);
-
-        ar_decoded = '0;
-        ar_decoded.axi = s_ar_i;
-        ar_decoded.route.domain.dst_id = ar_sam_idx.dst_id;
-        ar_decoded.route.domain.dst_port_id = ar_sam_idx.dst_port_id;
-        ar_decoded.route.domain.is_data = ar_sam_idx.is_data;
-    end
+    assign ar_decoded.axi = s_ar_i;
+    assign ar_decoded.route.domain.dst_id = ar_sam_idx.dst_id;
+    assign ar_decoded.route.domain.dst_port_id = ar_sam_idx.dst_port_id;
+    assign ar_decoded.route.domain.is_data = ar_sam_idx.is_data;
 
     noc_reg_slice #(
         .REG_TYPE ( AW_SAM_REG_TYPE ),
@@ -168,8 +207,8 @@ module nmu_sam #(
     ) i_aw_reg_slice (
         .clk_i     ( noc_clk_i                            ),
         .rst_ni    ( noc_rst_ni                           ),
-        .s_valid_i ( s_aw_valid_i && aw_lookup_valid      ),
-        .s_ready_o ( s_aw_ready_o                         ),
+        .s_valid_i ( noc_rst_ni && s_aw_valid_i && aw_lookup_valid ),
+        .s_ready_o ( aw_slice_ready                       ),
         .s_data_i  ( aw_decoded                           ),
         .m_valid_o ( m_aw_valid_o                         ),
         .m_ready_i ( m_aw_ready_i                         ),
@@ -182,20 +221,37 @@ module nmu_sam #(
     ) i_ar_reg_slice (
         .clk_i     ( noc_clk_i                            ),
         .rst_ni    ( noc_rst_ni                           ),
-        .s_valid_i ( s_ar_valid_i && ar_lookup_valid      ),
-        .s_ready_o ( s_ar_ready_o                         ),
+        .s_valid_i ( noc_rst_ni && s_ar_valid_i && ar_lookup_valid ),
+        .s_ready_o ( ar_slice_ready                       ),
         .s_data_i  ( ar_decoded                           ),
         .m_valid_o ( m_ar_valid_o                         ),
         .m_ready_i ( m_ar_ready_i                         ),
         .m_data_o  ( m_ar_o                               )
     );
 
-    always_comb begin
-        if (noc_rst_ni && s_aw_valid_i && (aw_lookup_error || aw_collective_error)) begin
-            $fatal(0, "Error: invalid AW SAM or collective mapping (instance %m)");
-        end
-        if (noc_rst_ni && s_ar_valid_i && ar_lookup_error) begin
-            $fatal(0, "Error: invalid AR SAM mapping (instance %m)");
+    always_ff @(posedge noc_clk_i) begin
+        if (noc_rst_ni) begin
+            if (s_aw_valid_i && aw_lookup_error) begin
+                $fatal(0, "Error: invalid AW SAM mapping (instance %m)");
+            end else if (s_aw_valid_i && burst_footprint_error(
+                    s_aw_i.axi.awaddr, s_aw_i.axi.awlen,
+                    s_aw_i.axi.awsize, s_aw_i.axi.awburst)) begin
+                $fatal(0, "Error: AW burst footprint crosses a SAM region boundary: addr=%h last=%h (instance %m)",
+                    s_aw_i.axi.awaddr, burst_last_byte(
+                        s_aw_i.axi.awaddr, s_aw_i.axi.awlen,
+                        s_aw_i.axi.awsize, s_aw_i.axi.awburst));
+            end else if (s_aw_valid_i && collective_error(
+                    s_aw_i.awuser, s_aw_i.axi.awlock, aw_sam_idx)) begin
+                $fatal(0, "Error: invalid AW collective mapping (instance %m)");
+            end
+            if (s_ar_valid_i && ar_lookup_error) begin
+                $fatal(0, "Error: invalid AR SAM mapping (instance %m)");
+            end else if (s_ar_valid_i && burst_footprint_error(
+                    s_ar_i.araddr, s_ar_i.arlen, s_ar_i.arsize, s_ar_i.arburst)) begin
+                $fatal(0, "Error: AR burst footprint crosses a SAM region boundary: addr=%h last=%h (instance %m)",
+                    s_ar_i.araddr, burst_last_byte(
+                        s_ar_i.araddr, s_ar_i.arlen, s_ar_i.arsize, s_ar_i.arburst));
+            end
         end
     end
 

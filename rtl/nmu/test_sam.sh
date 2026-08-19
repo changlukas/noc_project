@@ -59,7 +59,17 @@ case "${1:-test}" in
         "${task_verilator[@]}" --binary --Mdir "$task_obj_dir" -o nmu_sam_tb "${task_sources[@]}"
         "$task_obj_dir/nmu_sam_tb"
 
-        for task_case in 0 1; do
+        task_guard_messages=(
+            "AW_SAM_REG_TYPE must be 0, 1, or 2"
+            "AR_SAM_REG_TYPE must be 0, 1, or 2"
+            "AW burst footprint crosses a SAM region boundary"
+            "AR burst footprint crosses a SAM region boundary"
+            "invalid AW collective mapping"
+            "invalid AW SAM mapping"
+            "invalid AR SAM mapping"
+            "invalid AW collective mapping"
+        )
+        for task_case in 0 1 2 3 4 5 6 7; do
             task_obj_dir="$task_tmp/obj_dir_guard_$task_case"
             task_log="$task_tmp/guard_$task_case.log"
             "${task_verilator[@]}" \
@@ -71,7 +81,7 @@ case "${1:-test}" in
                 echo "nmu_sam parameter guard $task_case did not fail" >&2
                 exit 1
             fi
-            if ! grep -Fq "SAM_REG_TYPE must be 0, 1, or 2" "$task_log"; then
+            if ! grep -Fq "${task_guard_messages[$task_case]}" "$task_log"; then
                 cat "$task_log" >&2
                 echo "nmu_sam parameter guard $task_case failed for an unexpected reason" >&2
                 exit 1
