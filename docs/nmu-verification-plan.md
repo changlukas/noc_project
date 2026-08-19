@@ -261,7 +261,8 @@ are observed before time advances; an unrelated compile or simulator failure is 
 
 | Parameter/relationship | Positive cases | Expected-fail cases |
 |---|---|---|
-| `AXI_ID_WIDTH` | 1, default, 8 | 0 and 9 |
+| `AXI_ID_WIDTH` | 1, default, 8; endpoint remap allocation/reuse and B/R restoration | 0 and 9 |
+| `NOC_ID_WIDTH` | 3; fixed 136/126/633-bit generated records | any value other than 3 |
 | `NOC_DAT_NUM_VC` | 1, default, 8 | 0 and 9 |
 | `NOC_DAT_VC_MODE` | 0 and 1 with a legal count | other encodings; split with odd count or count 1 |
 | `AXI_FIFO_DEPTH` | 2, default, 32 | 0 and a positive non-power-of-two value |

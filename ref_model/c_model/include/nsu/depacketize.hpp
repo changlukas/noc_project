@@ -61,17 +61,17 @@ class Depacketize : public RequestDepacketizer {
         // boundary: validate with a throw, not an assert, so a misconfigured value fails
         // loud even in a release/NDEBUG build where asserts are compiled out.
         //
-        // Only 1 and AXI_ID_SPACE are legal. This mirrors FlooNoC's floo_meta_buffer,
+        // Only 1 and NOC_ID_SPACE are legal. This mirrors FlooNoC's floo_meta_buffer,
         // whose MaxUniqueIds has exactly two behaviors: collapse every id to one
         // downstream id (MaxUniqueIds==1, floo_meta_buffer.sv:87) or passthrough (else,
         // the unique-id count is set by OutIdWidth, floo_meta_buffer.sv:129). FlooNoC
         // provides no arbitrary-N remap (nothing in the chimney instantiates
         // axi_id_remap), so an intermediate value is intentionally unsupported, not a
         // modelling gap: with InIdWidth==OutIdWidth it would silently degenerate to
-        // the identity (full AXI_ID_SPACE) remap.
-        if (max_unique_ids != 1 && max_unique_ids != axi::AXI_ID_SPACE) {
+        // the identity (full NOC_ID_SPACE) remap.
+        if (max_unique_ids != 1 && max_unique_ids != axi::NOC_ID_SPACE) {
             throw std::invalid_argument(
-                "max_unique_ids must be 1 (collapse) or AXI_ID_SPACE (passthrough); "
+                "max_unique_ids must be 1 (collapse) or NOC_ID_SPACE (passthrough); "
                 "FlooNoC provides no arbitrary-N unique-id remap");
         }
     }

@@ -132,8 +132,8 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // Addressable range of the ordering_tag header field, NOT the pool depth.
     // Pool depths are b_rob_depth_ / r_rob_depth_ and may be smaller.
     static constexpr std::size_t ORDERING_TAG_SPACE = 1u << ni::header::ORDERING_TAG_WIDTH;  // 256
-    // AXI ID space alias — single source of truth lives in axi::AXI_ID_SPACE.
-    static constexpr std::size_t AXI_ID_SPACE = axi::AXI_ID_SPACE;  // 8
+    // AXI ID space alias — single source of truth lives in axi::NOC_ID_SPACE.
+    static constexpr std::size_t NOC_ID_SPACE = axi::NOC_ID_SPACE;  // 8
 
     std::size_t b_rob_depth() const noexcept { return b_rob_depth_; }
     std::size_t r_rob_depth() const noexcept { return r_rob_depth_; }
@@ -185,7 +185,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::size_t order_list_hwm() const noexcept { return order_list_hwm_; }
 
     // Peak in-flight transaction count per direction. Nothing bounds it directly;
-    // it is bounded transitively by max_txns_per_id_ x AXI_ID_SPACE.
+    // it is bounded transitively by max_txns_per_id_ x NOC_ID_SPACE.
     // Measurement-only; no behaviour effect.
     std::size_t write_txns_hwm() const noexcept { return write_txns_hwm_; }
     std::size_t read_txns_hwm() const noexcept { return read_txns_hwm_; }
@@ -216,7 +216,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
 
     // Per-AXI-ID single-outstanding flag for the R Disabled path. True while one AR
     // is in flight for that id; cleared by R(last) in retire_r.
-    std::array<bool, axi::AXI_ID_SPACE> read_outstanding_{};
+    std::array<bool, axi::NOC_ID_SPACE> read_outstanding_{};
 
     // AW-before-W interlock: AW-accepted bursts whose W beats are still owed.
     // Prevents W beats from reaching Packetize before their corresponding AW
@@ -273,8 +273,8 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         // follow until its merged B retires (R2, S4 design §2.3a).
         bool collective = false;
     };
-    std::array<std::deque<BeatRange>, AXI_ID_SPACE> write_order_by_id_;
-    std::array<std::deque<BeatRange>, AXI_ID_SPACE> read_order_by_id_;
+    std::array<std::deque<BeatRange>, NOC_ID_SPACE> write_order_by_id_;
+    std::array<std::deque<BeatRange>, NOC_ID_SPACE> read_order_by_id_;
 
     // Same-destination bypass state (floo_rob.sv:399,417-420,427-428). prev_dest_* is
     // the dst_id of the last accepted push for that id, updated on every push.
@@ -285,10 +285,10 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // fresh at every streak start. FlooNoC instead clears at drain (floo_rob.sv:435-441)
     // because its idle-ID bypass READS the sticky flag (!ax_rob_req_q); ours tests the empty
     // list, which makes a drain-time clear a dead store -- so it is omitted here.
-    std::array<uint8_t, AXI_ID_SPACE> prev_dest_write_{};
-    std::array<uint8_t, AXI_ID_SPACE> prev_dest_read_{};
-    std::array<bool, AXI_ID_SPACE> fallen_back_write_{};
-    std::array<bool, AXI_ID_SPACE> fallen_back_read_{};
+    std::array<uint8_t, NOC_ID_SPACE> prev_dest_write_{};
+    std::array<uint8_t, NOC_ID_SPACE> prev_dest_read_{};
+    std::array<bool, NOC_ID_SPACE> fallen_back_write_{};
+    std::array<bool, NOC_ID_SPACE> fallen_back_read_{};
 
     // Class of the last accepted push for that id (axi::AxiClass, updated
     // alongside prev_dest_write_ / prev_dest_read_). The REQUEST side splits by
@@ -303,8 +303,8 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // change on both write and read: falls into the needs_rob branch, so a
     // same-ID cross-class pair retires by ordering_tag in issue order
     // regardless of which network the response arrives on (AXI4 IHI 0022 §A5.3).
-    std::array<axi::AxiClass, AXI_ID_SPACE> prev_cls_write_{};
-    std::array<axi::AxiClass, AXI_ID_SPACE> prev_cls_read_{};
+    std::array<axi::AxiClass, NOC_ID_SPACE> prev_cls_write_{};
+    std::array<axi::AxiClass, NOC_ID_SPACE> prev_cls_read_{};
 
     // Per-base (keyed by ordering_tag base) arrival counter. NSU stamps every
     // R beat of a burst with ordering_tag=base; this counter positions beat i at base+i.
@@ -351,7 +351,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         axi::Burst burst;
         uint16_t beat_counter = 0;
     };
-    std::array<std::deque<ArLaneMeta>, AXI_ID_SPACE> ar_lane_meta_;
+    std::array<std::deque<ArLaneMeta>, NOC_ID_SPACE> ar_lane_meta_;
     void reanchor_from_fifo_(axi::RBeat& r);
 
     // Ready-to-emit beats drained by pop_b / pop_r.
@@ -364,12 +364,12 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
 // ===== inline impl =====
 
 inline bool Rob::push_aw(const axi::AwBeat& b) {
-    // Every per-id array below is AXI_ID_SPACE deep, which is 8 and no longer the
+    // Every per-id array below is NOC_ID_SPACE deep, which is 8 and no longer the
     // full uint8_t range, so an over-range id is a silent out-of-bounds rather than
     // a structural impossibility. Both admission points check it once at entry;
     // this is a permanent input error, not backpressure.
-    if (b.id >= AXI_ID_SPACE) {
-        assert(false && "nmu::Rob::push_aw: AXI id outside AXI_ID_SPACE");
+    if (b.id >= NOC_ID_SPACE) {
+        assert(false && "nmu::Rob::push_aw: AXI id outside NOC_ID_SPACE");
         std::abort();  // belt-and-braces for NDEBUG
     }
     // AWUSER collective validate + translate at push_aw entry (S4 design §2.1):
@@ -473,9 +473,9 @@ inline bool Rob::push_w(const axi::WBeat& b) {
 }
 
 inline bool Rob::push_ar(const axi::ArBeat& b) {
-    // See push_aw: the per-id arrays are AXI_ID_SPACE deep, not 256.
-    if (b.id >= AXI_ID_SPACE) {
-        assert(false && "nmu::Rob::push_ar: AXI id outside AXI_ID_SPACE");
+    // See push_aw: the per-id arrays are NOC_ID_SPACE deep, not 256.
+    if (b.id >= NOC_ID_SPACE) {
+        assert(false && "nmu::Rob::push_ar: AXI id outside NOC_ID_SPACE");
         std::abort();  // belt-and-braces for NDEBUG
     }
     if (mode_r_ == RobMode::Enabled) {

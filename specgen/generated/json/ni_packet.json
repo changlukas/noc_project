@@ -19,7 +19,7 @@
       "DST_PORT_ID_WIDTH": 2,
       "SRC_PORT_ID_WIDTH": 2,
       "AXI_ADDR_WIDTH": 48,
-      "AXI_ID_WIDTH": 3,
+      "NOC_ID_WIDTH": 3,
       "NOC_DATA_WIDTH": 512,
       "NOC_NARROW_DATA_WIDTH": 64,
       "AXI_USER_WIDTH": 8,
@@ -113,7 +113,7 @@
         "fields": [
           {
             "name": "awid",
-            "width_param": "AXI_ID_WIDTH"
+            "width_param": "NOC_ID_WIDTH"
           },
           {
             "name": "awaddr",
@@ -163,7 +163,7 @@
         "fields": [
           {
             "name": "arid",
-            "width_param": "AXI_ID_WIDTH"
+            "width_param": "NOC_ID_WIDTH"
           },
           {
             "name": "araddr",
@@ -257,7 +257,7 @@
         "fields": [
           {
             "name": "bid",
-            "width_param": "AXI_ID_WIDTH"
+            "width_param": "NOC_ID_WIDTH"
           },
           {
             "name": "bresp",
@@ -279,7 +279,7 @@
           },
           {
             "name": "rid",
-            "width_param": "AXI_ID_WIDTH"
+            "width_param": "NOC_ID_WIDTH"
           },
           {
             "name": "rresp",
@@ -305,7 +305,7 @@
           },
           {
             "name": "rid",
-            "width_param": "AXI_ID_WIDTH"
+            "width_param": "NOC_ID_WIDTH"
           },
           {
             "name": "rresp",

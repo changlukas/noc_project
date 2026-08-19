@@ -27,7 +27,7 @@ TEST(NsuTopLevel, ConstructsAndTicksWithoutCrash) {
     cfg.port_params.b_queue_depth = 16;
     cfg.port_params.r_queue_depth = 16;
     cfg.port_params.meta_buffer_max_outstanding = 32;
-    cfg.port_params.meta_buffer_max_unique_ids = axi::AXI_ID_SPACE;
+    cfg.port_params.meta_buffer_max_unique_ids = axi::NOC_ID_SPACE;
     // DAT face (S3a T4): unused by this smoke test, wired to the shared
     // null sentinel (router/null_adapters.hpp).
     Nsu nsu(cfg, channel.nsu_req_in(0), channel.nsu_rsp_out(0), ni::cmodel::router::null_req_in(),
@@ -70,7 +70,7 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     cfg.port_params.b_queue_depth = 16;
     cfg.port_params.r_queue_depth = 16;
     cfg.port_params.meta_buffer_max_outstanding = 32;
-    cfg.port_params.meta_buffer_max_unique_ids = axi::AXI_ID_SPACE;
+    cfg.port_params.meta_buffer_max_unique_ids = axi::NOC_ID_SPACE;
     NsuStandalone nsu(cfg);
 
     // Build an AW flit. NSU Depacketize allocates {src_id, ordering_req,
@@ -162,7 +162,7 @@ TEST(NsuTopLevel, EchoesTheRequestersPortBackOntoTheBResponse) {
     cfg.port_params.b_queue_depth = 16;
     cfg.port_params.r_queue_depth = 16;
     cfg.port_params.meta_buffer_max_outstanding = 32;
-    cfg.port_params.meta_buffer_max_unique_ids = axi::AXI_ID_SPACE;
+    cfg.port_params.meta_buffer_max_unique_ids = axi::NOC_ID_SPACE;
     NsuStandalone nsu(cfg);
 
     Flit aw_flit;

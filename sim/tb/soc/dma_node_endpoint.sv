@@ -30,7 +30,8 @@
 
 module dma_node_endpoint #(
     parameter int unsigned NODE_ID      = 0,
-    parameter int unsigned ID_WIDTH     = ni_params_pkg::AXI_ID_WIDTH_DFLT,
+    parameter int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_ID_WIDTH_DFLT,
+    parameter int unsigned NOC_ID_WIDTH = ni_params_pkg::NOC_ID_WIDTH_DFLT,
     // ADDR/DATA/AWUSER widths are what the crossbar, the memories and the id
     // remap are sized by. The DMA's own types come from idma_types_pkg, which
     // fixes them at the same ni_params_pkg defaults the generator passes here;
@@ -77,8 +78,10 @@ module dma_node_endpoint #(
     // appends to route responses back. The DMA drives the slave-port width,
     // which is what idma_types_pkg::AXI_ID_WIDTH is.
     localparam int unsigned XBAR_SLV_PORTS = 2;
-    localparam int unsigned XBAR_SLV_ID_W  = ni_params_pkg::AXI_INITIATOR_ID_WIDTH_DFLT;
+    localparam int unsigned XBAR_SLV_ID_W  = AXI_ID_WIDTH;
     localparam int unsigned XBAR_MST_ID_W  = XBAR_SLV_ID_W + $clog2(XBAR_SLV_PORTS);
+    localparam int unsigned NOC_MAX_UNIQ_IDS =
+        1 << ((XBAR_MST_ID_W < NOC_ID_WIDTH) ? XBAR_MST_ID_W : NOC_ID_WIDTH);
 
     // ------------------------------------------------------------------
     // iDMA backend + job driver
@@ -243,7 +246,7 @@ module dma_node_endpoint #(
     // id, so per-id ordering survives the fold.
     AXI_BUS #(
         .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ID_WIDTH(NOC_ID_WIDTH), .AXI_USER_WIDTH(AWUSER_WIDTH)
     ) noc_mst ();
 
     // s0: the DMA's own traffic.
@@ -431,9 +434,9 @@ module dma_node_endpoint #(
     // through the id remap that converts the tile's id space into the NI's.
     axi_id_remap_intf #(
         .AXI_SLV_PORT_ID_WIDTH(XBAR_MST_ID_W),
-        .AXI_SLV_PORT_MAX_UNIQ_IDS(1 << ID_WIDTH),
+        .AXI_SLV_PORT_MAX_UNIQ_IDS(NOC_MAX_UNIQ_IDS),
         .AXI_MAX_TXNS_PER_ID(ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT),
-        .AXI_MST_PORT_ID_WIDTH(ID_WIDTH),
+        .AXI_MST_PORT_ID_WIDTH(NOC_ID_WIDTH),
         .AXI_ADDR_WIDTH(ADDR_WIDTH),
         .AXI_DATA_WIDTH(DATA_WIDTH),
         .AXI_USER_WIDTH(AWUSER_WIDTH)
@@ -564,7 +567,7 @@ module dma_node_endpoint #(
     axi_bw_monitor #(
         .req_t(axi_vip_types_pkg::vip_req_t),
         .rsp_t(axi_vip_types_pkg::vip_resp_t),
-        .AxiIdWidth(ID_WIDTH),
+        .AxiIdWidth(NOC_ID_WIDTH),
         .Name($sformatf("node%0d.master", NODE_ID))
     ) u_bw_mst (
         .clk_i(clk_i), .en_i(rst_ni), .end_of_sim_i(end_of_sim_o),

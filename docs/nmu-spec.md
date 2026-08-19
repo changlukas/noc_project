@@ -9,7 +9,7 @@ boundaries are frozen in `rtl/README.md`; this document remains authoritative fo
 
 ### 2.1 Packetization
 
-The NoC fabric moves fixed-size flits, not AXI beats. Packetization is a 1-to-1 mapping: every accepted AXI request beat becomes exactly one flit, and every response flit becomes exactly one AXI response beat. The current `AXI_ID_WIDTH = 3` model uses a 48-bit header plus a payload sized per network (REQ 136 b, RSP 126 b, DAT 633 b total). The target RTL derives REQ as `133 + AXI_ID_WIDTH` bits and RSP as `123 + AXI_ID_WIDTH` bits; DAT remains 633 bits for the legal ID range 1..8 because `DataW` is its largest payload. The header carries routing and ordering metadata (source node, destination node, virtual channel, wormhole packet boundary, reorder-buffer tag, collective op and mask). The payload carries the AXI channel fields verbatim.
+The NoC fabric moves fixed-size flits, not AXI beats. Packetization is a 1-to-1 mapping: every accepted NoC-bound AXI request beat becomes exactly one flit, and every response flit becomes exactly one NoC-bound AXI response beat. The fixed `NOC_ID_WIDTH = 3` layout uses a 48-bit header plus a payload sized per network (REQ 136 b, RSP 126 b, DAT 633 b total). The external `AXI_ID_WIDTH` is 1..8 and is remapped at the endpoint before packetization; B/R responses restore it after depacketization. `SRC_ID` and `SRC_PORT_ID` remain NI identity fields. The header carries routing and ordering metadata (source node, destination node, virtual channel, wormhole packet boundary, reorder-buffer tag, collective op and mask). The payload carries the NoC-bound AXI channel fields verbatim.
 
 A write transaction of AWLEN+1 beats therefore becomes 1 AW flit followed by AWLEN+1 W flits. A read request becomes 1 AR flit. The write's flits form one wormhole packet (the AW flit opens it, the W flit with `wlast=1` closes it) so no other request flit from this NMU can interleave between an AW and its W beats on the link. AW+W is the only multi-flit packet the fabric builds, and AXI4 IHI 0022 A5.3.3 is why: W beats of different transactions may not interleave, so the AW and its burst have to travel as one indivisible unit. A read request and every response are single-flit packets, R beats included.
 
@@ -253,7 +253,7 @@ Slot pools, per direction: B pool depth `NMU_ROB_B_DEPTH` = 128, R pool depth `N
 
 Per-ID transaction gate, both directions and both R modes: at most `NMU_MAX_TXNS_PER_ID` = 32 outstanding transactions per ID. A burst is one transaction regardless of ARLEN. An entry or counter unit is taken when the request is accepted and released when the response is accepted at the AXI side, B on its single beat and R on rlast. A 33rd same-ID request is refused until one completes, which backpressures through the AxiSlavePort queue to awready / arready.
 
-There is no aggregate pool above the per-ID gate, so in-flight requests cap at `NMU_MAX_TXNS_PER_ID` x 2^`AXI_ID_WIDTH` = 32 x 8 = 256 per direction. Two limiters coexist on the write side and on Enabled reads, the per-ID order-list depth and the RoB slot pool, and which one binds depends on the traffic: a bypassed transaction takes a list entry and reserves no slot, so a stream that stays in branches 1 and 2 meets only the per-ID gate. Disabled reads have no slot-pool limiter but cannot cross an ordering-domain boundary until that ID becomes idle.
+There is no aggregate pool above the per-ID gate, so NoC-side in-flight requests cap at `NMU_MAX_TXNS_PER_ID` x 2^`NOC_ID_WIDTH` = 32 x 8 = 256 per direction. An external unseen AXI ID may instead be stalled by the endpoint remap until a NoC ID is freed. Two limiters coexist on the write side and on Enabled reads, the per-ID order-list depth and the RoB slot pool, and which one binds depends on the traffic: a bypassed transaction takes a list entry and reserves no slot, so a stream that stays in branches 1 and 2 meets only the per-ID gate. Disabled reads have no slot-pool limiter but cannot cross an ordering-domain boundary until that ID becomes idle.
 
 ### 2.6 Worked example: 2-beat write burst
 
@@ -283,15 +283,16 @@ behavior. Defaults below are the shipped values.
 
 | Parameter | Default | Legal range | Consumed by |
 |---|---|---|---|
-| AXI_ID_WIDTH | 3 | target 1..8; current model locked at 3 | NMU AXI and NoC-carried ID fields, RoB per-ID arrays |
+| AXI_ID_WIDTH | 3 | 1..8 | External endpoint AXI ID width; remapped before the NMU |
+| NOC_ID_WIDTH | 3 | fixed 3 | NoC-carried ID fields and RoB per-ID arrays |
 | AXI_ADDR_WIDTH | 48 | 1..64 | Address fields |
 | AXI_DATA_WIDTH | 512 | {32,64,128,256,512,1024} | wdata / rdata, WSTRB_WIDTH = 64 |
 | AXI_AWUSER_WIDTH | 58 | 10..64 | AWUSER slave-port field and the DPI unpack mask: 8 b user + 2 b collective_op + 48 b collective address mask (Section 2.8) |
 | NOC_DAT_NUM_VC | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector width; wrapper-local `DAT_NUM_VC` is an alias |
 | NOC_DAT_VC_MODE | SHARED (0) | {SHARED (0), READ_WRITE_SPLIT (1)} | Target `VcAllocator` eligible mask; system-wide with DAT router VA; current model implements SHARED only |
-| NOC_REQ_FLIT_WIDTH | 136 | derived as `133 + AXI_ID_WIDTH` | REQ egress flit port |
-| NOC_RSP_FLIT_WIDTH | 126 | derived as `123 + AXI_ID_WIDTH` | RSP ingress flit port |
-| NOC_DAT_FLIT_WIDTH | 633 | derived maximum, 633 for `AXI_ID_WIDTH` 1..8 | DAT flit ports, both directions |
+| NOC_REQ_FLIT_WIDTH | 136 | fixed | REQ egress flit port |
+| NOC_RSP_FLIT_WIDTH | 126 | fixed | RSP ingress flit port |
+| NOC_DAT_FLIT_WIDTH | 633 | fixed | DAT flit ports, both directions |
 | NOC_ROUTER_VC_DEPTH | 8 | power of two, >= 2 | Router LOCAL input VC FIFO depth and NMU DAT sender-credit seed |
 | AXI_FIFO_DEPTH | 8 | power of two, >= 2 | Common AW/W/AR/B/R dual-clock FIFO depth |
 | `NOC_FIFO_DEPTH` | 8 | positive power of two | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |

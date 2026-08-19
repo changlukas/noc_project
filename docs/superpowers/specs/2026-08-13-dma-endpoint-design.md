@@ -75,7 +75,7 @@ parameters are not free choices.
 
 | backend parameter | value | why |
 |---|---|---|
-| `AxiIdWidth` | 4, `ni_params_pkg::AXI_INITIATOR_ID_WIDTH_DFLT` | the crossbar's slave port is that wide, and `i_noc_id_remap` already folds it to the NI's 3 b on the way out. No second remap |
+| `AxiIdWidth` | 3, `ni_params_pkg::AXI_ID_WIDTH_DFLT` | the crossbar's slave port is that wide, and `i_noc_id_remap` already folds it to the NI's 3 b on the way out. No second remap |
 | `NumAxInFlight` | at most 64, `MaxMstTrans` | what one initiator may have in flight. Above it the tile memory's delayer throttles; overflow stalls rather than errors, so exceeding it costs throughput silently |
 | `DataWidth` | 512 | the tile's AXI |
 

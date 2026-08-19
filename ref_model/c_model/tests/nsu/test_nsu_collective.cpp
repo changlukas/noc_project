@@ -56,7 +56,7 @@ struct EchoTestbench {
     ChannelModel noc{16, 16};
     RspCapture b_cap, r_cap;
     MetaBuffer mb{4};
-    Depacketize depkt{noc.req_in(), mb, /*max_unique_ids=*/axi::AXI_ID_SPACE};
+    Depacketize depkt{noc.req_in(), mb, /*max_unique_ids=*/axi::NOC_ID_SPACE};
     Packetize pkt{b_cap, r_cap, r_cap, mb, kNsuSrcId};
 
     void accept_aw(const ni::cmodel::Flit& f) {

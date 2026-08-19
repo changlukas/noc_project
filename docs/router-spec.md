@@ -50,10 +50,8 @@ per cycle.
 | RSP | 126 | [125:48], 78 b | ready/valid, 1 VC |
 | DAT | 633 | [632:48], 585 b | credit, `NUM_VC` 1..8 |
 
-This table is the current `AXI_ID_WIDTH = 3` model layout. Target RTL derives REQ as
-`133 + AXI_ID_WIDTH` bits and RSP as `123 + AXI_ID_WIDTH` bits. DAT remains 633 bits for the legal
-ID range 1..8 because `DataW` remains its maximum payload. A router configuration consumes these
-derived package widths; it does not select flit widths independently.
+This is the fixed `NOC_ID_WIDTH = 3` layout: REQ is 136 bits, RSP is 126 bits, and DAT is 633
+bits. A router consumes these generated package widths and does not select flit widths independently.
 
 **Packet and wormhole switching.** An AXI transaction is packetized by the NI into one
 or more flits sharing the same header `dst_id`. The header bit `flit_tail` marks packet
@@ -465,9 +463,9 @@ and its `SimpleRouterForkWedge` twin, and by the co-sim `multicast` pattern
 |---|---|---|---|
 | `NOC_DAT_NUM_VC` (`DAT_NUM_VC` wrapper alias) | 2 | 1..8 (= 2^VC_ID_WIDTH); Split requires {2,4,6,8} | VCs on the DAT link. REQ/RSP are fixed single-VC. `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t)` disagrees. |
 | `NOC_DAT_VC_MODE` | SHARED (0) | {SHARED (0), READ_WRITE_SPLIT (1)} | Eligible-VC mask applied by every target DAT output VA; current C++ router implements SHARED only. |
-| `REQ_FLIT_WIDTH` | 136 | `133 + AXI_ID_WIDTH` | Derived REQ flit bus width, bits |
-| `RSP_FLIT_WIDTH` | 126 | `123 + AXI_ID_WIDTH` | Derived RSP flit bus width, bits |
-| `DAT_FLIT_WIDTH` | 633 | 633 for `AXI_ID_WIDTH` 1..8 | Derived DAT flit bus width, bits |
+| `REQ_FLIT_WIDTH` | 136 | fixed | REQ flit bus width, bits |
+| `RSP_FLIT_WIDTH` | 126 | fixed | RSP flit bus width, bits |
+| `DAT_FLIT_WIDTH` | 633 | fixed | DAT flit bus width, bits |
 | `LINK_PORTS` | 5 | fixed 5 | port array size = {LOCAL, NORTH, EAST, SOUTH, WEST} |
 
 Router model configuration, fixed at `cmodel_router_create` time:

@@ -28,7 +28,7 @@ module noc_tb_top #(
     // router, so NUM_ENDPOINTS = X_DIM*Y_DIM + N_PERIPH. Every loop that walks
     // the initiators walks endpoints -- each one injects and each one can wedge.
     parameter int unsigned NUM_ENDPOINTS = 4,
-    parameter int unsigned ID_WIDTH   = ni_params_pkg::AXI_ID_WIDTH_DFLT,
+    parameter int unsigned ID_WIDTH   = ni_params_pkg::NOC_ID_WIDTH_DFLT,
     parameter int unsigned ADDR_WIDTH = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
     parameter int unsigned DATA_WIDTH = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
     // Tile crossbar windows, one field per target in port order (m0 = config,

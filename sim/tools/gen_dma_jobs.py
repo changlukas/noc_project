@@ -55,7 +55,7 @@ whole backend onto its own top-level AXI port in a genvar loop, so the ordering
 requirement is enforced by port separation rather than lifted.
 
 It costs coverage, on the NMU side.  nmu/rob.hpp keeps write_order_by_id_ and
-read_order_by_id_ as arrays of AXI_ID_SPACE = 8, and every admission decision
+read_order_by_id_ as arrays of NOC_ID_SPACE = 8, and every admission decision
 keys on the id, so a single-id stream reaches one bucket of the eight and cannot
 form the shape the DAT deadlock argument is about -- one id's fallback-allocate
 interleaved with another id's bypass streak.  Downstream is where nothing is

@@ -34,6 +34,14 @@ def test_default_config_no_errors(packet_spec, constants):
     assert not errors, f"unexpected errors: {[i.message for i in errors]}"
 
 
+def test_axi_and_noc_id_width_contracts_are_independent(constants):
+    """External AXI width varies; the NoC packet ID width is fixed at three."""
+    axi_id = constants["axi"]["AXI_ID_WIDTH"]
+    noc_id = constants["axi"]["NOC_ID_WIDTH"]
+    assert (axi_id["min"], axi_id["max"]) == (1, 8)
+    assert noc_id["allowed"] == [3]
+
+
 @pytest.mark.parametrize("network", ["REQ", "RSP", "DAT"])
 def test_drifted_yaml_value_fires_error(packet_spec, constants, network):
     """noc.<NET>_FLIT_WIDTH hand-edited out of sync with the packet spec must

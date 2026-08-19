@@ -18,7 +18,8 @@ parameter source.
 
 | Canonical parameter | Default | Legal values | Contract |
 |---|---:|---|---|
-| `AXI_ID_WIDTH` | 3 | 1..8 | REQ width is `133 + AXI_ID_WIDTH`; RSP width is `123 + AXI_ID_WIDTH`; DAT is 633 throughout the legal range |
+| `AXI_ID_WIDTH` | 3 | 1..8 | External endpoint AXI ID width. The endpoint remaps live IDs to the fixed NoC ID space and restores B/R IDs. |
+| `NOC_ID_WIDTH` | 3 | fixed 3 | NoC-carried ID field and fixed REQ/RSP/DAT widths: 136/126/633 b. `SRC_ID` and `SRC_PORT_ID` remain NI identity parameters. |
 | `NOC_DAT_NUM_VC` | 2 | 1..8 | DAT VC count and credit-vector width; REQ and RSP remain single-VC |
 | `NOC_DAT_VC_MODE` | `NOC_DAT_VC_MODE_SHARED` (0) | `NOC_DAT_VC_MODE_SHARED` (0), `NOC_DAT_VC_MODE_READ_WRITE_SPLIT` (1) | One system-wide elaboration choice for NI allocation and DAT Router VA |
 | `AXI_FIFO_DEPTH` | 8 | power of two, >= 2 | Common depth of the five AXI-channel CDC FIFOs in each NI |

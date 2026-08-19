@@ -83,7 +83,7 @@ module tb_nmu_sam;
         ni_child_types_pkg::nmu_sam_aw_t value;
 
         value = '0;
-        value.axi.awid = index[ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0];
+        value.axi.awid = index[ni_params_pkg::NOC_ID_WIDTH_DFLT-1:0];
         value.axi.awlen = index[0] ? 8'd3 : 8'd1;
         value.axi.awsize = 3'd3;
         value.axi.awburst = 2'(index % 3);
@@ -100,7 +100,7 @@ module tb_nmu_sam;
         ni_signals_pkg::axi_ar_t value;
 
         value = '0;
-        value.arid = index[ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0];
+        value.arid = index[ni_params_pkg::NOC_ID_WIDTH_DFLT-1:0];
         value.arlen = index[0] ? 8'd3 : 8'd1;
         value.arsize = 3'd3;
         value.arburst = 2'(index % 3);

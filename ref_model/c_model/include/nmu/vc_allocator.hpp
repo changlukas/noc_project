@@ -96,8 +96,8 @@ class VcAllocator : public router::NocReqOut {
 
     // Fixed VC id (same-destination bypass): last (dst_id, VC) a given AXI id took on an
     // ordering_req=0 AW. nullopt dst = id never seen.
-    std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> last_aw_dst_{};
-    std::array<uint8_t, axi::AXI_ID_SPACE> last_aw_vc_{};
+    std::array<std::optional<uint8_t>, axi::NOC_ID_SPACE> last_aw_dst_{};
+    std::array<uint8_t, axi::NOC_ID_SPACE> last_aw_vc_{};
 };
 
 inline std::optional<uint8_t> VcAllocator::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,

@@ -120,7 +120,7 @@ package ni_child_types_pkg;
     typedef struct packed {
         logic [ni_flit_pkg::SRC_ID_WIDTH-1:0]          src_id;
         logic [ni_flit_pkg::SRC_PORT_ID_WIDTH-1:0]     src_port_id;
-        logic [ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0]   noc_id;
+        logic [ni_params_pkg::NOC_ID_WIDTH_DFLT-1:0]   noc_id;
         logic                                           ordering_req;
         logic [ni_flit_pkg::ORDERING_TAG_WIDTH-1:0]    ordering_tag;
         logic                                           is_data;

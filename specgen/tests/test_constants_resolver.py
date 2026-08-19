@@ -97,6 +97,13 @@ def test_payload_field_width_basic(packet_spec):
     assert C.payload_field_width(packet_spec, "AW", "awid") == 3
 
 
+def test_noc_id_width_is_independent_of_external_axi_id_width(packet_spec):
+    """Packet IDs are sized by the fixed NoC contract, not the AXI port."""
+    field_widths = packet_spec["flit"]["field_widths"]
+    assert field_widths["NOC_ID_WIDTH"] == 3
+    assert "AXI_ID_WIDTH" not in field_widths
+
+
 def test_payload_field_position(packet_spec):
     assert C.payload_field_position(packet_spec, "AW", "awid") == (0, 2)
 

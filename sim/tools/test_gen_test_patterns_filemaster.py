@@ -12,12 +12,12 @@ import gen_test_patterns as g
 
 def test_axi_widths_follow_constants_ssot():
     w = g.axi_widths()
-    # id is INITIATOR_ID_WIDTH, not ID_WIDTH: stimulus ids are what ONE tile
-    # initiator drives, and the tile crossbar appends the master-port index on
-    # top of them (constants.yaml axi.INITIATOR_ID_WIDTH).
+    # id is AXI_ID_WIDTH: stimulus ids are what one tile initiator drives.
+    # The tile crossbar appends its master-port index before the endpoint remaps
+    # the external AXI ID to the fixed NoC ID.
     # addr=48 per docs/noc-target-spec.md §6 (pre-S2); data=512 is S2 T2d's
     # data-class flip (specgen/source/constants.yaml axi.DATA_WIDTH).
-    assert w == {"id": 4, "addr": 48, "data": 512}
+    assert w == {"id": 3, "addr": 48, "data": 512}
 
 
 def test_encode_write_beats_full_width_addr_in_data():
@@ -354,11 +354,12 @@ def _gen_ids(tmp_path, tag, x_dim, y_dim, n_txn, extra_argv):
 
 
 def test_ids_per_initiator_one_is_the_pre_random_stimulus(tmp_path):
-    """One id per initiator, = src_idx, and the random draw must not run: it
+    """One id per initiator, = src_idx modulo its external AXI ID space, and the random draw must not run: it
     shares main()'s rng with the destination stream, so consuming from it would
     move every address in a uniform_random run."""
     ids = _gen_ids(tmp_path, "one", 4, 4, 4, ["--ids-per-initiator", "1"])
-    assert all(set(v) == {idx} for idx, v in ids.items())
+    id_space = 1 << g.axi_widths()["id"]
+    assert all(set(v) == {idx % id_space} for idx, v in ids.items())
     dflt = _gen_ids(tmp_path, "dflt", 4, 4, 4, [])
     assert ids == dflt
 
@@ -376,7 +377,7 @@ def test_ids_per_initiator_multi_repeats_and_varies_per_node(tmp_path):
 
 
 def test_ids_per_initiator_overlapping_blocks_fit_the_id_width(tmp_path):
-    """16 nodes x 4 ids overruns the 2**INITIATOR_ID_WIDTH space, so the blocks
+    """16 nodes x 4 ids overruns the 2**AXI_ID_WIDTH space, so the blocks
     overlap across tiles. That is legal -- responses route by the flit src_id,
     not the AXI id (nsu/meta_buffer.hpp:21) -- but every emitted id must still
     fit the width the endpoint's a_mst_id_fits assertion checks."""
