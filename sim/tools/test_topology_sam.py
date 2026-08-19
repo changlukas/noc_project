@@ -18,8 +18,10 @@ def _package(name):
 
 def _rule(pkg, generated_index):
     pattern = (
-        rf"{generated_index}: '\{{idx: '\{{dst_id: 8'd(?P<dst_id>\d+), "
-        rf"dst_port_id: 2'd(?P<port>\d+), is_data: 1'b(?P<is_data>[01]), "
+        rf"{generated_index}: '\{{idx: '\{{dst_id: "
+        rf"ni_flit_pkg::DST_ID_WIDTH'\((?P<dst_id>\d+)\), "
+        rf"dst_port_id: ni_flit_pkg::DST_PORT_ID_WIDTH'\((?P<port>\d+)\), "
+        rf"is_data: 1'b(?P<is_data>[01]), "
         rf"collective_en: 1'b(?P<collective>[01]), "
         rf"mask_x: '\{{offset: SAM_MASK_SEL_WIDTH'\((?P<x_offset>\d+)\), "
         rf"len: SAM_MASK_SEL_WIDTH'\((?P<x_len>\d+)\)\}}, "
@@ -46,6 +48,7 @@ def test_generated_sam_preserves_authored_metadata_and_reverses_priority(
     pkg = _package(name)
 
     assert f"localparam int unsigned SAM_NUM_RULES = {rule_count};" in pkg
+    assert "localparam int unsigned ADDR_WIDTH = ni_flit_pkg::AXI_ADDR_WIDTH;" in pkg
     assert "typedef struct packed" in pkg
     assert "sam_mask_sel_t mask_x;" in pkg
     assert "sam_mask_sel_t mask_y;" in pkg

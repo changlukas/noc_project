@@ -50,7 +50,7 @@ case "${1:-test}" in
 
         task_obj_dir="$task_tmp/obj_dir"
         "${task_verilator[@]}" --binary --Mdir "$task_obj_dir" -o ni_sam_tb "${task_sources[@]}"
-        "$task_obj_dir/ni_sam_tb" +disable_assert_final_checks
+        "$task_obj_dir/ni_sam_tb"
         ;;
     *)
         echo "usage: $0 [lint|test]" >&2

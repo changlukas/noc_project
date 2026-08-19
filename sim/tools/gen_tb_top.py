@@ -1293,7 +1293,7 @@ def emit_topology_pkg(topo: dict) -> str:
     w(f"    localparam int unsigned Y_DIM = {y_dim};")
     w(f"    localparam int unsigned NUM_NODES     = {n};")
     w(f"    localparam int unsigned NUM_ENDPOINTS = {n_ep};")
-    w("    localparam int unsigned ADDR_WIDTH = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;")
+    w("    localparam int unsigned ADDR_WIDTH = ni_flit_pkg::AXI_ADDR_WIDTH;")
     w(f"    localparam int unsigned SAM_NUM_RULES = {len(sam_rules)};")
     w("    localparam int unsigned SAM_MASK_SEL_WIDTH = $clog2(ADDR_WIDTH + 1);")
     w("")
@@ -1321,8 +1321,10 @@ def emit_topology_pkg(topo: dict) -> str:
         comma = "," if generated_index else ""
         w(f"        // Authored rule {authored_index}: SAM[{generated_index}]")
         w("        " +
-          f"{generated_index}: '{{idx: '{{dst_id: 8'd{rule['dst_id']}, "
-          f"dst_port_id: 2'd{rule['port']}, is_data: 1'b{int(rule['space'] != 'config')}, "
+          f"{generated_index}: '{{idx: '{{dst_id: "
+          f"ni_flit_pkg::DST_ID_WIDTH'({rule['dst_id']}), "
+          f"dst_port_id: ni_flit_pkg::DST_PORT_ID_WIDTH'({rule['port']}), "
+          f"is_data: 1'b{int(rule['space'] != 'config')}, "
           f"collective_en: 1'b{int(rule['collective_en'])}, "
           f"mask_x: '{{offset: SAM_MASK_SEL_WIDTH'({rule['mask_x'][0]}), "
           f"len: SAM_MASK_SEL_WIDTH'({rule['mask_x'][1]})}}, "

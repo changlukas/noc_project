@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 `resetall
 `timescale 1ns / 1ps
 `default_nettype none
