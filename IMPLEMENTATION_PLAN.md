@@ -22,6 +22,9 @@ Progress: Issue #43 freezes the shared generated topology/SAM interface before d
 and generator implementation: one build-only per-config package, typed constant `SAM`, shared
 combinational `ni_sam`, authored-first overlap priority, and deterministic 2x2/4x4 semantic DV.
 Follow-on issues #21, #44, and #27 implement that contract and close the recorded C++ overlap gap.
+Issue #23 aligns the C++ RoB ordering key to `{dst_id, dst_port_id, AXI class}` and implements
+the Disabled R-mode per-ID ordering-domain counter; its production `nmu_rob` RTL remains blocked
+until issue #11 supplies the NMU child interfaces and typed records.
 Complete NMU and NSU leaf RTL and paired DV first, then integrate each NI top and pass its hybrid
 zero-hop loopback. Router work starts only after both NI loopback gates pass.
 Status: In Progress

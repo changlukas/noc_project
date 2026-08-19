@@ -334,10 +334,10 @@ They do not emulate RTL CDC implementation details or force the RTL to use model
 | Area | Current usable behavior/gap | Required alignment before differential use |
 |---|---|---|
 | SAM | table lookup, unchanged address, YAML expansion, spaces and ports are modeled; RTL register types 1/2 are absent | retain table/order/config parity and burst-footprint checking; use the model only for mode 0 timing, and compare modes 1/2 against the approved slice semantics |
-| ordering-domain key | Enabled bypass compares destination and class but omits destination port | key both read and write admission on `{dst_id, dst_port_id, AXI class}`; add one-component-at-a-time and sticky tests |
+| ordering-domain key | C++ Enabled and Disabled paths key admission on `{dst_id, dst_port_id, AXI class}` | retain port-only, class-only, destination-only, sticky, and Disabled-mode RLAST-release tests before RTL differential use |
 | B RoB | slot pool, tags, bypass/fallback, sticky behavior, and per-ID ordering are modeled | retain behavior; add the exact N1 overtaking trace counters/metadata needed for accepted-event comparison |
 | enabled R RoB | per-beat slots, high-water allocation, bypass/fallback, and ordering are modeled, with the same missing port term | add destination port to the key and preserve per-beat fill/release tests before enabling comparison |
-| disabled R path | model permits only one outstanding read per ID | implement same-key streaks up to `NMU_MAX_TXNS_PER_ID`, latch the complete key while non-idle, block only a key change, and decrement only on RLAST |
+| disabled R path | model admits one ordering domain per ID with no R slot pool | retain same-key streak, all key-component mismatch, per-ID-bound, and final-RLAST-release tests before RTL differential use |
 | VC ownership and modes | model allocators own per-VC pending queues and implement `SHARED` only | expose class-FIFO-head acceptance and Router-credit behavior with no NI per-VC storage; add split-mode masks and fixed-VC no-spill tests; do not compare model queue timing |
 | LOCAL DAT receive | current model consumes DataR through symmetric credit flow control | keep the production target ready/valid; isolate the mismatch in F0 for hybrid comparison and never treat model receive-credit timing as DUT behavior |
 | REQ/DAT parallelism | independent paths exist, but no shared-AXI test proves same-cycle egress | add a focused model test that records simultaneous REQ and DAT transfers; use it for functional capability, not exact RTL latency |

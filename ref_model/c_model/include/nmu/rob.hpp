@@ -31,18 +31,18 @@ inline constexpr RobMode DEFAULT_ROB_MODE =
 // Implements RequestPacketizer (request gate: push_aw/w/ar) and
 // ResponseDepacketizer (response observe: pop_b/r).
 //
-// Disabled mode: per-AXI-ID single-outstanding interlock.
-//   - Any id with one outstanding AW/AR -> stall further same-id requests
-//   - Different id -> independent
-//   - Response B / R(last) observe clears the per-id outstanding flag
+// Disabled read mode: per-AXI-ID ordering-domain admission.
+//   - An idle id latches {dst_id, dst_port_id, AXI class} from its first AR.
+//   - A non-idle id accepts only the same key, up to max_txns_per_id_.
+//   - R(last) retires one transaction; a key change waits for the id to go idle.
 //
 // Enabled mode: per-beat slot pool + ordering_tag allocator (implemented; the
 //   asserts in the pop paths are integrity guards, not stubs).
 //
 // Both modes: no aggregate outstanding-transaction pool. The per-id order list
 // is the admission bound, so in-flight requests cap at max_txns_per_id_ x
-// 2**AXI_ID_WIDTH = 32 x 8 = 256 writes, and at 1 x 8 = 8 reads in
-// RobMode::Disabled where the per-id single-outstanding interlock applies.
+// 2**AXI_ID_WIDTH = 32 x 8 = 256 per direction. RobMode::Disabled permits
+// only one ordering domain per id at a time.
 // write_txns_ / read_txns_ still count the in-flight transactions per direction,
 // but only as the unmatched-response guard (retire_b / retire_r) and as the
 // high-water measurement.
@@ -54,10 +54,9 @@ inline constexpr RobMode DEFAULT_ROB_MODE =
 // (push_aw/w/ar via axi_slave_port_.tick_req()) before response drain -- so an id
 // freed by this cycle's B/R is not available to this cycle's request side.
 //
-// RoB-less (Disabled) same-id response ordering is guaranteed by the NMU
-// single-outstanding interlock (one transaction in flight per id), not by
-// AxiMaster ordering or XY routing. Enabled mode uses ordering_tag for per-beat
-// reorder buffering and does not rely on this interlock.
+// RoB-less (Disabled) same-id response ordering is guaranteed by one admitted
+// ordering domain per id, not by AxiMaster ordering or XY routing. Enabled mode
+// uses ordering_tag for per-beat reorder buffering and does not rely on this gate.
 // B RoB is unconditional in this model (cheap, no payload) -- a deliberate
 // divergence from FlooNoC's optional BRoBType=NoRoB. Only R keeps a Disabled mode.
 class Rob : public RequestPacketizer, public ResponseDepacketizer {
@@ -118,7 +117,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // Transaction retirement, at the AXI-side response acceptance point and nowhere
     // else (floo_meta_buffer.sv:205-206,210 pops on the AXI response handshake). One
     // event decrements the in-flight count, releases the RoB slot when the response
-    // owns one, and -- Disabled mode only -- clears the per-id single-outstanding flag.
+    // owns one, and -- Disabled mode only -- decrements the per-id outstanding count.
     // Callers: Nmu::push_rsp_{b,r}_to_axi_ integrated; Rob::pop_{b,r} standalone, where
     // AxiSlavePort pops only into a slot it already has room for.
     // R retires on its last beat: a burst is one transaction, n RoB slots.
@@ -154,12 +153,12 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         return msb < 0 ? r_rob_depth_ : r_rob_depth_ - 1u - static_cast<std::size_t>(msb);
     }
 
-    // Test introspection: current read outstanding-entry count summed over all ids
-    // (the R Disabled-mode per-id interlock flags). Writes are always RoB'd, so there
-    // is no write interlock to count.
+    // Test introspection: current read outstanding transaction count summed over all ids
+    // in the R Disabled-mode ordering-domain gate. Writes are always RoB'd, so there is
+    // no write admission counter to report here.
     std::size_t read_occupancy() const {
         std::size_t n = 0;
-        for (bool s : read_outstanding_) n += s ? 1 : 0;
+        for (std::size_t count : read_outstanding_) n += count;
         return n;
     }
     // High-water mark of occupied R RoB slots, updated on every AR that
@@ -171,8 +170,8 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // accepted-push count for that direction. AW and AR are counted separately
     // because they answer different questions -- the R-RoB high-water mark moves
     // with the AR split alone, and the AR path classifies only in
-    // RobMode::Enabled (Disabled reads take the single-outstanding interlock and
-    // are counted nowhere). Measurement-only; no behaviour effect.
+    // RobMode::Enabled (Disabled reads take the ordering-domain gate and are counted
+    // nowhere). Measurement-only; no behaviour effect.
     std::size_t aw_idle_bypass_count() const noexcept { return aw_idle_bypass_count_; }
     std::size_t aw_same_dest_bypass_count() const noexcept { return aw_same_dest_bypass_count_; }
     std::size_t aw_fallback_alloc_count() const noexcept { return aw_fallback_alloc_count_; }
@@ -214,9 +213,13 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::size_t write_txns_ = 0;
     std::size_t read_txns_ = 0;
 
-    // Per-AXI-ID single-outstanding flag for the R Disabled path. True while one AR
-    // is in flight for that id; cleared by R(last) in retire_r.
-    std::array<bool, axi::AXI_ID_SPACE> read_outstanding_{};
+    // Per-AXI-ID R Disabled-mode state. The first non-idle AR latches the complete
+    // ordering-domain key; matching ARs increment the count, while a key change waits
+    // until R(last) retires the final transaction for that id.
+    std::array<std::size_t, axi::AXI_ID_SPACE> read_outstanding_{};
+    std::array<uint8_t, axi::AXI_ID_SPACE> read_disabled_dst_{};
+    std::array<uint8_t, axi::AXI_ID_SPACE> read_disabled_port_{};
+    std::array<axi::AxiClass, axi::AXI_ID_SPACE> read_disabled_cls_{};
 
     // AW-before-W interlock: AW-accepted bursts whose W beats are still owed.
     // Prevents W beats from reaching Packetize before their corresponding AW
@@ -276,9 +279,9 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> write_order_by_id_;
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> read_order_by_id_;
 
-    // Same-destination bypass state (floo_rob.sv:399,417-420,427-428). prev_dest_* is
-    // the dst_id of the last accepted push for that id, updated on every push.
-    // fallen_back_* is the sticky same-destination-bypass flag: once a push
+    // Same-ordering-domain bypass state (floo_rob.sv:399,417-420,427-428). The
+    // prev_* arrays hold the {dst_id, dst_port_id, AXI class} key of the last accepted
+    // push for that id, updated on every push. fallen_back_* is the sticky bypass flag: once a push
     // allocates a RoB slot, every later push for that id allocates one too (even
     // if dest matches an earlier one) until a new streak begins. The reset is the idle-ID bypass
     // branch itself: an id's first push (empty order list) sets fallen_back_*=false, so the flag is
@@ -287,11 +290,13 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // list, which makes a drain-time clear a dead store -- so it is omitted here.
     std::array<uint8_t, AXI_ID_SPACE> prev_dest_write_{};
     std::array<uint8_t, AXI_ID_SPACE> prev_dest_read_{};
+    std::array<uint8_t, AXI_ID_SPACE> prev_port_write_{};
+    std::array<uint8_t, AXI_ID_SPACE> prev_port_read_{};
     std::array<bool, AXI_ID_SPACE> fallen_back_write_{};
     std::array<bool, AXI_ID_SPACE> fallen_back_read_{};
 
     // Class of the last accepted push for that id (axi::AxiClass, updated
-    // alongside prev_dest_write_ / prev_dest_read_). The REQUEST side splits by
+    // alongside prev_dest_* / prev_port_*). The REQUEST side splits by
     // class (S3a T6): NarrowAw/NarrowAr ride REQ, DataAw/DataAr ride DAT. The
     // RESPONSE side is asymmetric -- B never splits (NarrowB and DataB both
     // ride RSP, spec §6 :348), R does (NarrowR rides RSP, DataR rides DAT) --
@@ -386,8 +391,8 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
     //     into an idle id, so it always lands on the idle-ID bypass branch below
     //     (ordering_req=0, no RoB slot) -- ruling 4, NoRobReduction.
     //   anything in, front entry collective -> refuse. This closes the
-    //     same-destination bypass hole: a later same-id AW whose dst equals the
-    //     collective's dst_id would otherwise stream past it without a RoB slot.
+    //     same-ordering-domain bypass hole: a later same-id AW whose key equals the
+    //     collective's key would otherwise stream past it without a RoB slot.
     //     Testing the FRONT suffices -- a collective only ever enters an empty
     //     list, so while in flight it is the only entry.
     if (!write_order_by_id_[b.id].empty() &&
@@ -409,8 +414,8 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         needs_rob = false;
         fallen_back = false;  // fresh streak
     } else if (!fallen_back_write_[b.id] && dst == prev_dest_write_[b.id] &&
-               t.cls == prev_cls_write_[b.id]) {
-        // Same-destination bypass: same dest AND same class as the previous same-id
+               t.port == prev_port_write_[b.id] && t.cls == prev_cls_write_[b.id]) {
+        // Same-ordering-domain bypass: same dest, port, AND class as the previous same-id
         // push, not yet reordering. Ported from floo_rob.sv:427-428, with a class
         // term FlooNoC has no counterpart for (two AXI ports there, one here --
         // see the class comment on prev_cls_write_). A class change is treated like
@@ -439,6 +444,7 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         return false;  // downstream backpressure: no state mutation
     }
     prev_dest_write_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
+    prev_port_write_[b.id] = t.port;
     prev_cls_write_[b.id] = t.cls;
     fallen_back_write_[b.id] = fallen_back;
     if (needs_rob) {
@@ -452,7 +458,7 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
     // trial values and the push can still be refused after them, so counting
     // there would count pushes that never happened. (empty, needs_rob) names the
     // branch that ran -- empty: idle-ID bypass; !empty && !needs_rob:
-    // same-destination bypass; needs_rob: fall-back allocate.
+    // same-ordering-domain bypass; needs_rob: fall-back allocate.
     if (empty) {
         ++aw_idle_bypass_count_;
     } else if (needs_rob) {
@@ -492,8 +498,8 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
             needs_rob = false;
             fallen_back = false;  // fresh streak
         } else if (!fallen_back_read_[b.id] && dst == prev_dest_read_[b.id] &&
-                   t.cls == prev_cls_read_[b.id]) {
-            // Same-destination bypass: same dest AND same class as the previous same-id
+                   t.port == prev_port_read_[b.id] && t.cls == prev_cls_read_[b.id]) {
+            // Same-ordering-domain bypass: same dest, port, AND class as the previous same-id
             // push, not yet reordering. Ported from floo_rob.sv:427-428, with a class
             // term FlooNoC has no counterpart for (two AXI ports there, one here --
             // see the class comment on prev_cls_read_). A class change is treated like
@@ -532,6 +538,7 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
             return false;  // downstream backpressure: no state mutation
         }
         prev_dest_read_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
+        prev_port_read_[b.id] = t.port;
         prev_cls_read_[b.id] = t.cls;
         fallen_back_read_[b.id] = fallen_back;
         if (needs_rob) {
@@ -571,7 +578,12 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         return true;
     }
     auto t = sam_.translate(b.addr);
-    if (read_outstanding_[b.id]) return false;  // single-outstanding per id
+    const bool idle = read_outstanding_[b.id] == 0;
+    if (!idle && (read_outstanding_[b.id] >= max_txns_per_id_ ||
+                  t.dst_id != read_disabled_dst_[b.id] ||
+                  t.port != read_disabled_port_[b.id] || t.cls != read_disabled_cls_[b.id])) {
+        return false;
+    }
     AwHeaderMeta meta{t.dst_id, t.local_addr, 0, 0, t.cls};
     meta.dst_port = t.port;
     if (!next_pkt_.push_ar_with_meta(b, meta)) {
@@ -580,10 +592,15 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
     if (t.cls == axi::AxiClass::Narrow) {
         ar_lane_meta_[b.id].push_back({t.local_addr, b.len, b.size, b.burst, 0});
     }
-    read_outstanding_[b.id] = true;
+    if (idle) {
+        read_disabled_dst_[b.id] = t.dst_id;
+        read_disabled_port_[b.id] = t.port;
+        read_disabled_cls_[b.id] = t.cls;
+    }
+    ++read_outstanding_[b.id];
     ++read_txns_;
-    // Disabled reads run the single-outstanding interlock instead of the three
-    // admission branches, so there is no clause to count here.
+    // Disabled reads run the ordering-domain gate instead of the three admission
+    // branches, so there is no clause to count here.
     read_txns_hwm_ = std::max(read_txns_hwm_, read_txns_);
     return true;
 }
@@ -649,8 +666,8 @@ inline void Rob::retire_r(bool ordering_req, uint8_t ordering_tag, uint8_t axi_i
     if (ordering_req) commit_r_exit(ordering_tag, axi_id);
     if (!last) return;  // per transaction: the burst retires on its last beat
     if (mode_r_ != RobMode::Enabled) {
-        assert(read_outstanding_[axi_id] && "R(last) for id with no outstanding read");
-        read_outstanding_[axi_id] = false;
+        assert(read_outstanding_[axi_id] > 0 && "R(last) for id with no outstanding read");
+        --read_outstanding_[axi_id];
     }
     assert(read_txns_ > 0 && "nmu::Rob: R response with no outstanding read transaction");
     if (read_txns_ == 0) std::abort();
