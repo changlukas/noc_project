@@ -197,19 +197,17 @@ noc:
   MESH_X_DIM:
     type: int
     units: count
-    description: "Mesh X dimension (routers per row); bounded by X_WIDTH (4 bit); minimum 2 (a mesh communicating through NI + router needs at least 2x2, per dimension)"
+    description: "Mesh X dimension (routers per row); power of two; bounded by X_WIDTH (4 bit); minimum 2"
     default: 4
-    min: 2
-    max: 16
+    allowed: [2, 4, 8, 16]
     sv_symbol: NOC_MESH_X_DIM_DFLT
     cpp_symbol: NOC_MESH_X_DIM
   MESH_Y_DIM:
     type: int
     units: count
-    description: "Mesh Y dimension (routers per column); bounded by Y_WIDTH (4 bit); minimum 2 (a mesh communicating through NI + router needs at least 2x2, per dimension)"
+    description: "Mesh Y dimension (routers per column); power of two; bounded by Y_WIDTH (4 bit); minimum 2"
     default: 4
-    min: 2
-    max: 16
+    allowed: [2, 4, 8, 16]
     sv_symbol: NOC_MESH_Y_DIM_DFLT
     cpp_symbol: NOC_MESH_Y_DIM
 

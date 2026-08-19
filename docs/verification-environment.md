@@ -121,6 +121,8 @@ The NMU-specific N0/N1/N2 tests, comparison exclusions, overtaking evidence, F0 
 non-vacuous pass criteria are defined in `docs/nmu-verification-plan.md`.
 The NSU-specific S0/S1 tests, comparison exclusions, F0 adapter checks, and non-vacuous pass criteria
 are defined in `docs/nsu-verification-plan.md`.
+The Router-specific R0/R1/R2 tests, direct comparison points, LOCAL DAT normalizer, and approved
+cycle-divergence exclusions are defined in `docs/router-verification-plan.md`.
 
 ### Model-facing REQ/RSP egress
 
@@ -178,6 +180,60 @@ classifications below govern those plans and do not change the license of any so
 |---|---|---|---|
 | P1 | FlooNoC at `cb7b2ba3fd4b7eac340a4117ffba05c2a9757699`; inspected `floo_rob.sv`, `floo_rob_wrapper.sv`, `tb_floo_rob.sv`, `floo_meta_buffer.sv`, and `floo_axi_chimney.sv` | production-approved external reference; architecture, behavior, and test intent may inform reviewed production work, but issues #11 and #12 copy or instantiate no RTL | inspected files carry `SPDX-License-Identifier: SHL-0.51`; preserve their copyright/SPDX notices and the repository's Solderpad Hardware License v0.51 terms in any separately approved reuse |
 | P2 | Taxi at `d5d38c268e1ec5a0bf55ea59b6c25fb59c7b73ad`; inspected AXI/stream register RTL plus register and async-FIFO test methods | reference-only; general test intent may inform project-owned DV, but its RTL must not be copied, adapted, or instantiated in production | inspected sources carry `SPDX-License-Identifier: CERN-OHL-S-2.0`; retain all notices in the reference tree and do not rewrite or remove them |
+
+Issue #10's candidate inventory includes the upstream Router tops and wrappers, their directly
+relevant transitive modules, the deprecated VC-router family, direct Router tests, synthesis
+wrappers, and the packet/cut/join names that required an explicit scope decision. `adapt` means a
+later, separately approved derivative may retain the useful core while changing the recorded
+contract deltas. `rewrite` means
+the production block is project-owned and the source is not copied. None is reused as-is. All
+inspected P3 source files carry `SPDX-License-Identifier: SHL-0.51`; an adaptation must preserve
+copyright/SPDX notices, carry a prominent modification notice, and comply with the repository's
+Solderpad Hardware License v0.51. A rewrite copies no source or notice, so it introduces no
+third-party source-license delta. This issue performs no adaptation or RTL implementation.
+
+| ID | candidate at P1 revision | disposition | interface delta | behavior/dependency delta | license delta |
+|---|---|---|---|---|---|
+| P3-F01 | `hw/floo_route_xymask.sv` | adapt | replace upstream header/enums with generated coordinates and fixed project ports | retain pure fork/join mask equations; remove unsupported forwarding modes and add project legality guards | derivative obligations above |
+| P3-F02 | `hw/floo_wormhole_arbiter.sv` | adapt | map generic request/grant handshake to project candidate identity | retain packet-boundary lock concept; implement exact project freeze, tail, and RR update rules with no extra dependency state | derivative obligations above |
+| P3-F03 | `hw/floo_reduction_sync.sv` | adapt | replace upstream flit/route types with generated RSP fields and project ports | add exact ordering-tag/channel/BID qualification and target expected-set rules; keep loopback assumption out of the interface | derivative obligations above |
+| P3-F04 | `hw/floo_reduction_arbiter.sv` | adapt | narrow generic reduction interface to CollectB RSP use | retain whole-survivor/first-SLVERR scan; remove other reductions and add worm-boundary priority control | derivative obligations above |
+| P3-F05 | `hw/deprecated/vc_router_util/floo_vc_assignment.sv` | adapt | replace look-ahead and fixed-configuration inputs with per-flit `fixed_vc` and target port/VC types | retain preferred-map kernel; add mode eligibility, per-branch state, and target tail/lock rules | derivative obligations above; deprecated status is recorded, not removed |
+| P3-F06 | `hw/deprecated/vc_router_util/floo_vc_selection.sv` | adapt | map candidate/credit arrays to target eligible masks | retain preferred-then-highest selection kernel; restrict overflow to nonfixed tail and selected traffic class | derivative obligations above; deprecated status is recorded, not removed |
+| P3-F07 | `hw/floo_route_select.sv` | rewrite | generic routing/table/state interface conflicts with pure project child | unsupported algorithms and route-lock ownership exceed the approved dependency/behavior | no copied source; no source-license delta |
+| P3-F08 | `hw/floo_fifo.sv` | rewrite | VC stream arrays do not match project FIFO adapters | frozen contract requires the approved synchronous FIFO wrapper, not another FIFO layer | no copied source; no source-license delta |
+| P3-F09 | `hw/floo_vc_arbiter.sv` | rewrite | valid/ready VC interface differs from DAT credit candidates | arbitration modes and ready-dependent selection do not implement exact two-level target order | no copied source; no source-license delta |
+| P3-F10 | `hw/floo_output_arbiter.sv` | rewrite | combined generic output/reduction interface conflicts with child ownership | target join qualification, strict priority, worm-boundary hold, and DAT VA differ | no copied source; no source-license delta |
+| P3-F11 | `hw/floo_reduction_unit.sv` | rewrite/out of scope | arithmetic/offload ports have no target interface | non-CollectB operations and sequential reduction dependencies are unapproved | no copied source; no source-license delta |
+| P3-F12 | `hw/floo_router.sv` | rewrite | top ports, packet records, and generic VC topology differ | target has asymmetric DAT flow control, fixed package ownership, and exact pipeline/collective behavior | no copied source; no source-license delta |
+| P3-F13 | `hw/floo_nw_router.sv` | rewrite | wrapper records and network composition differ | target has exactly three independently owned networks and generated project types | no copied source; no source-license delta |
+| P3-F14 | `hw/floo_axi_router.sv` | rewrite | wrapper exposes an incompatible aggregate interface | offload/configuration behavior and dependency closure exceed the frozen top | no copied source; no source-license delta |
+| P3-F15 | `hw/deprecated/floo_vc_router.sv` | rewrite | heterogeneous VC/look-ahead/scalar-credit interface differs | pipeline, VC ownership, output protocol, and collective behavior conflict | no copied source; no source-license delta; deprecated notice untouched |
+| P3-F16 | `hw/deprecated/floo_nw_vc_router.sv` | rewrite | deprecated wrapper records do not match production ports | composes the incompatible deprecated VC router | no copied source; no source-license delta; deprecated notice untouched |
+| P3-F17 | `hw/deprecated/vc_router_util/floo_credit_counter.sv` | rewrite | scalar credit-ID interface differs from per-VC vectors and LOCAL ready/valid | lacks target ownership, LOCAL exception, and full conservation guards | no copied source; no source-license delta; deprecated notice untouched |
+| P3-F18 | `hw/deprecated/vc_router_util/floo_input_fifo.sv` | rewrite | custom depth-specific FIFO interface differs | frozen contract requires the approved FIFO adapter and whole-flit per-VC storage | no copied source; no source-license delta; deprecated notice untouched |
+| P3-F19 | `hw/deprecated/vc_router_util/floo_input_port.sv` | rewrite | split header/payload and scalar credit interface differs | multiple switch-pop paths and storage ownership conflict with one freed-slot credit event | no copied source; no source-license delta; deprecated notice untouched |
+| P3-F20 | `hw/deprecated/vc_router_util/floo_look_ahead_routing.sv` | rewrite | target flits carry no look-ahead route interface | target recomputes approved XY direction from destination at each hop | no copied source; no source-license delta; deprecated notice untouched |
+| P3-F21 | `hw/deprecated/vc_router_util/floo_mux.sv` | rewrite | helper shape/types are unnecessary | target can use direct typed selection without adding a dependency module | no copied source; no source-license delta; deprecated notice untouched |
+| P3-F22 | `hw/deprecated/vc_router_util/floo_rr_arbiter.sv` | rewrite | request/update interface differs | pointer and update order conflict with VC-major/input-minor packet-boundary rules | no copied source; no source-license delta; deprecated notice untouched |
+| P3-F23 | `hw/deprecated/vc_router_util/floo_sa_global.sv` | rewrite | look-ahead switch-allocation hierarchy differs | global selection and RR ownership do not match frozen output ownership | no copied source; no source-license delta; deprecated notice untouched |
+| P3-F24 | `hw/deprecated/vc_router_util/floo_sa_local.sv` | rewrite | local switch-allocation interface differs | local arbitration hierarchy does not implement the target's exact combined ordering | no copied source; no source-license delta; deprecated notice untouched |
+| P3-F25 | `hw/deprecated/vc_router_util/floo_vc_router_switch.sv` | rewrite | reconstructed header/payload interface differs from full-flit ports | target preserves every bit except an authorized `vc_id` rewrite | no copied source; no source-license delta; deprecated notice untouched |
+| P3-F26 | `hw/deprecated/floo_nw_vc_chimney.sv` | rewrite/out of Router scope | NI boundary module, not a Router child | endpoint behavior and dependencies belong to NI verification | no copied source; no source-license delta; deprecated notice untouched |
+| P3-F27 | `hw/synth/floo_synth_axi_router.sv` | rewrite/out of production scope | synthesis wrapper is not the frozen top interface | reference synthesis harness/configuration is not production behavior | no copied source; no source-license delta |
+| P3-F28 | `hw/synth/floo_synth_nw_router.sv` | rewrite/out of production scope | synthesis wrapper is not the frozen top interface | reference synthesis harness/configuration is not production behavior | no copied source; no source-license delta |
+| P3-F29 | `hw/floo_pkg.sv` | rewrite | upstream enums/records do not match generated project packages | includes unsupported routing, offload, and NI configuration types; generated sources remain authoritative | no copied source; no source-license delta |
+| P3-F30 | `hw/floo_cut.sv` | rewrite/out of Router scope | generic multi-channel VC cut differs from frozen Router boundaries | introduces an unapproved register/VC-arbiter layer; approved shared primitives already own required register cuts | no copied source; no source-license delta |
+| P3-F31 | `hw/floo_nw_join.sv` | rewrite/out of Router scope | joins two endpoint AXI buses rather than Router flit inputs | AXI width/ID conversion and endpoint dependencies are unrelated to CollectB | no copied source; no source-license delta |
+| P3-T01 | `hw/tb/tb_floo_router.sv` | adapt test intent only | upstream queue/record agents are not reused | project-owned DV retains connectivity, backpressure, and ordered-result intent but supplies independent predictors/fault injection | no test source copied by issue #10; any future derivative has obligations above |
+| P3-T02 | `hw/tb/tb_floo_vc_router.sv` | adapt test intent only | look-ahead/scalar-credit agents do not match target | project-owned DV retains VC/credit/worm stress intent and replaces the oracle, modes, assertions, and coverage | no test source copied by issue #10; any future derivative has obligations above |
+
+For issue #10, P2 inspection was limited to `src/prim/rtl/taxi_arbiter.sv`,
+`src/prim/tb/taxi_arbiter/test_taxi_arbiter.py`, `src/axis/rtl/taxi_axis_register.sv`, and
+`src/axis/tb/taxi_axis_register/test_taxi_axis_register.py`. The arbitration permutation and
+ready/valid pause-matrix ideas may inform independently written tests. The P2 classification is
+unchanged: reference-only, never copied, adapted, or instantiated, with all CERN-OHL-S-2.0 notices
+left intact.
 
 The project-owned C++ NMU and NSU models are conditional executable oracles rather than third-party
 sources. Their target-aligned and excluded comparison areas are listed in

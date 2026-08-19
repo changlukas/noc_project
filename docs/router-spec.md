@@ -477,7 +477,7 @@ Router model configuration, fixed at `cmodel_router_create` time:
 | `NOC_ROUTER_VC_DEPTH` | 8 | 1..16 | input VC FIFO depth; on DAT it is also the upstream credit seed, on REQ/RSP the depth the almost-full `ready` is computed against |
 | `NOC_ROUTER_OUTPUT_FIFO_DEPTH` | 2 | 1..16 | DAT stage-3 output FIFO depth, not credit-counted. REQ/RSP run with output FIFO depth 0 (stage 2 drives the link directly) |
 | `ready_slack` (REQ/RSP) | 2 | 1..`NOC_ROUTER_VC_DEPTH` - 1 | flits of headroom the almost-full `ready` reserves. PROVISIONAL, awaits a measured wire-loop calibration |
-| `mesh_x_dim`, `mesh_y_dim` | 4, 4 | 2, 4, 8, 16 each | the router array, which the generated tb_top passes from the topology's `x_dim` / `y_dim`. A peripheral shares its host router's coordinate, so it adds none. Powers of two only, because a collective mask wildcards a `clog2(dim)`-bit coordinate field and every index it names must be a node. Minimum 2 per dimension: a mesh communicating through NI + router needs at least 2x2; 1x1 and 1xN meshes are illegal. |
+| `mesh_x_dim`, `mesh_y_dim` | 4, 4 | 2, 4, 8, 16 each | the router array, which the generated tb_top passes from the topology's `x_dim` / `y_dim`. A peripheral shares its host router's coordinate, so it adds none. X and Y are independent for unicast; powers of two keep every encoded coordinate valid. The first RTL target guarantees multicast/collective operation only when `mesh_x_dim == mesh_y_dim`. Minimum 2 per dimension; 1x1 and 1xN meshes are illegal. |
 | `x_coord`, `y_coord` | per node | `x < mesh_x_dim`, `y < mesh_y_dim` | this node's coordinate |
 
 ### 3.2 Port index encoding

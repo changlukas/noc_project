@@ -467,3 +467,16 @@ semantics match production RTL without changing the C++ cores. Cons: the model-f
 adds one wire cycle, the pending DPI register can introduce an input bubble, and model-to-model
 Router composition must handshake-qualify ingress before recreating the C++ pulse. These are
 verification timing costs, not production microarchitecture.
+
+## Rectangular unicast and square collective signoff
+
+`MESH_X_DIM` and `MESH_Y_DIM` are independently selected from {2, 4, 8, 16}. Unicast routing is
+supported and verified on rectangular as well as square meshes. The first RTL target guarantees
+multicast/collective operation only when the dimensions are equal; rectangular collective support
+is deferred even though the current reference model exercises some rectangular route masks.
+
+Pros: customers can size unicast fabrics to non-square floorplans without paying for unused
+routers, while collective implementation and signoff stay aligned with the intended square-mesh
+workload. Cons: enabling collectives can require a different topology, and reference-model success
+on a rectangular collective case is not production conformance evidence. Rectangular collective
+support should be added only with explicit product demand and complete fork/join signoff.

@@ -35,7 +35,8 @@ compute tile per node on a 2D mesh, standard AXI4 at every endpoint.
 - Three physical networks `REQ` / `RSP` / `DAT`
 - `REQ`/`RSP` full-duplex, W/R utilization **81.4 %** on `DAT`
 - Support AXI Outstanding / Interleaving / Out-of-Order
-- 2x2 to 16x16 mesh, 256 nodes
+- X/Y dimensions independently selected from 2, 4, 8 and 16 for unicast, 256 nodes maximum;
+  v1 multicast/collective signoff requires a square mesh
 - Write multicast / Response reduction support
 - 1 to 8 virtual channels on `DAT`, default 2, with selectable shared or equal Read/Write-split
   allocation; credit-based on `DAT`, ready/valid on `REQ` / `RSP`
@@ -449,7 +450,7 @@ at simulation startup, and the verification flow checks the generated and runtim
 
 | Feature | Parameter | Values (default) | Comments |
 |---|---|---|---|
-| Topology | Mesh X and Y dimension | 2-16 (4) | Square meshes only. 256 nodes maximum, set by the 8-bit node ID |
+| Topology | Mesh X and Y dimension | 2, 4, 8, 16 (4) | X and Y are independent for unicast. v1 multicast/collective support requires X = Y. 256 nodes maximum, set by the 8-bit node ID |
 | AXI interface | Endpoint interfaces | 1 | One fixed 512-bit interface carries both classes; the SAM address space selects the internal NoC class |
 | AXI interface | `AXI_ID_WIDTH` | 1-8 (3) | NMU AXI ID and NoC-carried ID width; REQ/RSP flit widths derive from it at elaboration |
 | Flow control | `DAT_NUM_VC` | 1-8 (2) | Total DAT VC count and the Section 4.3 credit signal width; mode-specific legality applies below |
@@ -501,9 +502,11 @@ between spaces. Where a space is packed with its stride equal to its region size
 A space meeting all four conditions is a legal collective target. A space failing any of them is
 a legal unicast target and not a collective target.
 
-**Mesh dimensions are powers of two**, so the coordinate field is exactly as wide as the
-dimension and every index a mask names is a node. The generator and C++ loader refuse anything
-else.
+**Mesh dimensions are powers of two**, independently selected from 2, 4, 8 and 16, so the
+coordinate field is exactly as wide as the dimension and every index a mask names is a node. The
+generator and C++ loader refuse anything else. Unicast supports rectangular meshes. The first RTL
+target guarantees multicast/collective operation only when `x_dim == y_dim`; rectangular
+multicast is deferred.
 
 **Peripherals.** A peripheral shares the coordinate of the router it hangs off and is told apart
 by the port, `dst_port_id`: 0 is the tile on the router's LOCAL port, non-zero a boundary port.

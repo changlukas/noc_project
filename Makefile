@@ -114,9 +114,9 @@ endif
 # Bounded, not a bare -j. Unlimited parallelism starts one compiler per core --
 # 28 on the WSL host against 15 GB of RAM -- and the gtest translation units are
 # template-heavy enough that the machine goes to swap and g++ dies with an
-# internal compiler error. That is the whole story behind the "host GCC ICE"
-# this file used to route around. Override with JOBS= for a bigger machine.
-JOBS ?= 6
+# internal compiler error. Docker/WSL also produced corrupt test executables at
+# JOBS=2 on this host. Override only on a Linux host verified under parallel load.
+JOBS ?= 1
 
 build-cmodel: $(CMODEL_BUILD)/CMakeCache.txt
 	@$(CMAKE) --build $(CMODEL_BUILD) -j $(JOBS)
