@@ -249,8 +249,8 @@ Write VCs before buffering and returns credit by consumed VC
 That placement is intentionally not copied: this target puts VC FIFOs only in the Router.
 
 The four NoC-side queues are REQ, RSP, DAT Write and DAT Read. They are synchronous `noc_clk`
-class FIFOs, not CDC or per-VC FIFOs. `NOC_FIFO_DEPTH`, default 8 with legal values 4, 8 and
-16, is their common entry count. Separate per-class depth parameters are not introduced.
+class FIFOs, not CDC or per-VC FIFOs. `NOC_FIFO_DEPTH`, default 8 and any positive power of two,
+is their common entry count. Separate per-class depth parameters are not introduced.
 
 | Flow | Storage owner | Backpressure |
 |---|---|---|
@@ -290,11 +290,21 @@ one-sided reset, confirming that independent recovery requires extra reset coord
 surveyed NoC NI uses one clock/reset domain. This target therefore keeps the ordinary FIFO and
 places the two reset synchronizers at system integration.
 
-`NI_DAT_VC_DEPTH` is removed from the target. `NOC_ROUTER_VC_DEPTH`, default 8 with legal range
-1 to 16, is both the Router input VC FIFO depth and the NI-to-Router DAT credit seed.
-`AXI_FIFO_DEPTH` retains its approved default 8 and legal values 4, 8 and 16, now as the common
-entry count of the five AXI channel async FIFOs. These queues absorb clock-ratio variation and AXI
-backpressure; they do not store transaction lifetime state.
+`NI_DAT_VC_DEPTH` is removed from the target. `NOC_ROUTER_VC_DEPTH`, default 8 and any power of two
+at least 2, is both the Router input VC FIFO depth and the NI-to-Router DAT credit seed.
+`AXI_FIFO_DEPTH`, default 8 and any power of two at least 2, is the common entry count of the five
+AXI channel async FIFOs. These queues absorb clock-ratio variation and AXI backpressure; they do
+not store transaction lifetime state.
+
+All production FIFO depths use power-of-two entry counts and have no architectural maximum.
+Synchronous FIFOs permit depth 1 unless a block-level relation raises the minimum; Router input VC
+FIFOs require at least 2 because `ready_slack < depth`; AXI asynchronous FIFOs require at least 2
+for Gray-pointer CDC. `NOC_ROUTER_OUTPUT_FIFO_DEPTH` is also defaulted to 8. These defaults are
+`[TBD]` sizing points, not PPA optima; implementation signoff must sweep representative legal
+depths before changing them. Pros: pointer/occupancy logic and memory inference stay uniform, and
+customer sizing is not capped arbitrarily. Cons: a non-power-of-two depth that could save entries
+for a specific workload is excluded, and default 8 may consume more area than the final measured
+requirement.
 
 The current C++ model remains a known divergence: it is single-clock, its `VcAllocator` owns
 per-VC pending queues, and its LOCAL DAT receive path returns per-VC credits. Target alignment is a

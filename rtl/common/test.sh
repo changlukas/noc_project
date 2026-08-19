@@ -42,8 +42,8 @@ task_verilator=(
 )
 
 task_guard_messages=(
-    "NOC_FIFO_DEPTH must be 4, 8, or 16"
-    "AXI_FIFO_DEPTH must be 4, 8, or 16"
+    "NOC_FIFO_DEPTH must be a power of two"
+    "AXI_FIFO_DEPTH must be a power of two and at least 2"
     "REG_TYPE must be 0, 1, or 2"
 )
 
@@ -53,7 +53,7 @@ case "$task_mode" in
         ;;
     test)
         "${task_verilator[@]}" --lint-only "${task_sources[@]}"
-        for task_depth in 4 8 16; do
+        for task_depth in 2 8 32; do
             task_obj_dir="$task_tmp/obj_dir_$task_depth"
             "${task_verilator[@]}" \
                 -GNOC_FIFO_DEPTH="$task_depth" \

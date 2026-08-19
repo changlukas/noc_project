@@ -168,7 +168,7 @@ one verification-only wire cycle, for 3 cycles per hop at the wrapper pins.
 |---|---|---|
 | 1. Input | per-port 1-deep input register, then per-(port, VC) FIFO, depth `NOC_ROUTER_VC_DEPTH` = 8 | file the registered flit into the FIFO selected by header `vc_id` |
 | 2. Grant | per-output wormhole lock + RR state + credit counters | per output: pick one (input, VC) candidate, assign the output-side VC `out_vc` (VA, section 2.5), pop its FIFO front, decrement `credit_[out][out_vc]`, restamp header `vc_id = out_vc`, push into the output FIFO, schedule one credit pulse (input-side VC) to the upstream of that input |
-| 3. Link | per-output FIFO, depth `NOC_ROUTER_OUTPUT_FIFO_DEPTH` = 2 | drive at most one flit from each output FIFO onto the link |
+| 3. Link | per-output FIFO, depth `NOC_ROUTER_OUTPUT_FIFO_DEPTH` = 8 | drive at most one flit from each output FIFO onto the link |
 
 In target RTL, stage 2 checks per-VC credit for N/E/S/W outputs. For LOCAL output it checks output
 FIFO space but does not decrement a per-VC credit counter. Stage 3 holds the LOCAL flit stable until
@@ -178,7 +178,7 @@ and their dequeue returns the matching credit to the injecting NI.
 The model evaluates stages in reverse order (3, then 2, then 1) within one tick
 (`router.hpp:201-288`). Two observable consequences:
 
-- An output FIFO that is full at depth 2 and drains one flit in stage 3 can accept one
+- An output FIFO that is full and drains one flit in stage 3 can accept one
   new grant in stage 2 of the same cycle.
 - Stage 2 iterates the five outputs in fixed order LOCAL(0), NORTH(1), EAST(2),
   SOUTH(3), WEST(4) and pops immediately. Up to 5 grants happen per cycle (one per
@@ -310,7 +310,7 @@ output gates on NI ready. REQ and RSP have no counters.
    `credit_[EAST][1] = 3` -> flits assigned to VC1 keep flowing to EAST while flits
    assigned to VC0 wait.
 
-The stage-3 output FIFO (depth 2) is an architectural parameter of this design
+The stage-3 output FIFO (default depth 8) is an architectural parameter of this design
 (`NOC_ROUTER_OUTPUT_FIFO_DEPTH`) but is not credit-counted and is invisible to the
 neighbor. Its only flow effect is the stage-2 admission gate: no grant to an output
 whose FIFO already holds `NOC_ROUTER_OUTPUT_FIFO_DEPTH` flits.
@@ -474,8 +474,8 @@ Router model configuration, fixed at `cmodel_router_create` time:
 
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
-| `NOC_ROUTER_VC_DEPTH` | 8 | 1..16 | input VC FIFO depth; on DAT it is also the upstream credit seed, on REQ/RSP the depth the almost-full `ready` is computed against |
-| `NOC_ROUTER_OUTPUT_FIFO_DEPTH` | 2 | 1..16 | DAT stage-3 output FIFO depth, not credit-counted. REQ/RSP run with output FIFO depth 0 (stage 2 drives the link directly) |
+| `NOC_ROUTER_VC_DEPTH` | 8 | power of two, >= 2 | input VC FIFO depth; on DAT it is also the upstream credit seed, on REQ/RSP the depth the almost-full `ready` is computed against |
+| `NOC_ROUTER_OUTPUT_FIFO_DEPTH` | 8 | positive power of two | DAT stage-3 output FIFO depth, not credit-counted. REQ/RSP run with output FIFO depth 0 (stage 2 drives the link directly) |
 | `ready_slack` (REQ/RSP) | 2 | 1..`NOC_ROUTER_VC_DEPTH` - 1 | flits of headroom the almost-full `ready` reserves. PROVISIONAL, awaits a measured wire-loop calibration |
 | `mesh_x_dim`, `mesh_y_dim` | 4, 4 | 2, 4, 8, 16 each | the router array, which the generated tb_top passes from the topology's `x_dim` / `y_dim`. A peripheral shares its host router's coordinate, so it adds none. X and Y are independent for unicast; powers of two keep every encoded coordinate valid. The first RTL target guarantees multicast/collective operation only when `mesh_x_dim == mesh_y_dim`. Minimum 2 per dimension; 1x1 and 1xN meshes are illegal. |
 | `x_coord`, `y_coord` | per node | `x < mesh_x_dim`, `y < mesh_y_dim` | this node's coordinate |
@@ -756,7 +756,7 @@ ctest `RouterVcArbitration.BlockedVcDoesNotStallOthers`. Failure: traffic on a
 credited VC stalls while another VC is credit-blocked and the output is unlocked.
 
 SPEC 14 (output FIFO). Stage 2 admits no flit to an output whose FIFO holds
-`NOC_ROUTER_OUTPUT_FIFO_DEPTH` (default 2, range 1..16) flits, and a FIFO that drains
+`NOC_ROUTER_OUTPUT_FIFO_DEPTH` (default 8, positive power of two) flits, and a FIFO that drains
 one flit in stage 3 can accept one grant in the same cycle. Verified by ctest
 `RouterVcArbitration.SameCycleOutputFifoEnqueueDequeue`. Failure: a grant into a full
 FIFO, or a stall in the same-cycle drain-and-fill case.
@@ -786,18 +786,17 @@ under bidirectional regression traffic. Failure: cross-network coupling observab
 scoreboard divergence.
 
 SPEC 19 (parameter legality). Construction rejects (assert then abort) exactly three
-conditions: `DAT_NUM_VC` outside 1..8 (= 2^VC_ID_WIDTH), a zero VC depth or zero output
-FIFO depth, and an own coordinate outside the mesh (`router.hpp:77-88`). The upper
-bounds on VC depth, output FIFO depth, and mesh dims (VC depth and output FIFO depth
-stated as 1..16, mesh dims stated as 2..16) are design assumptions bounded by the
-flit field widths (X and Y coordinate 4 bits each), not construction-checked. The
+conditions: `DAT_NUM_VC` outside 1..8 (= 2^VC_ID_WIDTH), a VC/input or output FIFO depth
+that violates its power-of-two/minimum rule, and an own coordinate outside the mesh
+(`router.hpp:77-88`). FIFO depths have no architectural maximum. The mesh dimensions
+remain bounded by the flit field widths (X and Y coordinate 4 bits each). The
 mesh-dim lower bound (2 per dimension: a mesh communicating through NI + router
 needs at least 2x2; 1x1/1xN illegal) is enforced at topology load time
 (`gen_tb_top.py`, `gen_test_patterns.py`, `sam_yaml.hpp::load_sam_table`), not by
 Router construction. Verified by ctest death tests
-`RouterConstructionDeath.BadParametersAbort` (covers `num_vc = 9` and `vc_depth = 0`),
+`RouterConstructionDeath.BadParametersAbort` (covers `num_vc = 9` and illegal FIFO depths),
 `RouterRouteComputeDeath.DstOutsideMeshAborts`, `RouterDatapathDeath.BadVcIdAborts`.
-Failure: construction succeeds on `dat_num_vc` outside 1..8, a zero depth, or an
+Failure: construction succeeds on `dat_num_vc` outside 1..8, an illegal FIFO depth, or an
 out-of-mesh coordinate.
 
 The target RTL also rejects `NOC_DAT_VC_MODE=READ_WRITE_SPLIT` unless `DAT_NUM_VC` is
@@ -881,7 +880,7 @@ One Router (per network), 3-stage pipeline, 5 in / 5 out ports:
                                                                |    (seed 8, -- at
                                                                |     grant)
                                                                v
-                                            [output_fifo_[q], depth 2] --> link
+                                            [output_fifo_[q], depth 8] --> link
  credit pulse to upstream of p  <--- registered 1 cycle after the
  (per VC, max 1/cycle)               stage-2 dequeue from (p, vc)
 ```

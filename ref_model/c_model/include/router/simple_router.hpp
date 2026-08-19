@@ -187,6 +187,16 @@ class SimpleRouter {
                    "not a calibration point — RTL's own FIFO ready baseline is slack=1)");
             std::abort();
         }
+        if (cfg_.input_fifo_depth < 2 || !is_power_of_two(cfg_.input_fifo_depth)) {
+            assert(false &&
+                   "SimpleRouter: input_fifo_depth must be a power of two and at least 2");
+            std::abort();
+        }
+        if (cfg_.output_fifo_depth != 0 && !is_power_of_two(cfg_.output_fifo_depth)) {
+            assert(false &&
+                   "SimpleRouter: output_fifo_depth must be zero or a positive power of two");
+            std::abort();
+        }
         if (cfg_.input_fifo_depth < cfg_.ready_slack + 1) {
             assert(false && "SimpleRouter: input_fifo_depth must be >= ready_slack + 1");
             std::abort();

@@ -86,6 +86,12 @@ TEST(SimpleRouterConstructionDeath, BadParametersAbort) {
     bad_slack.input_fifo_depth = 2;
     bad_slack.ready_slack = 2;  // needs depth >= slack + 1 == 3
     EXPECT_DEATH(SimpleRouter r(bad_slack), "ready_slack");
+    SimpleRouterConfig non_power_of_two_input_depth = center_cfg();
+    non_power_of_two_input_depth.input_fifo_depth = 3;
+    EXPECT_DEATH(SimpleRouter r(non_power_of_two_input_depth), "power of two");
+    SimpleRouterConfig non_power_of_two_output_depth = center_cfg();
+    non_power_of_two_output_depth.output_fifo_depth = 3;
+    EXPECT_DEATH(SimpleRouter r(non_power_of_two_output_depth), "power of two");
     SimpleRouterConfig bad_coord = center_cfg();
     bad_coord.x = 99;
     EXPECT_DEATH(SimpleRouter r(bad_coord), "mesh");
@@ -213,7 +219,7 @@ TEST_P(SimpleRouterBackpressure, ReadyDeassertsAtAlmostFullNoOverflow) {
 INSTANTIATE_TEST_SUITE_P(DepthSlackGrid, SimpleRouterBackpressure,
                          ::testing::Values(std::make_tuple(2, 1), std::make_tuple(4, 1),
                                            std::make_tuple(8, 2), std::make_tuple(8, 4),
-                                           std::make_tuple(3, 2), std::make_tuple(5, 3)));
+                                           std::make_tuple(16, 2), std::make_tuple(16, 7)));
 
 // --- Route lock: floo_route_select.sv:200-220 -------------------------------
 

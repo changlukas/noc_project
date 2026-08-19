@@ -13,6 +13,9 @@ namespace ni::cmodel::router {
 
 enum class RouterPort : uint8_t { LOCAL = 0, NORTH = 1, EAST = 2, SOUTH = 3, WEST = 4 };
 inline constexpr std::size_t ROUTER_PORT_COUNT = 5;
+inline constexpr bool is_power_of_two(std::size_t value) {
+    return value != 0 && (value & (value - 1)) == 0;
+}
 
 struct RouterConfig {
     uint8_t x = 0;

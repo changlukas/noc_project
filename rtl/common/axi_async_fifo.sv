@@ -25,8 +25,8 @@ module axi_async_fifo #(
 
     localparam int unsigned CL_AXI_FIFO_DEPTH = $clog2(AXI_FIFO_DEPTH);
 
-    if (AXI_FIFO_DEPTH != 4 && AXI_FIFO_DEPTH != 8 && AXI_FIFO_DEPTH != 16) begin : gen_invalid_depth
-        initial $fatal(0, "Error: AXI_FIFO_DEPTH must be 4, 8, or 16 (instance %m)");
+    if (AXI_FIFO_DEPTH < 2 || (AXI_FIFO_DEPTH & (AXI_FIFO_DEPTH - 1)) != 0) begin : gen_invalid_depth
+        initial $fatal(0, "Error: AXI_FIFO_DEPTH must be a power of two and at least 2 (instance %m)");
     end
 
     cdc_fifo_gray #(
