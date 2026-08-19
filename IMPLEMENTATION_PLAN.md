@@ -30,13 +30,31 @@ updates the approved primitive dependency, and closes the focused generator/elab
 without adding NMU/NSU datapath state.
 Complete NMU and NSU leaf RTL and paired DV first, then integrate each NI top and pass its hybrid
 zero-hop loopback. Router work starts only after both NI loopback gates pass.
-Status: In Progress
+Status: Complete
 
 ### Issue #21: NMU SAM decode and timing cuts
 
 #### Stage 1: Contract and focused DV
 Goal: Bind the generated SAM contract to the NMU child boundary and encode independent AW/AR decode and slice behavior in a focused harness.
 Success Criteria: The harness checks authored-first route/class decode, unchanged AXI addresses, complete AW collective metadata, and independently stalled AW/AR streams for every legal slice mode.
+Status: Complete
+
+### Issue #22: N0 DV for NMU SAM decode and timing cuts
+
+#### Stage 1: Oracle and vector contract
+Goal: Cross-check every generated SAM vector against the approved C++ table oracle and retain authored-first priority evidence.
+Success Criteria: Generated memory, config, and peripheral vectors match the C++-checked SAM oracle in authored order; legal overlap and miss behavior are explicitly checked.
+Status: In Progress
+
+#### Stage 2: Leaf behavior coverage
+Goal: Exercise every generated entry boundary and all independent AW/AR timing-cut mode pairs under backpressure.
+Success Criteria: Addresses are preserved; route metadata matches the generated vectors; simultaneous AW/AR traffic remains independent; modes 0, 1, and 2 conserve stable payloads without avoidable full-skid bubbles.
+Investigation: Three queue-scoreboard attempts observed a testbench sampling-phase mismatch at 55 ns (`AR mode pair 0 changed transaction 2`). Alternatives considered were delaying the input sample, using a cycle-index offset, or separating deterministic vector checks from stream checks. The selected split keeps the existing backpressure checker and adds a mode-0 vector harness, avoiding a simulator-scheduling assumption.
+Status: Complete
+
+#### Stage 3: Fault-injection evidence and cleanup
+Goal: Demonstrate the focused checkers fail for invalid parameter, miss, footprint, and collective stimulus, then clean all artifacts.
+Success Criteria: Focused lint/behavior and oracle checks pass; expected-fail diagnostics are observed; `make clean` leaves no generated or build artifact; the issue change is committed from a clean worktree.
 Status: Complete
 
 #### Stage 2: Leaf implementation

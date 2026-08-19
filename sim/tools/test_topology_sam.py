@@ -9,6 +9,7 @@ import gen_tb_top
 
 
 ROOT = gen_tb_top.ROOT
+SAM_ORACLE = ROOT / "sim" / "configs" / "sam_rules.golden"
 
 
 def _package(name):
@@ -18,7 +19,7 @@ def _package(name):
 
 def _rule(pkg, generated_index):
     pattern = (
-        rf"{generated_index}: '\{{idx: '\{{dst_id: "
+        rf"^\s*{generated_index}: '\{{idx: '\{{dst_id: "
         rf"ni_flit_pkg::DST_ID_WIDTH'\((?P<dst_id>\d+)\), "
         rf"dst_port_id: ni_flit_pkg::DST_PORT_ID_WIDTH'\((?P<port>\d+)\), "
         rf"is_data: 1'b(?P<is_data>[01]), "
@@ -29,10 +30,55 @@ def _rule(pkg, generated_index):
         rf"len: SAM_MASK_SEL_WIDTH'\((?P<y_len>\d+)\)\}}\}}, "
         rf"start_addr: ADDR_WIDTH'\(64'h(?P<start>[0-9A-F]+)\), "
         rf"end_addr: ADDR_WIDTH'\(64'h(?P<end>[0-9A-F]+)\)\}}")
-    match = re.search(pattern, pkg)
+    match = re.search(pattern, pkg, re.MULTILINE)
     assert match, f"SAM[{generated_index}] not found"
     return {key: int(value, 16) if key in ("start", "end") else int(value)
             for key, value in match.groupdict().items()}
+
+
+def _cxx_oracle_rules(name):
+    """Return C++ SamTable vectors published by the checked-in parity oracle.
+
+    ref_model/c_model/tests/nmu/test_sam_config.cpp compares this file line by
+    line against `load_sam_table()`, so it is the approved C++ table oracle at
+    this Python/SV boundary.  Keep this parser deliberately independent of the
+    generator's expansion helpers.
+    """
+    result = []
+    for line in SAM_ORACLE.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        rule_name, space, base, size, dst_id, port = line.split()
+        if rule_name == name:
+            result.append({
+                "space": space,
+                "start": int(base, 0),
+                "end": int(base, 0) + int(size, 0),
+                "dst_id": int(dst_id, 0),
+                "port": int(port, 0),
+            })
+    assert result, f"C++ SAM oracle has no vectors for {name}"
+    return result
+
+
+@pytest.mark.parametrize("name", [
+    "mesh_2x2",
+    "mesh_2x2_periph",
+    "mesh_4x4",
+    "mesh_4x4_periph4",
+])
+def test_generated_sam_vectors_match_cxx_table_oracle(name):
+    pkg = _package(name)
+    oracle_rules = _cxx_oracle_rules(name)
+
+    assert f"localparam int unsigned SAM_NUM_RULES = {len(oracle_rules)};" in pkg
+    for authored_index, expected in enumerate(oracle_rules):
+        generated = _rule(pkg, len(oracle_rules) - 1 - authored_index)
+        assert generated["start"] == expected["start"]
+        assert generated["end"] == expected["end"]
+        assert generated["dst_id"] == expected["dst_id"]
+        assert generated["port"] == expected["port"]
+        assert generated["is_data"] == (expected["space"] != "config")
 
 
 @pytest.mark.parametrize(
