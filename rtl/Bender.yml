@@ -12,3 +12,4 @@ sources:
   - common/ni_sam.sv
   - common/stream_register.sv
   - nmu/nmu_sam.sv
+  - nmu/nmu.sv
