@@ -53,7 +53,7 @@ struct MetaEntry {
 // ni::AXI_ID_WIDTH the flit carries. Upstream keeps the input and output widths
 // apart as axi_cfg_t.InIdWidth and .OutIdWidth (floo_pkg.sv:182-184) and its '1
 // is OutIdWidth-wide; here the two are the same width, so all-ones of
-// AXI_ID_WIDTH is that value. AXI_INITIATOR_ID_WIDTH is a tile-side width
+// AXI_ID_WIDTH is that value. AXI_ID_WIDTH is a tile-side width
 // upstream of the endpoint's axi_id_remap and does not reach this port.
 //
 // The remap is a function of upstream_id ALONE, matching the ported source

@@ -127,13 +127,13 @@ Physically separate networks, not virtual channels on a shared link:
 
 | Physical link | Size | Narrow class | Data class |
 |---|---|---|---|
-| `REQ` | `133 + AXI_ID_WIDTH` b (default 136 b) | `Aw`, `Ar`: 48 b address. `W`: 64 b data | `Ar`: 48 b address |
-| `RSP` | `123 + AXI_ID_WIDTH` b (default 126 b) | `R`: 64 b data. `B`: 2 b response | `B`: 2 b response |
+| `REQ` | 136 b | `Aw`, `Ar`: 48 b address. `W`: 64 b data | `Ar`: 48 b address |
+| `RSP` | 126 b | `R`: 64 b data. `B`: 2 b response | `B`: 2 b response |
 | `DAT` | 633 b for `AXI_ID_WIDTH` 1..8 | - | `Aw`: 48 b address. `W`, `R`: 512 b data |
 
-Physical widths are elaboration-time derivatives of the packet layout, not independent tuning
-parameters. The 585-bit `DataW` payload is wider than `DataAw` and `DataR` throughout the legal
-ID range, so DAT remains 633 bits while REQ and RSP track `AXI_ID_WIDTH`.
+Physical widths are fixed by the packet layout. The NI remaps the external AXI ID to the fixed
+3-bit `NOC_ID_WIDTH` field before packetization, so changing `AXI_ID_WIDTH` does not change NoC
+link widths. The 585-bit `DataW` payload remains the largest payload, so DAT remains 633 bits.
 
 One `DAT` network, not a request and response pair, even though it carries request-direction
 `DataW` and response-direction `DataR`:
@@ -391,16 +391,16 @@ The table below is the NI-facing contract. Directions are from the NI's view.
 
 | Signal | Width | Direction | Description |
 |---|---:|---|---|
-| `TXREQFLIT` | `133 + AXI_ID_WIDTH` | Output | `REQ` transmit flit, header and payload |
+| `TXREQFLIT` | 136 | Output | `REQ` transmit flit, header and payload |
 | `TXREQVALID` | 1 | Output | `REQ` transmit valid |
 | `TXREQREADY` | 1 | Input | `REQ` transmit ready, from the receiver |
-| `RXREQFLIT` | `133 + AXI_ID_WIDTH` | Input | `REQ` receive flit |
+| `RXREQFLIT` | 136 | Input | `REQ` receive flit |
 | `RXREQVALID` | 1 | Input | `REQ` receive valid |
 | `RXREQREADY` | 1 | Output | `REQ` receive ready |
-| `TXRSPFLIT` | `123 + AXI_ID_WIDTH` | Output | `RSP` transmit flit, header and payload |
+| `TXRSPFLIT` | 126 | Output | `RSP` transmit flit, header and payload |
 | `TXRSPVALID` | 1 | Output | `RSP` transmit valid |
 | `TXRSPREADY` | 1 | Input | `RSP` transmit ready, from the receiver |
-| `RXRSPFLIT` | `123 + AXI_ID_WIDTH` | Input | `RSP` receive flit |
+| `RXRSPFLIT` | 126 | Input | `RSP` receive flit |
 | `RXRSPVALID` | 1 | Input | `RSP` receive valid |
 | `RXRSPREADY` | 1 | Output | `RSP` receive ready |
 | `TXDATFLIT` | 633 | Output | `DAT` transmit flit, flit type in `axi_ch`, see §6 |
@@ -452,7 +452,8 @@ at simulation startup, and the verification flow checks the generated and runtim
 |---|---|---|---|
 | Topology | Mesh X and Y dimension | 2, 4, 8, 16 (4) | X and Y are independent for unicast. v1 multicast/collective support requires X = Y. 256 nodes maximum, set by the 8-bit node ID |
 | AXI interface | Endpoint interfaces | 1 | One fixed 512-bit interface carries both classes; the SAM address space selects the internal NoC class |
-| AXI interface | `AXI_ID_WIDTH` | 1-8 (3) | NMU AXI ID and NoC-carried ID width; REQ/RSP flit widths derive from it at elaboration |
+| AXI interface | `AXI_ID_WIDTH` | 1-8 (3) | External AXI ID width; NI remaps it to fixed `NOC_ID_WIDTH` |
+| AXI interface | `NOC_ID_WIDTH` | 3 | Fixed NoC transaction ID width |
 | AXI interface | `NSU_AXI_ID_WIDTH` | 1-8 (`AXI_ID_WIDTH`, default 3) | ID width driven by the NSU downstream AXI interface |
 | AXI interface | `NSU_MAX_ACTIVE_IDS` | 1 to `2**NSU_AXI_ID_WIDTH` (8) | Live source-aware downstream-ID mappings per read/write direction; the default 3-bit interface permits up to 8 |
 | AXI interface | `NSU_MAX_OUTSTANDING` | power of two, 1-256 (32) | Response Queue transaction records per read/write direction; independent of active-ID capacity |

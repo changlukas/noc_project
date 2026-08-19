@@ -4,43 +4,25 @@
 schema_version: "1.0"
 
 axi:
-  ID_WIDTH:
+  AXI_ID_WIDTH:
     type: int
     units: bits
-    description: "AXI transaction ID width at the NI interface and in the flit"
+    description: "External AXI transaction ID width at the NI interface"
     default: 3
     min: 1
     max: 8
-    # This is the OUTPUT width of the axi_id_remap in the tile endpoint
-    # (sim/tb/user_node_endpoint.sv, i_noc_id_remap), not a share of a wider
-    # tile id: the remap compresses the tile-side id space into this one, so
-    # INITIATOR_ID_WIDTH sits UPSTREAM of the converter and carries no budget
-    # relationship to this field. Nothing bounds this width from below: it is
-    # what SETS how many distinct AXI ids the NI can hold in flight at once,
-    # and the things downstream take their bound FROM it. Both
-    # nsu.META_BUFFER_MAX_UNIQUE_IDS and the endpoint remap's
-    # AxiSlvPortMaxUniqIds cap at 2^ID_WIDTH.
-    # NOTE: the production contract intentionally caps this at 8. The current
-    # c_model remains a fixed 3-bit instance; every non-default production
-    # instance must regenerate the REQ/RSP packet widths coherently.
+    # The NI remaps this external width to the fixed NOC_ID_WIDTH carried in
+    # NoC metadata. The remap backpressures when all live NoC IDs are in use.
     sv_symbol: AXI_ID_WIDTH_DFLT
     cpp_symbol: AXI_ID_WIDTH
-  INITIATOR_ID_WIDTH:
+  NOC_ID_WIDTH:
     type: int
     units: bits
-    description: "AXI transaction ID width one tile initiator may drive"
-    default: 4
-    min: 1
-    max: 32
-    # AXI4 IHI 0022 §A5.3.6 recommends up to 4 bits at a master component and up
-    # to 4 more for the interconnect's master-port number. Same split as pulp
-    # axi_xbar (AxiIdWidthSlvPorts + $clog2(NoSlvPorts), doc/axi_xbar.md) and as
-    # FlooNoC's per-manager id_width (3..5 across floogen/examples).
-    # This width is upstream of the tile's axi_id_remap, so it is not bounded by
-    # ID_WIDTH. What it sets is the crossbar master-port width,
-    # INITIATOR_ID_WIDTH + $clog2(NoSlvPorts), which is the remap's INPUT width.
-    sv_symbol: AXI_INITIATOR_ID_WIDTH_DFLT
-    cpp_symbol: AXI_INITIATOR_ID_WIDTH
+    description: "Fixed NoC transaction ID width after the NI AXI-ID remap"
+    default: 3
+    allowed: [3]
+    sv_symbol: NOC_ID_WIDTH_DFLT
+    cpp_symbol: NOC_ID_WIDTH
   ADDR_WIDTH:
     type: int
     units: bits

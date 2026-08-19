@@ -30,7 +30,7 @@ Two naming and behavior gates must be resolved before their dependent RTL packag
 The target downstream-ID contract is approved. `NSU_AXI_ID_WIDTH` defaults to `AXI_ID_WIDTH = 3`
 and is legal from 1 to 8. `NSU_MAX_ACTIVE_IDS` defaults to 8 and is legal from 1 through
 `2**NSU_AXI_ID_WIDTH`; therefore the default 3-bit interface supports 1 through 8 live mappings.
-The external initiator may use the independently wider `INITIATOR_ID_WIDTH`; the endpoint remapper
+The external initiator may use the independently wider `AXI_ID_WIDTH`; the endpoint remapper
 compresses it to the NoC-carried `AXI_ID_WIDTH` before the request reaches the NI.
 `NSU_MAX_OUTSTANDING` defaults to 32 and is a power of two from 1 through 256; it independently
 sizes the read and write Response Queues and is not an alias for the live-mapping count.

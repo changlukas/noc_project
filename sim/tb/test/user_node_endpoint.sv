@@ -98,7 +98,7 @@ module user_node_endpoint #(
     // and i_noc_id_remap below converts between them -- the tile's is the WIDER
     // of the two.
     localparam int unsigned XBAR_SLV_PORTS = 2;
-    localparam int unsigned XBAR_SLV_ID_W  = ni_params_pkg::AXI_INITIATOR_ID_WIDTH_DFLT;
+    localparam int unsigned XBAR_SLV_ID_W  = ni_params_pkg::AXI_ID_WIDTH_DFLT;
     localparam int unsigned XBAR_MST_ID_W  = XBAR_SLV_ID_W + $clog2(XBAR_SLV_PORTS);
 
     // ------------------------------------------------------------------
@@ -410,7 +410,7 @@ module user_node_endpoint #(
     end
 
     // Both initiators are held to their share of the field: the stimulus
-    // generator caps its ids at 2**INITIATOR_ID_WIDTH (gen_test_patterns.py
+    // generator caps its ids at 2**AXI_ID_WIDTH (gen_test_patterns.py
     // axi_widths) and the NSU's collapsed downstream id is all-ones of ID_WIDTH
     // (nsu::remap_downstream_id). Nothing asserts that here, and nothing needs
     // to: the master face is XBAR_SLV_ID_W wide, which is exactly the cap, and

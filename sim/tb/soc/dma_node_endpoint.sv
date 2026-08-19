@@ -77,7 +77,7 @@ module dma_node_endpoint #(
     // appends to route responses back. The DMA drives the slave-port width,
     // which is what idma_types_pkg::AXI_ID_WIDTH is.
     localparam int unsigned XBAR_SLV_PORTS = 2;
-    localparam int unsigned XBAR_SLV_ID_W  = ni_params_pkg::AXI_INITIATOR_ID_WIDTH_DFLT;
+    localparam int unsigned XBAR_SLV_ID_W  = ni_params_pkg::AXI_ID_WIDTH_DFLT;
     localparam int unsigned XBAR_MST_ID_W  = XBAR_SLV_ID_W + $clog2(XBAR_SLV_PORTS);
 
     // ------------------------------------------------------------------

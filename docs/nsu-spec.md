@@ -39,9 +39,9 @@ One 48-bit header layout, three flit widths, one per network (`specgen/generated
 | RSP | 126 | [125:48], 78 b | out: `NarrowB`, `DataB`, `NarrowR` |
 | DAT | 633 | [632:48], 585 b | in: `DataAw`, `DataW`; out: `DataR` |
 
-This table is the current `AXI_ID_WIDTH = 3` model layout. Target RTL derives REQ as
-`133 + AXI_ID_WIDTH` bits and RSP as `123 + AXI_ID_WIDTH` bits. DAT remains 633 bits for the legal
-ID range 1..8 because its 585-bit `DataW` payload remains the maximum.
+This table is the current `AXI_ID_WIDTH = 3` model layout. The NI remaps external AXI IDs to the
+fixed 3-bit `NOC_ID_WIDTH` field before packetization, so REQ, RSP and DAT remain 136, 126 and
+633 bits for every legal external ID width. The 585-bit `DataW` payload remains the maximum.
 
 Header, flit bits [47:0], identical on all three:
 
@@ -321,8 +321,8 @@ at simulation startup. Synthesizable RTL receives the same fields from generated
 | `NOC_ROUTER_VC_DEPTH` | 8 | power of two, >= 2 | Router LOCAL input VC FIFO depth and NSU DAT response sender-credit seed |
 | `AXI_FIFO_DEPTH` | 8 | power of two, >= 2 | common AW/W/AR/B/R dual-clock FIFO depth |
 | `NOC_FIFO_DEPTH` | 8 | positive power of two | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
-| `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 136 / 126 / 633 | target `133 + AXI_ID_WIDTH` / `123 + AXI_ID_WIDTH` / 633 | per-network flit containers and DPI marshalling |
-| `AXI_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 48 / 512 | target ID 1..8, current model locked at 3 / 1..64 / {32,64,128,256,512,1024} | NoC-carried ID, beat structs and DPI |
+| `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 136 / 126 / 633 | fixed | per-network flit containers and DPI marshalling |
+| `AXI_ID_WIDTH` / `NOC_ID_WIDTH` | 3 / 3 | AXI ID 1..8 / fixed NoC ID 3 | external AXI ID and mapped NoC ID |
 | create-time `src_id` | 0 | 8 bit | stamped into every response flit `src_id` |
 
 The request ingress stage is a 1-entry register per channel plus the single pending slot. It has no configurable depth.

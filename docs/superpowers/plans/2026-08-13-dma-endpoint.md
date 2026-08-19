@@ -230,7 +230,7 @@ Widths, and where each comes from:
 |---|---|---|
 | `DataWidth` | 512 | `ni_params_pkg::AXI_DATA_WIDTH_DFLT` |
 | `AddrWidth` | 48 | the spec's AXI address width |
-| `AxiIdWidth` | 4 | `ni_params_pkg::AXI_INITIATOR_ID_WIDTH_DFLT`, the tile crossbar's slave port |
+| `AxiIdWidth` | 4 | `ni_params_pkg::AXI_ID_WIDTH_DFLT`, the tile crossbar's slave port |
 | `UserWidth` | 58 | the spec's `AWUSER` width |
 | `TFLenWidth` | 20 | covers a whole `0x100000` tile window; the bound is 12 to `AddrWidth` |
 
