@@ -227,6 +227,13 @@ mapping live while transactions of that key remain outstanding. The tables live 
 request allocation occurs before AW/AR enter their AXI async FIFOs, and response retirement occurs
 after B/R leave those FIFOs. The FIFOs carry the mapped AXI ID; live mapping state never crosses.
 
+`NSU_AXI_ID_WIDTH` defaults to the 3-bit NoC-carried `AXI_ID_WIDTH` and is legal from 1 to 8.
+`NSU_MAX_ACTIVE_IDS` defaults to 8 and is legal from 1 through `2**NSU_AXI_ID_WIDTH`; it counts
+live mappings, not ID bits. A wider external `INITIATOR_ID_WIDTH` is compressed by the endpoint
+remapper before entering the NI. This follows the surveyed separation between input ID width,
+output ID width, and maximum unique IDs while retaining all eight default NoC IDs without
+serialization.
+
 The target block is named **Response Queue** (`nsu_response_queue` in RTL), and one stored record
 is a `response_entry_t`. `ResponseHeader` is not used for this state because an entry also contains
 ID, ordering, class, collective and narrow-read context; `response_header_t` remains reserved for

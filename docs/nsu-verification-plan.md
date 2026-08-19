@@ -27,11 +27,11 @@ Two naming and behavior gates must be resolved before their dependent RTL packag
   current-model acceptance section of `docs/nsu-spec.md` describes `MetaBuffer`, not target RTL.
   S0 differential comparison is gated on the selective model alignment in Section 9.
 
-`NSU_AXI_ID_WIDTH` and `NSU_MAX_ACTIVE_IDS` appear in the approved mapping rationale, but their
-defaults and legal ranges are not yet in the canonical parameter table. Those values are `[TBD]`.
-This plan does not approve them. Their elaboration guards and boundary-value tests become mandatory
-after the parameter contract is approved. The already approved parameter tests in Section 6 are
-not blocked by this gate.
+The target downstream-ID contract is approved. `NSU_AXI_ID_WIDTH` defaults to `AXI_ID_WIDTH = 3`
+and is legal from 1 to 8. `NSU_MAX_ACTIVE_IDS` defaults to 8 and is legal from 1 through
+`2**NSU_AXI_ID_WIDTH`; therefore the default 3-bit interface supports 1 through 8 live mappings.
+The external initiator may use the independently wider `INITIATOR_ID_WIDTH`; the endpoint remapper
+compresses it to the NoC-carried `AXI_ID_WIDTH` before the request reaches the NI.
 
 ## 2. Verification levels
 
@@ -179,6 +179,8 @@ A timeout or unrelated compile error is not a passing guard test.
 | Parameter/contract | Positive matrix | Negative matrix |
 |---|---|---|
 | `AXI_ID_WIDTH` | 1, default, 8; generated REQ/RSP widths agree at every port | 0 and 9; any generated-width mismatch |
+| `NSU_AXI_ID_WIDTH` | 1, default, 8 | 0 and 9 |
+| `NSU_MAX_ACTIVE_IDS` | 1, default; `2**NSU_AXI_ID_WIDTH` at widths 1, default, and 8 | 0 and `2**NSU_AXI_ID_WIDTH + 1` |
 | `NOC_DAT_NUM_VC` | 1, default, 8 in `SHARED`; 2, 4, 6, 8 in `READ_WRITE_SPLIT` | 0, 9; split with 1 or any odd count; out-of-range credit-vector width |
 | `NOC_DAT_VC_MODE` | both approved encodings | any other encoding |
 | `AXI_FIFO_DEPTH` | 2, default, 32 | 0 and a positive non-power-of-two value |

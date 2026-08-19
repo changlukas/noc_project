@@ -38,6 +38,8 @@ constexpr int NMU_DEPKT_Q_DEPTH      = 16;
 constexpr int NMU_ARBITER_FIFO_DEPTH = 4;
 
 // NSU depth defaults
+constexpr int NSU_AXI_ID_WIDTH                = 3;
+constexpr int NSU_MAX_ACTIVE_IDS              = 8;
 constexpr int NSU_QUEUE_DEPTH                 = 16;
 constexpr int NSU_META_BUFFER_MAX_OUTSTANDING = 32;
 constexpr int NSU_META_BUFFER_MAX_UNIQUE_IDS  = 1;

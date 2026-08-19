@@ -275,6 +275,24 @@ nmu:
     cpp_symbol: NMU_ARBITER_FIFO_DEPTH
 
 nsu:
+  AXI_ID_WIDTH:
+    type: int
+    units: bits
+    description: "AXI transaction ID width driven by the NSU downstream interface."
+    default: 3
+    min: 1
+    max: 8
+    sv_symbol: NSU_AXI_ID_WIDTH_DFLT
+    cpp_symbol: NSU_AXI_ID_WIDTH
+  MAX_ACTIVE_IDS:
+    type: int
+    units: count
+    description: "Maximum live downstream-ID mappings per NSU direction; must not exceed 2^NSU_AXI_ID_WIDTH."
+    default: 8
+    min: 1
+    max: 256
+    sv_symbol: NSU_MAX_ACTIVE_IDS_DFLT
+    cpp_symbol: NSU_MAX_ACTIVE_IDS
   QUEUE_DEPTH:
     type: int
     units: beats

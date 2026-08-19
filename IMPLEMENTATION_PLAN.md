@@ -18,7 +18,8 @@ Status: Complete
 ## Stage 3: Block RTL
 Goal: Implement and verify Router, NMU, and NSU through independently reviewable work packages.
 Success Criteria: Every DE package has its paired DV evidence; focused tests pass from a clean tree; RTL NMU passes zero-hop co-sim with the reference NSU; RTL NSU passes zero-hop co-sim with the reference NMU; any model/target DAT flow-control mismatch is isolated in a verification-only adapter with no packet transformation; RTL Router passes its reference-driven differential harness within the documented conformance scope; Router, NMU, and NSU elaborate through the wrapper-facing RTL contract; reference reuse is classified and license-compliant.
-Status: Not Started
+Progress: Complete NMU and NSU leaf RTL and paired DV first, then integrate each NI top and pass its hybrid zero-hop loopback. Router work starts only after both NI loopback gates pass.
+Status: In Progress
 
 ## Stage 4: 2x2 Integration
 Goal: Close the first end-to-end RTL write/readback path on a 2x2 mesh.

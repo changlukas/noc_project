@@ -309,6 +309,8 @@ at simulation startup. Synthesizable RTL receives the same fields from generated
 
 | Parameter | Default | Legal range | Consumed at |
 |---|---|---|---|
+| `NSU_AXI_ID_WIDTH` [target RTL] | `AXI_ID_WIDTH` (3) | 1 to 8 | downstream AXI AWID/ARID/BID/RID width |
+| `NSU_MAX_ACTIVE_IDS` [target RTL] | 8 | 1 to `2**NSU_AXI_ID_WIDTH` | live source-aware downstream-ID mappings, independently per read/write direction |
 | `NSU_QUEUE_DEPTH` [current model] | 16 | 1 to 1024 | single-clock AW/W/AR/B/R queue depth in `AxiMasterPort` |
 | `NSU_META_BUFFER_MAX_OUTSTANDING` | 32 | 1 to 256 | MetaBuffer shared pool, per direction |
 | `NSU_META_BUFFER_MAX_UNIQUE_IDS` | 1 | {1, 8} only, constructor throws otherwise | id remap in Depacketize |
