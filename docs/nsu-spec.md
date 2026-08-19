@@ -15,9 +15,23 @@ The NSU is the slave-side network interface of the NoC. It terminates the reques
 **COMPUTE** depacketize each flit into exactly one AXI beat, remap the AXI id, remember per-request metadata, drive the beats out of an AXI4 master face in arrival order. When the tile slave answers, packetize each B/R beat into exactly one response flit, restoring the original id and the requester's node id from the remembered metadata, then arbitrate the flit onto a virtual channel.
 **OUTPUT** response flits to the router LOCAL input port on two faces, RSP (every B, plus narrow-class R) and DAT (data-class R). The current model exposes per-VC credit pulses in both DAT directions. Target RTL keeps per-VC credit only for DAT response injection into the Router and uses ready/valid for DAT request ejection from the Router.
 
-The NSU contains no reorder buffer and does not perform destination routing. Requests are issued toward the slave in NoC arrival order per channel, regardless of AXI id. Reordering same-id responses back into request order is the job of the master-side NI, which the NSU supports only by echoing the `ordering_req` / `ordering_tag` header fields verbatim into every response flit. For multicast AW address replacement only, the target NSU performs a combinational lookup in the same generated SAM table to recover that matched range's coordinate-field layout; this lookup does not change destination or AXI class.
+The NSU contains no reorder buffer and does not perform destination routing. Requests are issued
+toward the slave in NoC arrival order per channel, regardless of AXI id. Reordering same-id
+responses back into request order is the job of the master-side NI, which the NSU supports only by
+echoing the `ordering_req` / `ordering_tag` header fields verbatim into every response flit. For
+multicast AW address replacement only, `nsu_depacketize` enables one instance of the shared
+pure-combinational `ni_sam` wrapper. It reads the same generated constant `SAM` as NMU and consumes
+the matched range's `collective_en`, `mask_x`, and `mask_y`; it does not consume the result to
+reroute the packet or reclassify its NoC channel. Unicast AW, W, AR, and response traffic never
+enable this lookup.
 
-The AW/AR payload carries a global address. For unicast, its node-coordinate field already names this NSU and the address passes unchanged. For a multicast AW, the NSU selects the coordinate field associated with the request's AXI class and overwrites only that field with its own coordinate before issuing the AXI request; all other bits, including the node-local offset, remain unchanged. Config and Memory may use different coordinate fields. The NSU never subtracts a SAM region base. An endpoint without a declared coordinate field, including a peripheral endpoint, leaves the address unchanged.
+The AW/AR payload carries a global address. For unicast, its node-coordinate field already names
+this NSU and the address passes unchanged. For a multicast AW, the matched SAM entry selects the
+coordinate layout, and the NSU overwrites only that field with its own coordinate before issuing
+the AXI request; all other bits, including the node-local offset, remain unchanged. Config and
+Memory may use different coordinate fields. The NSU never subtracts a SAM region base. A multicast
+AW miss, or a hit on a rule whose `collective_en` is zero, is a malformed incoming packet; there is
+no default layout.
 
 Depacketization is a one-flit-one-beat mapping. There is no burst splitting, merging, or reassembly anywhere in the NSU:
 
@@ -303,9 +317,13 @@ remains credit-controlled.
 Single-sourced in `specgen/source/constants.yaml`, generated into `ni_params.h` / `ni_params_pkg.sv`, drift-gated at build by `codegen.py --check`.
 
 Address-map metadata follows the project configuration flow rather than the scalar parameters
-below. The C++ reference model derives each tile endpoint's coordinate fields from the YAML config
-at simulation startup. Synthesizable RTL receives the same fields from generated
-`topology_pkg.sv` at elaboration; it does not parse YAML and has no runtime configuration port.
+below. The selected `sim/configs/<CONFIG>.yml` `endpoints:` block is the sole SAM source. The C++
+reference model derives each tile endpoint's coordinate fields from it at simulation startup.
+Synthesizable RTL receives `SAM_NUM_RULES`, the SAM-related parameter types, and constant `SAM`
+from build-only `$(BUILD_ROOT)/generated/<CONFIG>/topology_pkg.sv` at elaboration; it does not parse
+YAML and has no runtime configuration port. `nsu_depacketize` passes these parameters unchanged to
+the shared `ni_sam`, which wraps the pinned `common_cells` `addr_decode` rather than implementing a
+second decoder. The complete generated type and array contract is in `rtl/README.md`.
 
 | Parameter | Default | Legal range | Consumed at |
 |---|---|---|---|
@@ -341,7 +359,11 @@ The request ingress stage is a 1-entry register per channel plus the single pend
 10. **Context-gated ready pre-assert.** `bready` = (`outstanding_w_` > 0) and B FIFO has space. `rready` = (`expected_r_beats_` > 0) and R FIFO has space. Both are asserted without waiting for valid. `outstanding_w_` (uint32) increments when a `wlast` beat completes its W handshake and decrements at each B wire handshake. `expected_r_beats_` (uint32) increments by `arlen` + 1 at each AR handshake and decrements at each R beat wire handshake. Example: after one AR with `arlen` = 8'd3 handshakes, `expected_r_beats_` = 4 and `rready` stays high until 4 R beats have been accepted (given FIFO space). A B/R beat is accepted into the model only on a true wire handshake, valid together with the ready level the NSU drove in that cycle.
 11. **Request credit (current model only).** On the DAT face, one `rx_dat_crdvalid_o` pulse is returned for each flit the depacketizer ingress consumes, on the consumed flit's header `vc_id`, at most 1 per VC per cycle. Uncontended, the pulse for a flit sampled at posedge T is on the wire during the next cycle. A stalled ingress returns no pulses, which is the current-model request-side backpressure mechanism. Target RTL supersedes this rule with `rx_dat_ready_o` as described in Section 3.1.
 12. **Response flow control.** On the DAT face the NSU holds one sender credit counter per VC, seeded to `NOC_ROUTER_VC_DEPTH` = 8 at time 0. Sending a flit on VC v decrements counter v, a `tx_dat_crdvalid_i` pulse on bit v increments it. A flit is sent only while its counter is nonzero. Invariant: counter + flits in flight toward the router on that VC = 8 at all times. RSP has no counter: its model-facing wrapper accepts a C++ strobe only with spill capacity, then holds it until `tx_rsp_valid_o && tx_rsp_ready_i`.
-13. **Address handling.** The NSU never subtracts a SAM region base. A unicast AW/AR address passes unchanged. For a multicast AW at a tile endpoint, the AXI class selects the corresponding Config or Memory coordinate field and only that field is replaced with this NSU's coordinate. The two fields may occupy different address bits. An endpoint without a declared coordinate field leaves every address unchanged.
+13. **Address handling.** The NSU never subtracts a SAM region base. A unicast AW/AR address passes
+unchanged and does not enable SAM lookup. Only a multicast AW enables `ni_sam`; on a valid,
+collective-enabled hit, only the returned X/Y coordinate fields are replaced with this NSU's
+coordinate. The two fields may occupy different address bits. Miss or
+`collective_en == 0` is malformed input and never selects a default layout.
 
 ### 3.6 Input guarantees
 
@@ -359,6 +381,7 @@ The implementer does not handle any of the following, they are guaranteed not to
 | G8 | For NSU-to-Router DAT responses, downstream credit is truthful: a VC reported as having credit accepts the push. The model asserts and aborts otherwise. |
 | G9 | Reset is given once, before traffic. No mid-run reset. |
 | G10 | Since W flits carry no id, the fabric wormhole serialization guarantees every W flit follows its AW flit on the same stream. |
+| G11 | Every multicast AW address hits a generated SAM rule with `collective_en == 1`; the source NMU performed the same-table validation before packetization. |
 
 ## 4. Specifications
 
@@ -382,7 +405,14 @@ Each item names its verification and failure condition. ctest paths are under `r
 16. Reset behavior per rule 6: every output 0 in the first cycle after `rst_ni` deasserts, no X. Verify: co-sim waveform at simulation start. Fail: any nonzero or unknown output before the first request completes the pipeline.
 17. Uncontended latency exactly 2 cycles (request, flit to AXI valid), exactly 5 cycles (RSP response handshake to model-facing egress valid), and exactly 4 cycles for credit-controlled DAT response per rule 8. The RSP count includes the verification-only spill register after the existing DPI output register; production RTL does not include this adapter. Verify: co-sim waveform inspection of an isolated transaction. Fail: valid earlier or later than the specified edge in the uncontended case.
 18. All parameters of 3.4 are consumed from the generated headers, never redefined locally. Verify: `codegen.py --check` build gate. Fail: drift gate error at build.
-19. Address handling follows rule 13. Verify: `nsu/test_nsu_depacketize.cpp` `RebasesAReplicaAddressOntoThisNode`, `RebaseIsTheIdentityForAUnicastAlreadyNamingThisNode`, and `UndeclaredCoordsLeaveTheAddressAlone`. Fail: a unicast or peripheral address changes, a multicast replica keeps another node's coordinate, or any non-coordinate bit changes.
+19. Target address handling follows rule 13. Verify through S0-SAM-01 through S0-SAM-06 in
+`docs/nsu-verification-plan.md`: unicast bypasses lookup, a collective-enabled multicast hit
+replaces only returned coordinate bits, and a miss or non-collective hit is rejected without a
+default. Current-model tests `RebasesAReplicaAddressOntoThisNode` and
+`RebaseIsTheIdentityForAUnicastAlreadyNamingThisNode` cover the aligned subset;
+`UndeclaredCoordsLeaveTheAddressAlone` records the pre-contract model behavior and is not target
+evidence. Fail: a unicast address changes, a multicast replica keeps another node's coordinate,
+any non-coordinate bit changes, or malformed multicast reaches AXI.
 20. NoC-to-AXI write assignment follows the target integration overlay: Narrow and Data AW compete by work-conserving round robin, every accepted AW appends its class and burst length to the W-order FIFO, and W cannot bypass the FIFO head class through WLAST. The current C++ structure implements this policy; direct simultaneous-class round-robin and blocked-head W coverage is `[TBD]`. Fail: one ready class idles while the other is absent, one class starves while both remain ready, or a W beat is associated with a later AW.
 
 ## 5. Block Diagram

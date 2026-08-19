@@ -50,6 +50,7 @@ latency is not compared unless a later approved specification adds a target-RTL 
 
 | Required behavior | Planned evidence |
 |---|---|
+| shared generated SAM and multicast-AW-only coordinate lookup | S0-SAM-01 through S0-SAM-06, NSU-A11 |
 | AW/W/AR reconstruction and Narrow/Data request scheduling | S0-REQ-01 through S0-REQ-09 |
 | Response Queue lifetime and legal downstream-ID mapping | S0-RQ-01 through S0-RQ-11, NSU-A04 through NSU-A06 |
 | independent AXI channels | S0-REQ-07, S1-AXI-01/02, S1-CDC-02 |
@@ -85,11 +86,22 @@ but reaching the watchdog or simply running for a fixed cycle count cannot produ
 
 ## 4. S0 request and Response Queue tests
 
-### 4.1 Request reconstruction and scheduling
+### 4.1 Shared SAM and multicast address layout
 
 | ID | Stimulus and pressure | Required observation |
 |---|---|---|
-| S0-REQ-01 | one Narrow AW/W burst on REQ; vary legal address, ID, burst fields, strobes, WLAST, ordering, source/port, and collective context | AXI AW and every W beat are bit-accurate; unicast address is unchanged, while multicast replaces only the class-selected coordinate field and never subtracts a region base; the Response Queue write entry contains the complete context |
+| S0-SAM-01 | unicast AW, W, AR, and idle cycles with arbitrary address-bus values | `ni_sam.lookup_en_i` is zero; result/valid/error are zero; no inactive traffic can alter an address or create an error |
+| S0-SAM-02 | multicast AW hits collective-enabled memory and config ranges while AXI AW is independently stalled | lookup enables only for that AW; `nsu_depacketize` uses the matched X/Y `{offset,len}` fields, changes only coordinate bits, and holds the complete translated AW stable while stalled |
+| S0-SAM-03 | multicast AW misses, then hits a rule with explicit `en_collective: false`, then one with the key absent | each packet is rejected as malformed with no default layout; false/absent package entries have `collective_en=0` and both selector lengths zero |
+| S0-SAM-04 | checker-owned broad authored rule 0 overlaps narrower rule 1 at the multicast address | the shared wrapper selects authored rule 0, proving the emitted reverse array preserves first-match behavior with the pinned highest-index priority |
+| S0-SAM-05 | generate and elaborate the checked-in 2x2 and 4x4 configurations with the same `ni_sam` unit used by NMU | exact declarations, rule counts, indices, ranges, destination/port/class, collective flags, and X/Y selectors match N0-SAM-11 through N0-SAM-13 in `docs/nmu-verification-plan.md`; both generations are byte-identical and no golden RTL is committed |
+| S0-SAM-06 | exercise zero/negative, non-4-KiB-aligned, overflowing, inverted, invalid membership/port/class, incomplete coverage, and unrepresentable collective-enabled ranges, then run `make clean-generated` | every invalid case fails generation, legal overlap succeeds, and `$(BUILD_ROOT)/generated/` contains no generated package after cleanup |
+
+### 4.2 Request reconstruction and scheduling
+
+| ID | Stimulus and pressure | Required observation |
+|---|---|---|
+| S0-REQ-01 | one Narrow AW/W burst on REQ; vary legal address, ID, burst fields, strobes, WLAST, ordering, source/port, and collective context | AXI AW and every W beat are bit-accurate; unicast address is unchanged, while multicast replaces only the coordinate field returned by `ni_sam` and never subtracts a region base; the Response Queue write entry contains the complete context |
 | S0-REQ-02 | one Narrow AR on REQ, including unaligned narrow-lane cases | AXI AR is bit-accurate and its unicast address remains unchanged; the read entry retains address/burst context needed to select every returned narrow lane |
 | S0-REQ-03 | Data AW/W on DAT and Data AR on REQ | all three AXI channels reconstruct bit-accurately; class affects NoC response selection but not the downstream AXI ordering domain |
 | S0-REQ-04 | REQ and DAT present admissible AWs in the same cycle, then continuously replenish both; repeat after both have waited behind full write-admission state | the first simultaneous tie follows reset state; grants alternate on accepted simultaneous-class AWs; rejected/stalled attempts do not rotate priority; either class wins immediately when it is the only admissible class |
@@ -103,7 +115,7 @@ Tests S0-REQ-04 and S0-REQ-06 close the two direct coverage gaps in the current 
 The testbench must not infer fairness from a final transaction count; it observes grant order while
 both classes are continuously eligible.
 
-### 4.2 Response Queue and downstream-ID mapping
+### 4.3 Response Queue and downstream-ID mapping
 
 | ID | Stimulus and pressure | Required observation |
 |---|---|---|
@@ -189,6 +201,7 @@ A timeout or unrelated compile error is not a passing guard test.
 | `AXI_FIFO_DEPTH` | 2, default, 32 | 0 and a positive non-power-of-two value |
 | `NOC_FIFO_DEPTH` | 1, default, 32 | 0 and a positive non-power-of-two value |
 | `NOC_ROUTER_VC_DEPTH` | 2, default, 32 | 0, 1, and a positive non-power-of-two value |
+| generated SAM | deterministic 2x2/4x4 packages, legal overlap, explicit collective true/false/absent, canonical field-width derivation | empty/invalid range or membership, overflow, incomplete required coverage, unrepresentable requested collective layout, or a field/type width mismatch; overlap is not negative |
 
 The test records the instance path and expected diagnostic for each guard. This prevents an
 unrelated fatal in another generated block from satisfying the test.
@@ -212,6 +225,7 @@ requires it. Every checker must have a fault-injection or illegal-stimulus test 
 | NSU-A08 | response schedulers | at most one RSP and one DAT flit transfer per cycle; B/NarrowR arbitration is work-conserving and bounded-fair while both remain continuously eligible |
 | NSU-A09 | DAT assigner | selected VC is mode-eligible and equals the required DataR hash; `fixed_vc=1`; zero-credit send is impossible; an eligible head transfers whenever its required VC has credit and the output can accept; credit count stays within `[0, NOC_ROUTER_VC_DEPTH]` |
 | NSU-A10 | CDC/reset | no output valid escapes reset; no transfer occurs from stale pre-reset state; each local state element is controlled by its documented domain reset |
+| NSU-A11 | multicast SAM | lookup enable implies an accepted/present multicast AW; hit must be valid and collective-enabled before coordinate replacement; overlap resolves authored-first; miss has no default; unicast AW, W, and AR never enable lookup |
 
 In addition to temporal assertions, build/source-list review checks that production NSU source
 lists contain no verification adapter and that the NSU owns no per-VC pending FIFO. The latter is
@@ -223,6 +237,7 @@ Coverage is collected on accepted events. The S0/S1 regressions must close these
 inventing a percentage target:
 
 - physical ingress × `axi_ch` × Narrow/Data class × single/multi-beat;
+- SAM lookup enabled/disabled × hit/miss/overlap × collective true/false/absent × 2x2/4x4 selector layout;
 - AW arbitration state × eligible classes × selected class;
 - W head class × other-class availability × head stalled/accepted × WLAST;
 - mapping direction × identity/fallback/reuse/table-full × same/different source and port;

@@ -442,11 +442,13 @@ Response Queue.
 
 **Configuration options**
 
-The authored configuration is one YAML file. Before RTL elaboration, the project generator emits
-its topology, SAM entries and coordinate metadata into `topology_pkg.sv`; the NI and
-router consume those values as elaboration-time constants. Synthesizable RTL does not parse YAML
-and has no CSR path for changing the SAM at runtime. The C++ reference model loads the same YAML
-at simulation startup, and the verification flow checks the generated and runtime views for parity.
+The selected `sim/configs/<CONFIG>.yml` `endpoints:` block is the sole SAM source. Before RTL
+elaboration, the project generator emits its topology, typed SAM entries and coordinate metadata
+into `$(BUILD_ROOT)/generated/<CONFIG>/topology_pkg.sv`; the NI and router consume those values as
+elaboration-time constants. The package is a build artifact and is never committed. Synthesizable
+RTL does not parse YAML and has no CSR path for changing the SAM at runtime. The C++ reference
+model loads the same YAML at simulation startup, and the verification flow checks the generated
+and runtime views for parity.
 
 | Feature | Parameter | Values (default) | Comments |
 |---|---|---|---|
@@ -491,7 +493,8 @@ allocation, not an endpoint's: several endpoints may share one. A space that lea
 without one is rejected by both the RTL-package generator and the C++ model loader. A map may
 omit a space entirely.
 
-Four further conditions decide whether that space is also a collective target. Its regions must
+Explicit YAML authorship and four layout conditions decide whether a range is also a collective
+target. The range must have `en_collective: true`, and its space's regions must
 
 - be equal in size across all nodes
 - be a power of two in size
@@ -503,8 +506,11 @@ bits of X below `clog2(y_dim)` bits of Y, and a mask over that field names an al
 nodes at one shared node-local offset. `node_stride` is the power-of-two spacing between adjacent
 node regions within that space. It is uniform within one collective-capable space but may differ
 between spaces. Where a space is packed with its stride equal to its region size the two coincide.
-A space meeting all four conditions is a legal collective target. A space failing any of them is
-a legal unicast target and not a collective target.
+A range with explicit `en_collective: true` that meets all four conditions is a legal collective
+target. If the key is `false` or absent, the range is unicast-only and its generated X/Y selector
+lengths are zero even when the layout is otherwise inferable. A range that requests collective
+operation but fails a condition is rejected; a range that does not request it remains a legal
+unicast target.
 
 **Mesh dimensions are powers of two**, independently selected from 2, 4, 8 and 16, so the
 coordinate field is exactly as wide as the dimension and every index a mask names is a node. The
@@ -525,15 +531,28 @@ Two things follow for the conditions above.
   one measurement stands for every replica, so **every region in the space must be one size**. The
   uniform-aperture condition above is what holds it
 
-**Class.** The address space a request falls in selects the AXI class, config space narrow and
-memory space data. This is one compare per space, not per node, and it is independent of how the
-destination is reached.
+**Class.** The matched entry's authored address space selects the AXI class, config space narrow
+and memory space data. The generated rule records the resulting class with its destination and
+port; no second runtime space decoder exists.
 
-**Destination.** The NMU first-match range lookup returns the entry's `dst_id`, `dst_port_id` and
-AXI class. Each tile space derives its own coordinate ranges from its declared stride; those ranges
-support collective address-mask translation and may differ between spaces. A future offset decoder
-would require one fixed coordinate field across the whole map, but the current target does not
-implement that optimization.
+**Destination and priority.** The shared `ni_sam` wrapper around the pinned `common_cells`
+`addr_decode` returns the entry's `dst_id`, `dst_port_id`, class, collective enable, and X/Y
+coordinate selectors. NMU instantiates it for AW and AR; NSU enables its instance only for
+multicast AW coordinate-layout lookup. The generated `sam_idx_t` contains no unused base ID.
+Authored rule order is endpoint, range, then increasing X-fast endpoint-array member order.
+Overlap is legal and authored rule 0 has first-match priority. Because the pinned primitive grants
+the highest matching array index, generated rule `i` is stored at
+`SAM[SAM_NUM_RULES-1-i]`. A miss reports invalid/error and has no default mapping. Each tile space
+derives its own coordinate ranges from its declared stride; those ranges may differ between
+spaces. A future offset decoder would require one fixed coordinate field across the whole map, but
+the current target does not implement that optimization.
+
+The generated package freezes `SAM_NUM_RULES`, `SAM_MASK_SEL_WIDTH`, `sam_mask_sel_t`,
+`sam_idx_t`, `sam_rule_t`, and constant `SAM`. All packed widths derive from the canonical
+generated address, destination, port, class, X, and Y widths. Rule count, SAM-related
+`parameter type` values, and constant `SAM` pass through the RTL hierarchy as elaboration-time
+parameters. The full field shapes, generation errors, build path, cleanup behavior, and 2x2/4x4
+semantic vectors are normative in `rtl/README.md`.
 
 The AW and AR decoders are parallel combinational range comparators. Their independent
 elaboration-time `*_SAM_REG_TYPE` parameters select the boundary between decode and RoB admission:
