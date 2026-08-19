@@ -203,19 +203,16 @@ it independently drains REQ and DAT ingress, round-robins simultaneous AW classe
 and burst length in `w_order_`, and blocks W behind the FIFO head. Direct tests for simultaneous
 AW fairness and blocked-head W behavior are still missing.
 
-The NoC-carried AXI ID uses elaboration-time derived physical widths rather than an 8-bit reserved
-field. `AXI_ID_WIDTH` is legal from 1 to 8 and defaults to 3. With the fixed 48-bit header, the
-packet layout gives `REQ_FLIT_WIDTH = 133 + AXI_ID_WIDTH` and
-`RSP_FLIT_WIDTH = 123 + AXI_ID_WIDTH`. DAT stays 633 bits throughout this range because its
-585-bit `DataW` payload remains wider than `DataAw` and `DataR`. The generated field positions,
-flit containers, router ports and NoC class FIFOs all use the same elaborated widths; each AXI
-async FIFO derives its entry width from its own parameterized channel type.
+The NI remaps external AXI IDs to a fixed 3-bit `NOC_ID_WIDTH` before packetization. `AXI_ID_WIDTH`
+is legal from 1 to 8 and defaults to 3, while REQ/RSP/DAT remain fixed at 136/126/633 bits. DAT
+stays 633 bits because its 585-bit `DataW` payload remains wider than `DataAw` and `DataR`. The
+generated field positions, flit containers, router ports and NoC class FIFOs therefore have one
+stable NoC width; each AXI async FIFO still derives its entry width from its own AXI channel type.
 
-This avoids paying five unused ID wires on every default-width REQ and RSP link while allowing a
-customer build to carry wider IDs. The cost is that changing `AXI_ID_WIDTH` changes the REQ/RSP
-module interface and requires one coherent rebuild of the NI, routers, wrappers and verification
-model. That is acceptable because ID width is an elaboration parameter, not a runtime setting. The
-surveyed reference likewise composes flits from parameterized packed header and payload types
+This avoids widening every NoC link for a wider customer AXI ID and keeps the router/fabric
+interface stable. The cost is a live ID mapping table and backpressure when all eight 3-bit NoC
+IDs are occupied. The mapping is per direction and responses restore the original AXI ID. The
+surveyed reference likewise separates input ID width, output ID width and unique-ID capacity
 ([type definitions](https://github.com/pulp-platform/FlooNoC/blob/2fa02eb23c1babef9a8f714715ea7c78de98c364/hw/include/floo_noc/typedef.svh#L34-L81)).
 
 ## NSU downstream ID mapping
@@ -251,7 +248,7 @@ after B/R leave those FIFOs. The FIFOs carry the mapped AXI ID; live mapping sta
 
 `NSU_AXI_ID_WIDTH` defaults to the 3-bit NoC-carried `AXI_ID_WIDTH` and is legal from 1 to 8.
 `NSU_MAX_ACTIVE_IDS` defaults to 8 and is legal from 1 through `2**NSU_AXI_ID_WIDTH`; it counts
-live mappings, not ID bits. A wider external `INITIATOR_ID_WIDTH` is compressed by the endpoint
+live mappings, not ID bits. A wider external `AXI_ID_WIDTH` is compressed by the endpoint
 remapper before entering the NI. This follows the surveyed separation between input ID width,
 output ID width, and maximum unique IDs while retaining all eight default NoC IDs without
 serialization.

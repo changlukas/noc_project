@@ -13,7 +13,7 @@ package idma_types_pkg;
     localparam int unsigned DATA_WIDTH   = ni_params_pkg::AXI_DATA_WIDTH_DFLT;
     localparam int unsigned ADDR_WIDTH   = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;
     // The tile crossbar's slave port, which is what the DMA drives.
-    localparam int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_INITIATOR_ID_WIDTH_DFLT;
+    localparam int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_ID_WIDTH_DFLT;
     localparam int unsigned USER_WIDTH   = ni_params_pkg::AXI_AWUSER_WIDTH_DFLT;
     // Transfer length in bytes. Not a tile-size consequence -- tiles are 4 GiB
     // as of Stage 1 -- 20 bits is a deliberate cap on job length; jobs are 1 KiB

@@ -114,7 +114,7 @@ def axi_widths():
     Read directly (values only); the specgen validator owns schema checking."""
     axi = yaml.safe_load(_CONSTANTS_YAML.read_text(encoding="utf-8"))["axi"]
     return {
-        "id":   int(axi["INITIATOR_ID_WIDTH"]["default"]),
+        "id":   int(axi["AXI_ID_WIDTH"]["default"]),
         "addr": int(axi["ADDR_WIDTH"]["default"]),
         "data": int(axi["DATA_WIDTH"]["default"]),
     }

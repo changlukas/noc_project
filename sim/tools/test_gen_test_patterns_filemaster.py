@@ -12,9 +12,9 @@ import gen_test_patterns as g
 
 def test_axi_widths_follow_constants_ssot():
     w = g.axi_widths()
-    # id is INITIATOR_ID_WIDTH, not ID_WIDTH: stimulus ids are what ONE tile
+    # id is AXI_ID_WIDTH, not ID_WIDTH: stimulus ids are what ONE tile
     # initiator drives, and the tile crossbar appends the master-port index on
-    # top of them (constants.yaml axi.INITIATOR_ID_WIDTH).
+    # top of them (constants.yaml axi.AXI_ID_WIDTH).
     # addr=48 per docs/noc-target-spec.md §6 (pre-S2); data=512 is S2 T2d's
     # data-class flip (specgen/source/constants.yaml axi.DATA_WIDTH).
     assert w == {"id": 4, "addr": 48, "data": 512}
@@ -376,7 +376,7 @@ def test_ids_per_initiator_multi_repeats_and_varies_per_node(tmp_path):
 
 
 def test_ids_per_initiator_overlapping_blocks_fit_the_id_width(tmp_path):
-    """16 nodes x 4 ids overruns the 2**INITIATOR_ID_WIDTH space, so the blocks
+    """16 nodes x 4 ids overruns the 2**AXI_ID_WIDTH space, so the blocks
     overlap across tiles. That is legal -- responses route by the flit src_id,
     not the AXI id (nsu/meta_buffer.hpp:21) -- but every emitted id must still
     fit the width the endpoint's a_mst_id_fits assertion checks."""

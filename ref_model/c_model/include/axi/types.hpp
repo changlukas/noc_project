@@ -26,7 +26,7 @@ constexpr int NOC_DATA_WIDTH_BITS = DATA_BYTES * 8;
 // divergence is a runtime abort at flit.hpp's field-width assert, not a
 // compile error. Bind them here instead.
 static_assert(ni::AXI_ID_WIDTH == ni::width::AXI_ID_WIDTH,
-              "constants.yaml axi.ID_WIDTH and ni_packet.json flit.field_widths.AXI_ID_WIDTH "
+              "constants.yaml axi.AXI_ID_WIDTH and ni_packet.json flit.field_widths.AXI_ID_WIDTH "
               "must agree; regenerate both after changing either");
 
 // AXI ID space (1 << AXI_ID_WIDTH). Used to size per-id container arrays in
