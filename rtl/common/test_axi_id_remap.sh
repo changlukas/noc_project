@@ -28,13 +28,29 @@ case "$mode" in
         "$tmp_dir/obj/Vtb_axi_id_remap"
         ;;
     illegal)
-        verilator --binary --timing -Wno-TIMESCALEMOD --top-module tb_axi_id_remap_illegal \
-            "$root_dir/rtl/common/tests/tb_axi_id_remap_illegal.sv" \
-            -Mdir "$tmp_dir/obj"
-        if "$tmp_dir/obj/Vtb_axi_id_remap_illegal"; then
-            echo "illegal AXI ID-width test unexpectedly passed" >&2
-            exit 1
-        fi
+        expected_messages=(
+            "AXI_ID_WIDTH must be between 1 and 8"
+            "AXI_ID_WIDTH must be between 1 and 8"
+            "NOC_ID_WIDTH must be fixed at 3"
+            "NOC_ID_WIDTH must be fixed at 3"
+        )
+        for invalid_case in 0 1 2 3; do
+            obj_dir="$tmp_dir/obj_$invalid_case"
+            log="$tmp_dir/illegal_$invalid_case.log"
+            verilator --binary --timing -Wno-TIMESCALEMOD \
+                --top-module tb_axi_id_remap_illegal -GINVALID_CASE="$invalid_case" \
+                "$root_dir/rtl/common/tests/tb_axi_id_remap_illegal.sv" \
+                -Mdir "$obj_dir"
+            if "$obj_dir/Vtb_axi_id_remap_illegal" >"$log" 2>&1; then
+                echo "illegal ID-width case $invalid_case unexpectedly passed" >&2
+                exit 1
+            fi
+            if ! grep -Fq "${expected_messages[$invalid_case]}" "$log"; then
+                cat "$log" >&2
+                echo "illegal ID-width case $invalid_case failed for an unexpected reason" >&2
+                exit 1
+            fi
+        done
         ;;
     *)
         echo "usage: $0 {test|illegal}" >&2

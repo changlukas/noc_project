@@ -103,6 +103,13 @@ module user_node_endpoint #(
     localparam int unsigned NOC_MAX_UNIQ_IDS =
         1 << ((XBAR_MST_ID_W < NOC_ID_WIDTH) ? XBAR_MST_ID_W : NOC_ID_WIDTH);
 
+    initial begin : p_id_width_guard
+        if (AXI_ID_WIDTH < 1 || AXI_ID_WIDTH > 8)
+            $fatal(0, "Error: AXI_ID_WIDTH must be between 1 and 8 (instance %m)");
+        if (NOC_ID_WIDTH != 3)
+            $fatal(0, "Error: NOC_ID_WIDTH must be fixed at 3 (instance %m)");
+    end
+
     // ------------------------------------------------------------------
     // DV interfaces + flat-struct bridging (explicit wiring, both faces)
     // ------------------------------------------------------------------
@@ -281,7 +288,7 @@ module user_node_endpoint #(
     // m2 after the id remap: the NoC-facing face of the tile, at the NI's id
     // width. A tile initiator may drive 2**XBAR_SLV_ID_W ids and the crossbar
     // appends its index, so up to 2**XBAR_MST_ID_W distinct ids arrive here and
-    // fold into the NI's space, 2**ID_WIDTH of them concurrently -- which is
+    // fold into the NI's space, 2**NOC_ID_WIDTH of them concurrently -- which is
     // what AXI_SLV_PORT_MAX_UNIQ_IDS below sizes the remap's tables for, since
     // the master port cannot encode more than that at once. axi_id_remap stalls
     // an id that finds no free downstream id rather than erroring (its own

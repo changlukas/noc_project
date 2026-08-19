@@ -236,7 +236,7 @@ module noc_tb_top #(
     string sam_config_path = "";
 
     // NSU knobs. max_unique_ids=1 collapses every master onto one downstream
-    // AXI id (FlooNoC default); 2**AXI_ID_WIDTH passes the master's id through.
+    // NoC id (fixed 3-bit contract); 2**NOC_ID_WIDTH passes the master's id through.
     // max_outstanding is the shared MetaBuffer pool per direction.
     int unsigned max_unique_ids  = ni_params_pkg::NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT;
     int unsigned max_outstanding = ni_params_pkg::NSU_META_BUFFER_MAX_OUTSTANDING_DFLT;

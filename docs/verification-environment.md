@@ -277,8 +277,8 @@ Upstream references:
 - ID-space narrowing for a small-`NumIds` RoB: `axi_id_remap.sv`
   (pulp-platform axi v0.39.7), instantiated as `i_noc_id_remap` in
   `user_node_endpoint.sv`. Its input is the crossbar master-port id space,
-  `AXI_ID_WIDTH` + `$clog2(XBAR_SLV_PORTS)` = 5 b, not
-  `AXI_ID_WIDTH` itself, so it folds 32 tile ids onto the NI's fixed
+  `AXI_ID_WIDTH` + `$clog2(XBAR_SLV_PORTS)` = 4 b, not
+  `AXI_ID_WIDTH` itself, so it folds 16 tile ids onto the NI's fixed
   `NOC_ID_WIDTH` = 3, 8 ids.
 - Traffic patterns and injection process: BookSim2 `src/traffic.cpp`
   (`NeighborTrafficPattern`, `TransposeTrafficPattern`,

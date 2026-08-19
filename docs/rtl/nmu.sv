@@ -4,7 +4,7 @@
 
 module nmu #(
     parameter int unsigned AXI_ADDR_WIDTH = 48,   // §5 fixed
-    parameter int unsigned AXI_ID_WIDTH   = 3,    // §5 fixed
+    parameter int unsigned NOC_ID_WIDTH   = 3,    // §5, fixed after endpoint remap
     parameter int unsigned AXI_DATA_WIDTH = 512,  // 64 narrow class, 512 data class
     parameter int unsigned AWUSER_WIDTH   = 58,   // 50 b collective attributes, §6
     parameter int unsigned XUSER_WIDTH    = 8,    // ARUSER / WUSER / RUSER / BUSER
@@ -21,7 +21,7 @@ module nmu #(
     input  logic                        noc_rst_n,
 
     // ----- AXI slave port, §4.2: write address channel -----
-    input  logic [AXI_ID_WIDTH-1:0]     AWID,
+    input  logic [NOC_ID_WIDTH-1:0]     AWID,
     input  logic [AXI_ADDR_WIDTH-1:0]   AWADDR,
     input  logic [7:0]                  AWLEN,
     input  logic [2:0]                  AWSIZE,
@@ -44,14 +44,14 @@ module nmu #(
     output logic                        WREADY,
 
     // ----- write response channel -----
-    output logic [AXI_ID_WIDTH-1:0]     BID,
+    output logic [NOC_ID_WIDTH-1:0]     BID,
     output logic [1:0]                  BRESP,
     output logic [XUSER_WIDTH-1:0]      BUSER,
     output logic                        BVALID,
     input  logic                        BREADY,
 
     // ----- read address channel -----
-    input  logic [AXI_ID_WIDTH-1:0]     ARID,
+    input  logic [NOC_ID_WIDTH-1:0]     ARID,
     input  logic [AXI_ADDR_WIDTH-1:0]   ARADDR,
     input  logic [7:0]                  ARLEN,
     input  logic [2:0]                  ARSIZE,
@@ -66,7 +66,7 @@ module nmu #(
     output logic                        ARREADY,
 
     // ----- read data channel -----
-    output logic [AXI_ID_WIDTH-1:0]     RID,
+    output logic [NOC_ID_WIDTH-1:0]     RID,
     output logic [AXI_DATA_WIDTH-1:0]   RDATA,
     output logic [1:0]                  RRESP,
     output logic                        RLAST,

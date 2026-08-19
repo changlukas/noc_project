@@ -41,7 +41,7 @@ inline constexpr RobMode DEFAULT_ROB_MODE =
 //
 // Both modes: no aggregate outstanding-transaction pool. The per-id order list
 // is the admission bound, so in-flight requests cap at max_txns_per_id_ x
-// 2**AXI_ID_WIDTH = 32 x 8 = 256 writes, and at 1 x 8 = 8 reads in
+// 2**NOC_ID_WIDTH = 32 x 8 = 256 writes, and at 1 x 8 = 8 reads in
 // RobMode::Disabled where the per-id single-outstanding interlock applies.
 // write_txns_ / read_txns_ still count the in-flight transactions per direction,
 // but only as the unmatched-response guard (retire_b / retire_r) and as the

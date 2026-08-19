@@ -83,6 +83,13 @@ module dma_node_endpoint #(
     localparam int unsigned NOC_MAX_UNIQ_IDS =
         1 << ((XBAR_MST_ID_W < NOC_ID_WIDTH) ? XBAR_MST_ID_W : NOC_ID_WIDTH);
 
+    initial begin : p_id_width_guard
+        if (AXI_ID_WIDTH < 1 || AXI_ID_WIDTH > 8)
+            $fatal(0, "Error: AXI_ID_WIDTH must be between 1 and 8 (instance %m)");
+        if (NOC_ID_WIDTH != 3)
+            $fatal(0, "Error: NOC_ID_WIDTH must be fixed at 3 (instance %m)");
+    end
+
     // ------------------------------------------------------------------
     // iDMA backend + job driver
     // ------------------------------------------------------------------

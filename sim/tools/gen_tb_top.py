@@ -895,7 +895,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w('    string sam_config_path = "";')
     w("")
     w("    // NSU knobs. max_unique_ids=1 collapses every master onto one downstream")
-    w("    // AXI id (FlooNoC default); 2**AXI_ID_WIDTH passes the master's id through.")
+    w("    // NoC id (fixed 3-bit contract); 2**NOC_ID_WIDTH passes the master's id through.")
     w("    // max_outstanding is the shared MetaBuffer pool per direction.")
     w("    int unsigned max_unique_ids  = ni_params_pkg::NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT;")
     w("    int unsigned max_outstanding = ni_params_pkg::NSU_META_BUFFER_MAX_OUTSTANDING_DFLT;")

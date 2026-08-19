@@ -4,7 +4,7 @@
 
 module nsu #(
     parameter int unsigned AXI_ADDR_WIDTH = 48,   // §5 fixed
-    parameter int unsigned AXI_ID_WIDTH   = 3,    // §5 fixed
+    parameter int unsigned NSU_AXI_ID_WIDTH = 3,  // §5, 1-8; default NOC_ID_WIDTH
     parameter int unsigned AXI_DATA_WIDTH = 512,  // 64 narrow class, 512 data class
     parameter int unsigned AWUSER_WIDTH   = 58,   // collective bits arrive cleared, §6.1
     parameter int unsigned XUSER_WIDTH    = 8,    // ARUSER / WUSER / RUSER / BUSER
@@ -45,7 +45,7 @@ module nsu #(
     output logic [NUM_VC-1:0]           RXDATCRDVALID,
 
     // ----- AXI master port, §4.2: write address channel -----
-    output logic [AXI_ID_WIDTH-1:0]     AWID,
+    output logic [NSU_AXI_ID_WIDTH-1:0] AWID,
     output logic [AXI_ADDR_WIDTH-1:0]   AWADDR,
     output logic [7:0]                  AWLEN,
     output logic [2:0]                  AWSIZE,
@@ -68,14 +68,14 @@ module nsu #(
     input  logic                        WREADY,
 
     // ----- write response channel -----
-    input  logic [AXI_ID_WIDTH-1:0]     BID,
+    input  logic [NSU_AXI_ID_WIDTH-1:0] BID,
     input  logic [1:0]                  BRESP,
     input  logic [XUSER_WIDTH-1:0]      BUSER,
     input  logic                        BVALID,
     output logic                        BREADY,
 
     // ----- read address channel -----
-    output logic [AXI_ID_WIDTH-1:0]     ARID,
+    output logic [NSU_AXI_ID_WIDTH-1:0] ARID,
     output logic [AXI_ADDR_WIDTH-1:0]   ARADDR,
     output logic [7:0]                  ARLEN,
     output logic [2:0]                  ARSIZE,
@@ -90,7 +90,7 @@ module nsu #(
     input  logic                        ARREADY,
 
     // ----- read data channel -----
-    input  logic [AXI_ID_WIDTH-1:0]     RID,
+    input  logic [NSU_AXI_ID_WIDTH-1:0] RID,
     input  logic [AXI_DATA_WIDTH-1:0]   RDATA,
     input  logic [1:0]                  RRESP,
     input  logic                        RLAST,
