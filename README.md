@@ -48,12 +48,10 @@ Linux only. The build used to carry a native-Windows path (MSYS2 mingw64) and
 it is gone: it doubled every toolchain behaviour, which is how a test file that
 compiled under one and not the other went unnoticed.
 
-On WSL, build and run directly from the `/mnt/*` checkout — there is no
-source copy. Only the build OUTPUT has to live on the native filesystem,
-which is what `BUILD_ROOT` is for. A mirror under `$HOME` is worse than
-none: `$BUILD_ROOT/cmodel` records the source directory CMake configured
-against, so a second copy leaves ctest compiling one tree while you edit
-the other. Per-host settings
+On WSL, clone, build, simulate, and run agents from the Linux-native filesystem,
+for example `$HOME/work/noc_project`. Do not use a `/mnt/*` checkout for Git
+worktrees or Docker bind mounts. The Windows checkout is not a build or agent
+workspace; synchronize changes through Git. Per-host settings
 (`BUILD_ROOT`, `PYTHON3`, `VERILATOR`, `CMAKE`) go in a gitignored
 `local.mk` at the repo root. Offline hosts: unpack pre-fetched
 `googletest-src/` and `yaml-cpp-src/` into `~/noc_offline_deps`; the
@@ -72,10 +70,8 @@ and nothing else. `make build` (or `make build-cmodel`) is needed only
 before `make test`.
 
 Artifacts land under `$(BUILD_ROOT)` (gitignored), which defaults to
-`build/` in the repo; `make clean` removes them. On WSL set
-`BUILD_ROOT := $(HOME)/noc_build` in `local.mk` — a build under `/mnt/`
-produces a Windows-COFF yaml-cpp that the Linux linker rejects. The CMake
-cache records the source directory it was configured against, and
+`build/` in the Linux-native repo; `make clean` removes them. The CMake cache
+records the source directory it was configured against, and
 `make build-cmodel` honours whatever the cache names, so after moving the
 checkout delete the cache rather than editing it, and confirm with
 `grep CMAKE_HOME_DIRECTORY $BUILD_ROOT/cmodel/CMakeCache.txt`.
@@ -88,6 +84,20 @@ make pytest                                # specgen + sim/tools suites, golden 
 make docker-pytest                         # same Python suites in the pinned Docker toolchain
 python3 specgen/tools/codegen.py --check   # committed generated code matches sources
 ~~~
+
+## Agent Runner
+
+Run the DE/DV team only through the checked launcher:
+
+~~~bash
+tools/ic-team.sh --preflight
+tools/ic-team.sh --dry-run
+tools/ic-team.sh
+~~~
+
+The launcher pins Node through `ic-design-team/.nvmrc`, checks Docker, GitHub
+and Codex authentication, rejects `/mnt/*`, requires clean Linux-native target
+and reference repositories, and supplies the reference mount paths.
 
 
 ## Simulate (cosim)

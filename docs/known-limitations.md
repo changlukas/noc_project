@@ -104,15 +104,10 @@ generated fabric drives one packed vector from a port connection (bit 0) alongsi
 `always_comb` (bits 1-4), which Verilator tolerates and VCS may reject; and deleting only
 `noc_fabric_<topo>.sv` leaves the build failing on a missing file rather than regenerating it.
 
-The WSL host is unstable under load. Working practice: rsync to `~/noc_project`, one foreground
-session at a time, and an echo-marker retry around each invocation.
-
-Two hazards come with that mirror. The CMake cache under `$HOME/noc_build` records the mirror as
-its source directory, so a `make` invoked from `/mnt/e` fails on the source-directory mismatch
-rather than building the working tree, and a `cmake --build` aimed straight at the build
-directory silently compiles the mirror instead. A pass count is evidence only once the mirror has
-been re-synced. The unbounded `-j` that used to take the host down mid-build is fixed; see the
-compiler-error row above.
+The former `/mnt/e` checkout plus rsync mirror workflow is retired. The canonical WSL working
+copy is the Linux-native `$HOME/work/noc_project` clone, and Windows copies synchronize through
+Git. `tools/ic-team.sh` rejects `/mnt/*` before launching an agent. The unbounded `-j` that used
+to take the host down mid-build is fixed; see the compiler-error row above.
 
 A tile interconnect decodes addresses and nothing else, so it cannot tell a collective write from
 a unicast. A collective whose address names the issuing node's own region therefore looks local,
