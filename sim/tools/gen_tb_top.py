@@ -87,6 +87,8 @@ def _constant(domain: str, name: str) -> int:
 Y_WIDTH = 4
 VC_ID_WIDTH = 3
 DST_ID_WIDTH = X_WIDTH + Y_WIDTH  # 8 bits → 256 max nodes
+ADDR_WIDTH = _constant("axi", "ADDR_WIDTH")
+_SAM_ALIGNMENT = 0x1000
 
 
 def _check_flit_capacity(cfg: dict, path) -> None:
@@ -1130,6 +1132,103 @@ def emit_tb_top(topo: dict, dma: bool = False,
 # instead of a generated top declaring it inline.
 # ---------------------------------------------------------------------------
 
+def _is_power_of_two(value: int) -> bool:
+    return value > 0 and (value & (value - 1)) == 0
+
+
+def _sam_range_error(endpoint_name: str, detail: str) -> None:
+    raise SystemExit(f"gen_tb_top: endpoint {endpoint_name}: {detail}")
+
+
+def _validate_sam_ranges(topo: dict) -> None:
+    """Reject ranges that cannot be represented by the generated address type."""
+    addr_limit = 1 << ADDR_WIDTH
+    for endpoint in topo["endpoints"]:
+        if endpoint.get("sbr_port_protocol") is None:
+            continue
+        member_count = address_map.members(endpoint)
+        for rule in endpoint["addr_range"]:
+            try:
+                base = int(rule["base"])
+                size = int(rule["size"])
+                stride = int(rule["stride"]) if rule.get("stride") is not None else size
+            except (KeyError, TypeError, ValueError) as error:
+                _sam_range_error(endpoint["name"], f"range has a non-integer field ({error})")
+            if size <= 0 or size % _SAM_ALIGNMENT != 0:
+                _sam_range_error(endpoint["name"],
+                                 "range size must be positive and 4 KB aligned")
+            if base < 0 or stride <= 0 or base % _SAM_ALIGNMENT != 0 or \
+                    stride % _SAM_ALIGNMENT != 0:
+                _sam_range_error(endpoint["name"],
+                                 "range base and stride must be 4 KB aligned and non-negative")
+            for member in range(member_count):
+                start = base + stride * member
+                end = start + size
+                if start >= end or start >= addr_limit or end >= addr_limit:
+                    _sam_range_error(endpoint["name"],
+                                     "range expansion does not fit the canonical address width")
+
+
+def _collective_selectors(entries: list, x_dim: int, y_dim: int) -> dict:
+    """Return representable X/Y selector pairs for each collective-capable space."""
+    selectors = {}
+    for space in ("config", "memory"):
+        space_entries = [entry for entry in entries
+                         if entry["space"] == space and entry["port"] == 0]
+        by_coord = {(entry["x"], entry["y"]): entry for entry in space_entries}
+        if len(space_entries) != x_dim * y_dim or len(by_coord) != len(space_entries):
+            continue
+        origin = by_coord.get((0, 0))
+        x_neighbor = by_coord.get((1, 0))
+        if origin is None or x_neighbor is None:
+            continue
+        stride = x_neighbor["base"] - origin["base"]
+        if not _is_power_of_two(stride):
+            continue
+        if any(entry["size"] != origin["size"] for entry in space_entries):
+            continue
+        if any(entry["base"] != origin["base"] + (y * x_dim + x) * stride
+               for (x, y), entry in by_coord.items()):
+            continue
+        x_len = (x_dim - 1).bit_length()
+        y_len = (y_dim - 1).bit_length()
+        offset = stride.bit_length() - 1
+        field_mask = (((1 << x_len) - 1) << offset) | \
+                     (((1 << y_len) - 1) << (offset + x_len))
+        if origin["base"] & field_mask or origin["size"] > stride:
+            continue
+        if offset + x_len + y_len > ADDR_WIDTH:
+            continue
+        selectors[space] = ((offset, x_len), (offset + x_len, y_len))
+    return selectors
+
+
+def _sam_rules(topo: dict):
+    """Expand YAML rules and attach collective metadata for package emission."""
+    _validate_sam_ranges(topo)
+    _bases, entries = address_map.pack_config(topo)
+    _nodes_, x_dim, y_dim = _nodes(topo)
+    selectors = _collective_selectors(entries, x_dim, y_dim)
+
+    rules = []
+    for entry in entries:
+        collective_enabled = bool(entry.get("en_collective", False))
+        if collective_enabled:
+            if entry["space"] not in selectors:
+                raise SystemExit("gen_tb_top: collective layout is not representable for "
+                                 f"{entry['space']} space")
+            mask_x, mask_y = selectors[entry["space"]]
+        else:
+            mask_x = (0, 0)
+            mask_y = (0, 0)
+        rules.append({
+            **entry,
+            "collective_en": collective_enabled,
+            "mask_x": mask_x,
+            "mask_y": mask_y,
+        })
+    return rules
+
 def emit_topology_pkg(topo: dict) -> str:
     """Address-map package for the selected configuration: TILE_BASE_ADDR /
     TILE_SIZE / NOC_EGRESS_BASE / the peripheral table, computed exactly as
@@ -1146,6 +1245,7 @@ def emit_topology_pkg(topo: dict) -> str:
     peripherals = _peripherals(topo)
     endpoints = _endpoints(nodes, peripherals)
     n_ep = len(endpoints)
+    sam_rules = _sam_rules(topo)
     per_node, noc_egress_base = tile_targets(topo, endpoints)
     n_targets = max(len(w) for w in per_node.values())
     # Same cast and row order as emit_tb_top's TILE_BASE_ADDR/TILE_SIZE: packed,
@@ -1193,7 +1293,46 @@ def emit_topology_pkg(topo: dict) -> str:
     w(f"    localparam int unsigned Y_DIM = {y_dim};")
     w(f"    localparam int unsigned NUM_NODES     = {n};")
     w(f"    localparam int unsigned NUM_ENDPOINTS = {n_ep};")
-    w("    localparam int unsigned ADDR_WIDTH = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;")
+    w("    localparam int unsigned ADDR_WIDTH = ni_flit_pkg::AXI_ADDR_WIDTH;")
+    w(f"    localparam int unsigned SAM_NUM_RULES = {len(sam_rules)};")
+    w("    localparam int unsigned SAM_MASK_SEL_WIDTH = $clog2(ADDR_WIDTH + 1);")
+    w("")
+    w("    typedef logic [ADDR_WIDTH-1:0] sam_addr_t;")
+    w("    typedef struct packed {")
+    w("        logic [SAM_MASK_SEL_WIDTH-1:0] offset;")
+    w("        logic [SAM_MASK_SEL_WIDTH-1:0] len;")
+    w("    } sam_mask_sel_t;")
+    w("    typedef struct packed {")
+    w("        logic [ni_flit_pkg::DST_ID_WIDTH-1:0] dst_id;")
+    w("        logic [ni_flit_pkg::DST_PORT_ID_WIDTH-1:0] dst_port_id;")
+    w("        logic is_data;")
+    w("        logic collective_en;")
+    w("        sam_mask_sel_t mask_x;")
+    w("        sam_mask_sel_t mask_y;")
+    w("    } sam_idx_t;")
+    w("    typedef struct packed {")
+    w("        sam_idx_t idx;")
+    w("        sam_addr_t start_addr;")
+    w("        sam_addr_t end_addr;")
+    w("    } sam_rule_t;")
+    w("    localparam sam_rule_t [SAM_NUM_RULES-1:0] SAM = '{")
+    for authored_index, rule in enumerate(sam_rules):
+        generated_index = len(sam_rules) - 1 - authored_index
+        comma = "," if generated_index else ""
+        w(f"        // Authored rule {authored_index}: SAM[{generated_index}]")
+        w("        " +
+          f"{generated_index}: '{{idx: '{{dst_id: "
+          f"ni_flit_pkg::DST_ID_WIDTH'({rule['dst_id']}), "
+          f"dst_port_id: ni_flit_pkg::DST_PORT_ID_WIDTH'({rule['port']}), "
+          f"is_data: 1'b{int(rule['space'] != 'config')}, "
+          f"collective_en: 1'b{int(rule['collective_en'])}, "
+          f"mask_x: '{{offset: SAM_MASK_SEL_WIDTH'({rule['mask_x'][0]}), "
+          f"len: SAM_MASK_SEL_WIDTH'({rule['mask_x'][1]})}}, "
+          f"mask_y: '{{offset: SAM_MASK_SEL_WIDTH'({rule['mask_y'][0]}), "
+          f"len: SAM_MASK_SEL_WIDTH'({rule['mask_y'][1]})}}}}, "
+          f"start_addr: ADDR_WIDTH'(64'h{rule['base']:012X}), "
+          f"end_addr: ADDR_WIDTH'(64'h{rule['base'] + rule['size']:012X})}}{comma}")
+    w("    };")
     w(f"    localparam int unsigned TILE_TARGETS = {n_targets};")
     w(f"    localparam logic [{n_ep - 1}:0][TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_BASE_ADDR = "
       f"{{{tile_base_addr}}};")
@@ -1247,8 +1386,8 @@ def main() -> int:
                     help="Emit the address-map package instead of tb_top: topology_pkg.sv, "
                          "exporting the same TILE_BASE_ADDR / TILE_SIZE / NOC_EGRESS_BASE / "
                          "peripheral table tb_top stamps inline, for sim/tb/tb_noc_mesh.sv "
-                         "to `import`. Default output is sim/tb/test/topology_pkg.sv. The "
-                         "name is fixed and the contents follow --topology, so switching "
+                         "to `import`. Default output is build/generated/<CONFIG>/topology_pkg.sv. "
+                         "The name is fixed and the contents follow --topology, so switching "
                          "configuration means regenerating it.")
     a = ap.parse_args()
 
@@ -1257,8 +1396,9 @@ def main() -> int:
         print(num_vc())
         return 0
     if a.emit_topology_pkg:
-        default_out = ROOT / "sim" / "tb" / "test" / "topology_pkg.sv"
+        default_out = ROOT / "build" / "generated" / a.topology / "topology_pkg.sv"
         out_path = Path(a.out) if a.out is not None else default_out
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(emit_topology_pkg(topo), encoding="utf-8")
         return 0
     # The DMA flavour cannot run a peripheral topology at all

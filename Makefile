@@ -18,7 +18,7 @@ CMODEL_BUILD     = $(BUILD_ROOT)/cmodel
 SIM_VERILATOR := sim/verilator
 SIM_VCS       := sim/vcs
 
-.PHONY: help build build-cmodel build-yamlcpp build-verilator test rtl-common-lint rtl-common-test \
+.PHONY: help build build-cmodel build-yamlcpp build-verilator test rtl-common-lint rtl-common-test rtl-sam-lint rtl-sam-test \
         pytest check docker-build docker-shell docker-test docker-pytest docker-sim-setup docker-sim-smoke docker-sim-tier2 \
         clean clean-cmodel clean-verilator clean-vcs clean-generated
 
@@ -40,6 +40,7 @@ help:
 	@echo "  make test             run c_model ctest suite"
 	@echo "  make rtl-common-lint  lint the production common primitive adapters"
 	@echo "  make rtl-common-test  lint and behavior-test the common primitive adapters"
+	@echo "  make rtl-sam-test     lint and behavior-test the generated SAM wrapper"
 	@echo "  make pytest           specgen + sim/tools suites, golden drift gate"
 	@echo "  make check            both of the above -- run this before committing"
 	@echo ""
@@ -149,6 +150,12 @@ rtl-common-lint:
 rtl-common-test:
 	@bash rtl/common/test.sh test
 
+rtl-sam-lint:
+	@bash rtl/common/test_sam.sh lint
+
+rtl-sam-test:
+	@bash rtl/common/test_sam.sh test
+
 PYTHON3 ?= python3
 
 # Python suites: specgen (codegen/golden drift gate -- a stale golden, e.g. an
@@ -247,7 +254,7 @@ clean-cmodel:
 # Generated sources and stimulus, plus every __pycache__ the generators leave.
 clean-generated:
 	rm -f sim/tb/test/tb_top_*.sv sim/tb/soc/tb_top_dma_*.sv sim/filelist_*.f
-	rm -f sim/tb/test/topology_pkg.sv
+	rm -rf $(BUILD_ROOT)/generated
 	rm -f sim/tools/injection_sweep.csv sim/tools/injection_sweep.png
 	rm -f sim/verilator/hs_trace_node*.log
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

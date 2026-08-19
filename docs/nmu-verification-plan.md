@@ -124,7 +124,7 @@ has one fault-injection or illegal-stimulus test that demonstrates it can fail.
 | N0-SAM-14 | synthetic invalid ranges plus explicit `en_collective: false` and absent cases; run `make clean-generated` | zero/negative or non-4-KiB-aligned size/base, start/end/stride overflow, `start >= end`, invalid destination/port/class/membership, incomplete required coverage, and unrepresentable requested collective layout fail generation; overlap remains legal; false/absent cases have `collective_en=0` and zero-length selectors; generated build-root packages are removed |
 
 The decoder predictor performs an ordered authored-rule scan. The DUT evaluates entries in
-parallel through the pinned `common_cells` `addr_decode`, whose highest matching array index wins;
+parallel through the pinned `common_cells` `cc_addr_decode`, whose highest matching array index wins;
 the generator therefore emits authored rule `i` at `SAM[SAM_NUM_RULES-1-i]`. Overlap is a legal
 positive case at both generator and unit boundaries. The current C++ validator's overlap rejection
 is non-conforming follow-on work and is not accepted as target RTL evidence.

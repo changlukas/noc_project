@@ -87,7 +87,7 @@ destination width equals the generated X plus Y widths.
 
 Rule expansion preserves YAML authorship order: endpoint declarations first,
 then each endpoint's `addr_range` order, then array members in increasing
-X-fast member order. The pinned `addr_decode` gives the highest matching array
+X-fast member order. The pinned `cc_addr_decode` gives the highest matching array
 index priority, so authored rule `i` is emitted at
 `SAM[SAM_NUM_RULES-1-i]`. Overlap is legal; this reversal makes authored rule 0
 win deterministically. Generation fails for a zero or negative size, a base or
@@ -128,7 +128,7 @@ output wire logic      lookup_valid_o,
 output wire logic      lookup_error_o
 ```
 
-The wrapper instantiates the production-pinned `common_cells` `addr_decode`,
+The wrapper instantiates the production-pinned `common_cells` `cc_addr_decode`,
 passing `SAM` as `addr_map_i`, disabling its default index, and tying its default
 index to zero. It does not reimplement comparison or priority logic. The
 externally visible truth table is fixed:
@@ -330,7 +330,7 @@ must not implement storage arrays, pointers, synchronizers, or a second flow-con
 | `common/noc_sync_fifo` | One typed ready/valid input and output, `clk_i`/`rst_ni`, legal depth parameter; wraps the approved synchronous FIFO with non-fall-through behavior | shared primitive |
 | `common/axi_async_fifo` | One typed source ready/valid face and one typed destination ready/valid face, separate clock/reset pairs; depth is `AXI_FIFO_DEPTH` and maps to the primitive's log-depth | shared CDC primitive |
 | `common/noc_reg_slice` | Typed ready/valid stream; `REG_TYPE=0` bypass, 1 simple stream register, 2 full spill register; illegal values fail elaboration | shared register primitive for types 1/2; no state for type 0 |
-| `common/ni_sam` | Qualified address -> typed SAM result plus valid/error; wraps the pinned `addr_decode` | no state; generated constant `SAM` remains the sole rule storage |
+| `common/ni_sam` | Qualified address -> typed SAM result plus valid/error; wraps the pinned `cc_addr_decode` | no state; generated constant `SAM` remains the sole rule storage |
 
 Custom reusable FIFO, CDC, or register-slice implementations are forbidden. Block-specific state
 such as RoB entries, route latches, credit counters, and protocol FSMs is not a shared primitive

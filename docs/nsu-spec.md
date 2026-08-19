@@ -343,7 +343,7 @@ reference model derives each tile endpoint's coordinate fields from it at simula
 Synthesizable RTL receives `SAM_NUM_RULES`, the SAM-related parameter types, and constant `SAM`
 from build-only `$(BUILD_ROOT)/generated/<CONFIG>/topology_pkg.sv` at elaboration; it does not parse
 YAML and has no runtime configuration port. `nsu_depacketize` passes these parameters unchanged to
-the shared `ni_sam`, which wraps the pinned `common_cells` `addr_decode` rather than implementing a
+the shared `ni_sam`, which wraps the pinned `common_cells` `cc_addr_decode` rather than implementing a
 second decoder. The complete generated type and array contract is in `rtl/README.md`.
 
 | Parameter | Default | Legal range | Consumed at |

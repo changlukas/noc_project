@@ -6,10 +6,11 @@ package:
 dependencies:
   common_cells:
     git: https://github.com/pulp-platform/common_cells.git
-    rev: 9ca8a7655f741e7dd5736669a20a301325194c28
+    rev: 63b7c50d43e462b59506f69d341ff1e40202866d
 
 sources:
   - common/ni_child_types_pkg.sv
+  - common/ni_sam.sv
   - common/noc_sync_fifo.sv
   - common/axi_async_fifo.sv
   - common/noc_reg_slice.sv
