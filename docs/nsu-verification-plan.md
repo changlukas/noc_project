@@ -50,6 +50,7 @@ latency is not compared unless a later approved specification adds a target-RTL 
 
 | Required behavior | Planned evidence |
 |---|---|
+| generated NI payloads, typed child ports, and exact `response_entry_t` fields | S0-TYPE-01 through S0-TYPE-04 |
 | shared generated SAM and multicast-AW-only coordinate lookup | S0-SAM-01 through S0-SAM-06, NSU-A11 |
 | AW/W/AR reconstruction and Narrow/Data request scheduling | S0-REQ-01 through S0-REQ-09 |
 | Response Queue lifetime and legal downstream-ID mapping | S0-RQ-01 through S0-RQ-11, NSU-A04 through NSU-A06 |
@@ -86,7 +87,16 @@ but reaching the watchdog or simply running for a fixed cycle count cannot produ
 
 ## 4. S0 request and Response Queue tests
 
-### 4.1 Shared SAM and multicast address layout
+### 4.1 Generated types and leaf contract
+
+| ID | Stimulus and pressure | Required observation |
+|---|---|---|
+| S0-TYPE-01 | run the shared generated-type harness and compile `nsu_aw_request_t`, `nsu_ar_request_t`, `nsu_b_response_t`, and `nsu_r_response_t` | each composite uses the canonical AXI channel type; `valid`/`ready` remain independent ports; source order is the one in `rtl/README.md` |
+| S0-TYPE-02 | construct write and read `response_entry_t` values with walking fields | the exact field set is `{src_id, src_port_id, noc_id, ordering_req, ordering_tag, is_data, local_addr, len, size, burst, collective_op, collective_mask}` with no mapped-ID, valid, reference-count, or beat-counter field |
+| S0-TYPE-03 | independently stall depacketize AW/W/AR outputs and Response Queue AW/AR/B/R input/output streams | every stalled payload is stable; W remains separate from Response Queue metadata; B and R have no shared handshake authority |
+| S0-TYPE-04 | inspect the focused elaboration result, run `make clean`, and check the working tree | the pytest temporary build is gone and no repository build, generated topology, filelist, or simulator output remains |
+
+### 4.2 Shared SAM and multicast address layout
 
 | ID | Stimulus and pressure | Required observation |
 |---|---|---|
@@ -97,7 +107,7 @@ but reaching the watchdog or simply running for a fixed cycle count cannot produ
 | S0-SAM-05 | generate and elaborate the checked-in 2x2 and 4x4 configurations with the same `ni_sam` unit used by NMU | exact declarations, rule counts, indices, ranges, destination/port/class, collective flags, and X/Y selectors match N0-SAM-11 through N0-SAM-13 in `docs/nmu-verification-plan.md`; both generations are byte-identical and no golden RTL is committed |
 | S0-SAM-06 | exercise zero/negative, non-4-KiB-aligned, overflowing, inverted, invalid membership/port/class, incomplete coverage, and unrepresentable collective-enabled ranges, then run `make clean-generated` | every invalid case fails generation, legal overlap succeeds, and `$(BUILD_ROOT)/generated/` contains no generated package after cleanup |
 
-### 4.2 Request reconstruction and scheduling
+### 4.3 Request reconstruction and scheduling
 
 | ID | Stimulus and pressure | Required observation |
 |---|---|---|
@@ -115,7 +125,7 @@ Tests S0-REQ-04 and S0-REQ-06 close the two direct coverage gaps in the current 
 The testbench must not infer fairness from a final transaction count; it observes grant order while
 both classes are continuously eligible.
 
-### 4.3 Response Queue and downstream-ID mapping
+### 4.4 Response Queue and downstream-ID mapping
 
 | ID | Stimulus and pressure | Required observation |
 |---|---|---|

@@ -28,6 +28,7 @@ CMODEL_INC     := $(PROJ_ROOT)/ref_model/c_model/include
 CMODEL_TESTS   := $(PROJ_ROOT)/ref_model/c_model/tests
 SPECGEN_INC    := $(PROJ_ROOT)/specgen/generated/cpp
 SPECGEN_SV_INC := $(PROJ_ROOT)/specgen/generated/sv
+RTL_ROOT       := $(PROJ_ROOT)/rtl
 SRC_SV         := $(PROJ_ROOT)/ref_model/top
 SRC_DPI        := $(PROJ_ROOT)/ref_model/dpi
 # Imported DV/VIP source set (pulp axi + common_verification + FlooNoC monitors).
@@ -225,10 +226,11 @@ TOPOLOGY_PKG_SV := $(SIM_ROOT)/tb/test/topology_pkg.sv
 
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
-    $(TOPOLOGY_PKG_SV) \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
-    $(TOPOLOGY_NOC_TYPES_PKG) \
     $(SPECGEN_SV_INC)/ni_flit_pkg.sv \
+    $(TOPOLOGY_NOC_TYPES_PKG) \
+    $(TOPOLOGY_PKG_SV) \
+    $(RTL_ROOT)/common/ni_child_types_pkg.sv \
     $(DV_ROOT)/common_cells-1.37.0/src/cf_math_pkg.sv \
     $(DV_ROOT)/common_cells-1.37.0/src/addr_decode_dync.sv \
     $(DV_ROOT)/common_cells-1.37.0/src/addr_decode.sv \

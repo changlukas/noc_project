@@ -127,6 +127,11 @@ class TestSvPacketEmit:
                 f"missing {sig} in ni_flit_pkg.sv"
             )
 
+    def test_emits_per_network_flit_container_types(self):
+        text = _sv_text("ni_flit_pkg.sv")
+        for type_name in ("req_flit_t", "rsp_flit_t", "dat_flit_t"):
+            assert f"}} {type_name};" in text
+
 
 class TestSvSignalsEmit:
     def setup_method(self):
@@ -166,6 +171,11 @@ class TestSvSignalsEmit:
         run_codegen("--target", "sv", "--domain", "signals", "--out", str(RTL_PKG_DIR))
         sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
         assert "} axi_req_t;" in sv and "} axi_rsp_t;" in sv
+
+    def test_emits_axi_channel_payload_typedefs(self):
+        sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
+        for type_name in ("axi_aw_t", "axi_w_t", "axi_b_t", "axi_ar_t", "axi_r_t"):
+            assert f"}} {type_name};" in sv
 
     def test_struct_typedefs_in_package(self):
         sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")

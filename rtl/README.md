@@ -185,6 +185,109 @@ Generator tests use semantic assertions rather than committed golden RTL:
   or compile the generated package and assert declarations and field semantics;
   they do not compare against a committed per-configuration RTL file.
 
+## Canonical NI payload and child-record contract
+
+`ni_signals_pkg` is the sole AXI payload-type source. Its channel records contain data only;
+`valid` and `ready` remain independent child ports. Packed field order below is LSB to MSB. The
+widths are the generated fixed-default widths already used by `axi_req_t` and `axi_rsp_t`:
+
+| Type | Width | Packed fields, LSB to MSB |
+|---|---:|---|
+| `axi_aw_t` | 80 | `awid`, `awaddr`, `awlen`, `awsize`, `awburst`, `awcache`, `awlock`, `awprot`, `awregion`, `awqos` |
+| `axi_w_t` | 577 | `wlast`, `wstrb`, `wdata` |
+| `axi_b_t` | 5 | `bid`, `bresp` |
+| `axi_ar_t` | 80 | `arid`, `araddr`, `arlen`, `arsize`, `arburst`, `arcache`, `arlock`, `arprot`, `arregion`, `arqos` |
+| `axi_r_t` | 518 | `rlast`, `rid`, `rresp`, `rdata` |
+
+The 58-bit NMU `AWUSER` remains a sideband of the wrapper-facing AW channel and is part of
+`nmu_sam_aw_t`, not `axi_aw_t`. Its lower eight bits become the NoC AW payload `user`; the upper
+50 bits are consumed by collective translation. No other AXI USER pin crosses the production
+top, so adding it to every channel record would widen CDC and queue storage without carrying
+information. The existing `axi_req_t` and `axi_rsp_t` aggregates remain the wrapper-facing types;
+children use the per-channel records above.
+
+`ni_flit_pkg` is the sole physical-flit type source. Each container is a packed struct with
+`header` in bits `[47:0]` and its network's widest payload immediately above it:
+
+| Type | Payload member | Total width |
+|---|---:|---:|
+| `req_flit_t` | 88 | 136 |
+| `rsp_flit_t` | 78 | 126 |
+| `dat_flit_t` | 585 | 633 |
+
+The existing generated header and per-channel payload offset constants remain normative for
+field access. A container adds no handshake, VC credit, padding beyond the existing network width,
+or second field layout.
+
+### Production child records
+
+`rtl/common/ni_child_types_pkg.sv` owns the NI records below. They are packed signal/storage
+records, not queues or verification abstractions, and their named fields are the complete public
+surface. `nmu_sam` consumes `topology_pkg::sam_idx_t` directly; `nmu_ordering_domain_t` is the
+request-ordering projection used after SAM translation, not a replacement SAM record.
+
+| Record | Fields |
+|---|---|
+| `nmu_ordering_domain_t` | `dst_id`, `dst_port_id`, `is_data` |
+| `nmu_route_t` | `domain` |
+| `nmu_aw_route_t` | `route`, eight-bit `user`, `collective_op`, `collective_mask` |
+| `nmu_request_t` | `route`, `ordering_req`, `ordering_tag` |
+| `nmu_response_t` | `is_data`, `ordering_req`, `ordering_tag` |
+| `nmu_rob_order_entry_t` | `base`, nine-bit `beat_count`, `ordering_req`, `collective` |
+| `nmu_b_rob_entry_t` | `occupied`, `complete`, `axi_b_t beat` |
+| `nmu_r_rob_entry_t` | `occupied`, `complete`, three-bit `narrow_lane`, `axi_r_t beat` |
+| `nmu_read_context_t` | `local_addr`, `len`, `size`, `burst`, `beat_index` |
+| `response_entry_t` | `src_id`, `src_port_id`, `noc_id`, `ordering_req`, `ordering_tag`, `is_data`, `local_addr`, `len`, `size`, `burst`, `collective_op`, `collective_mask` |
+
+`nmu_sam_aw_t`, `nmu_sam_aw_result_t`, `nmu_sam_ar_result_t`, `nmu_aw_request_t`,
+`nmu_ar_request_t`, `nmu_b_response_t`, `nmu_r_response_t`, `nsu_aw_request_t`,
+`nsu_ar_request_t`, `nsu_b_response_t`, and `nsu_r_response_t` compose those records with the
+applicable generated AXI channel type. They add no `valid` or `ready` member. Write
+`response_entry_t` values zero the read-only context; read values zero the AW-only collective
+fields. Queue valid state and the downstream-ID mapping table are not duplicated in the entry.
+
+### Leaf ready/valid ports
+
+Every stream uses the same flat port pattern: the source drives `<name>_o` and
+`<name>_valid_o`, and consumes `<name>_ready_i`; the sink consumes `<name>_i` and
+`<name>_valid_i`, and drives `<name>_ready_o`. A transfer occurs only on `valid && ready`, and a
+source holds the complete typed payload stable while stalled. The following rows are independent
+streams; no row's readiness may be inferred from another row.
+
+| Child | Input streams | Output streams |
+|---|---|---|
+| `nmu_sam` | `s_aw: nmu_sam_aw_t`, `s_ar: axi_ar_t` | `m_aw: nmu_sam_aw_result_t`, `m_ar: nmu_sam_ar_result_t` |
+| `nmu_rob` | `s_aw: nmu_sam_aw_result_t`, `s_w: axi_w_t`, `s_ar: nmu_sam_ar_result_t`, `s_b: nmu_b_response_t`, `s_r: nmu_r_response_t` | `m_aw: nmu_aw_request_t`, `m_w: axi_w_t`, `m_ar: nmu_ar_request_t`, `m_b: axi_b_t`, `m_r: axi_r_t` |
+| `nsu_depacketize` | `s_req: req_flit_t`, `s_dat: dat_flit_t` | `m_aw: nsu_aw_request_t`, `m_w: axi_w_t`, `m_ar: nsu_ar_request_t` |
+| `nsu_response_queue` | `s_aw: nsu_aw_request_t`, `s_ar: nsu_ar_request_t`, `s_b: axi_b_t`, `s_r: axi_r_t` | `m_aw: axi_aw_t`, `m_ar: axi_ar_t`, `m_b: nsu_b_response_t`, `m_r: nsu_r_response_t` |
+
+All four children run only on `noc_clk` / `noc_rst_n`. The AXI CDC children own the ACLK crossing;
+none of these four exposes `ACLK` or `ARESETn`. `nmu_sam` modes 1 and 2 use `noc_clk` /
+`noc_rst_n` for their approved AW/AR timing cuts; mode 0 is combinational but keeps the same ports.
+The B path exists unconditionally in `nmu_rob`. `READ_ROB_ENABLED` selects only the two structural
+R implementations; both use the same `s_ar`, `s_r`, `m_ar`, and `m_r` contracts.
+
+### Source order and focused harness
+
+Canonical source order is `ni_params_pkg.sv`, `ni_signals_pkg.sv`, `ni_flit_pkg.sv`, the selected
+`noc_types_pkg_vc<N>.sv`, generated `topology_pkg.sv`, `ni_child_types_pkg.sv`, shared primitives,
+then leaf modules and their harness. `rtl/Bender.yml` owns the production-package order;
+`sim/build_config.mk` prepends the generated packages in the order above.
+
+`specgen/tests/sv/tb_ni_type_contract.sv` is the smallest generated-type harness. It owns no clock
+or reset because it contains no sequential DUT: it elaborates all canonical payloads, declares
+independent valid/ready wires for the four leaf boundaries, checks AXI/flit widths, checks the flit
+header/payload split, and exits at time zero. The Python owner compiles and runs it in a temporary
+directory:
+
+```text
+python3 -m pytest specgen/tests/test_ni_type_contract.py -q
+```
+
+The temporary directory is removed by pytest. After inspecting any broader build, test, or
+simulation result, run `make clean`; `make clean-generated` is the narrower command that removes
+generated topology/stimulus only.
+
 ## Clock and reset ownership
 
 System integration owns the common active-low reset and its two reset synchronizers. It supplies

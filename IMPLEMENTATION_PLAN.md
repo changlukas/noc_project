@@ -21,7 +21,10 @@ Success Criteria: Every DE package has its paired DV evidence; focused tests pas
 Progress: Issue #43 freezes the shared generated topology/SAM interface before dependent NMU, NSU,
 and generator implementation: one build-only per-config package, typed constant `SAM`, shared
 combinational `ni_sam`, authored-first overlap priority, and deterministic 2x2/4x4 semantic DV.
-Follow-on issues #21, #44, and #27 implement that contract and close the recorded C++ overlap gap.
+Issue #44 freezes the generated per-channel AXI/flit containers, typed NMU/NSU leaf records,
+ready/valid child ports, canonical source order, and the zero-time elaboration harness without
+adding datapath RTL. Follow-on issues #21, #23, and #27 consume those contracts; the recorded C++
+overlap gap remains separate implementation work.
 Complete NMU and NSU leaf RTL and paired DV first, then integrate each NI top and pass its hybrid
 zero-hop loopback. Router work starts only after both NI loopback gates pass.
 Status: In Progress
