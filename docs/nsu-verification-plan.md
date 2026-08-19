@@ -181,9 +181,9 @@ A timeout or unrelated compile error is not a passing guard test.
 | `AXI_ID_WIDTH` | 1, default, 8; generated REQ/RSP widths agree at every port | 0 and 9; any generated-width mismatch |
 | `NOC_DAT_NUM_VC` | 1, default, 8 in `SHARED`; 2, 4, 6, 8 in `READ_WRITE_SPLIT` | 0, 9; split with 1 or any odd count; out-of-range credit-vector width |
 | `NOC_DAT_VC_MODE` | both approved encodings | any other encoding |
-| `AXI_FIFO_DEPTH` | 4, 8, 16 | representative non-member values below, between, and above the legal set |
-| `NOC_FIFO_DEPTH` | 4, 8, 16 | representative non-member values below, between, and above the legal set |
-| `NOC_ROUTER_VC_DEPTH` | 1, default, 16 | 0 and 17 |
+| `AXI_FIFO_DEPTH` | 2, default, 32 | 0 and a positive non-power-of-two value |
+| `NOC_FIFO_DEPTH` | 1, default, 32 | 0 and a positive non-power-of-two value |
+| `NOC_ROUTER_VC_DEPTH` | 2, default, 32 | 0, 1, and a positive non-power-of-two value |
 | Response Queue mapping and entry-capacity parameters | boundary and capacity-consistency cases after their canonical defaults/ranges are approved | zero/unrepresentable capacity and out-of-range widths after approval; `[TBD]` until then |
 
 The test records the instance path and expected diagnostic for each guard. This prevents an

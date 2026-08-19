@@ -248,9 +248,9 @@ are observed before time advances; an unrelated compile or simulator failure is 
 | `AXI_ID_WIDTH` | 1, default, 8 | 0 and 9 |
 | `NOC_DAT_NUM_VC` | 1, default, 8 | 0 and 9 |
 | `NOC_DAT_VC_MODE` | 0 and 1 with a legal count | other encodings; split with odd count or count 1 |
-| `AXI_FIFO_DEPTH` | 4, 8, 16 | representative non-members below, between, and above the legal set |
-| `NOC_FIFO_DEPTH` | 4, 8, 16 | representative non-members below, between, and above the legal set |
-| `NOC_ROUTER_VC_DEPTH` | 1, default, 16 | 0 and 17 |
+| `AXI_FIFO_DEPTH` | 2, default, 32 | 0 and a positive non-power-of-two value |
+| `NOC_FIFO_DEPTH` | 1, default, 32 | 0 and a positive non-power-of-two value |
+| `NOC_ROUTER_VC_DEPTH` | 2, default, 32 | 0, 1, and a positive non-power-of-two value |
 | `NMU_ROB_B_DEPTH` | 1, default, 256 | 0 and 257 |
 | `NMU_ROB_R_DEPTH` | 1, default, 256 | 0 and 257 |
 | `NMU_MAX_TXNS_PER_ID` | 1, default, 256 | 0 and 257 |

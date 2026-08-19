@@ -25,7 +25,7 @@ package ni_params_pkg;
   localparam int unsigned NOC_DAT_FLIT_WIDTH_DFLT           = 633;
   localparam int unsigned NOC_FIFO_DEPTH_DFLT               = 8;
   localparam int unsigned NOC_ROUTER_VC_DEPTH_DFLT          = 8;
-  localparam int unsigned NOC_ROUTER_OUTPUT_FIFO_DEPTH_DFLT = 2;
+  localparam int unsigned NOC_ROUTER_OUTPUT_FIFO_DEPTH_DFLT = 8;
   localparam int unsigned NOC_MESH_X_DIM_DFLT               = 4;
   localparam int unsigned NOC_MESH_Y_DIM_DFLT               = 4;
 

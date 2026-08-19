@@ -21,14 +21,14 @@ def test_load_constants_returns_expected_shape():
     assert c["schema_version"] == "1.0"
     assert c["axi"]["ID_WIDTH"]["default"] == 3
     assert (c["axi"]["ID_WIDTH"]["min"], c["axi"]["ID_WIDTH"]["max"]) == (1, 8)
-    assert c["axi"]["FIFO_DEPTH"]["allowed"] == [4, 8, 16]
+    assert c["axi"]["FIFO_DEPTH"]["min"] == 2
     assert c["axi"]["FIFO_DEPTH"]["default"] == 8
     assert c["axi"]["DATA_WIDTH"]["allowed"] == [32, 64, 128, 256, 512, 1024]
     assert c["noc"]["DAT_NUM_VC"]["default"] == 2
     assert c["noc"]["DAT_VC_MODE"]["allowed"] == [0, 1]
     assert c["noc"]["DAT_VC_MODE"]["default"] == c["noc"]["DAT_VC_MODE_SHARED"]["default"]
     assert c["noc"]["DAT_VC_MODE_READ_WRITE_SPLIT"]["default"] == 1
-    assert c["noc"]["FIFO_DEPTH"]["allowed"] == [4, 8, 16]
+    assert c["noc"]["FIFO_DEPTH"]["min"] == 1
     assert c["noc"]["FIFO_DEPTH"]["default"] == 8
     assert c["noc"]["DAT_FLIT_WIDTH"]["sv_symbol"] == "NOC_DAT_FLIT_WIDTH_DFLT"
     assert c["derived"]["WSTRB_WIDTH"]["expression"] == "DATA_WIDTH / 8"

@@ -246,9 +246,9 @@ behavior. Defaults below are the shipped values.
 | NOC_REQ_FLIT_WIDTH | 136 | derived as `133 + AXI_ID_WIDTH` | REQ egress flit port |
 | NOC_RSP_FLIT_WIDTH | 126 | derived as `123 + AXI_ID_WIDTH` | RSP ingress flit port |
 | NOC_DAT_FLIT_WIDTH | 633 | derived maximum, 633 for `AXI_ID_WIDTH` 1..8 | DAT flit ports, both directions |
-| NOC_ROUTER_VC_DEPTH | 8 | 1..16 | Router LOCAL input VC FIFO depth and NMU DAT sender-credit seed |
-| AXI_FIFO_DEPTH | 8 | {4,8,16} | Common AW/W/AR/B/R dual-clock FIFO depth |
-| `NOC_FIFO_DEPTH` | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
+| NOC_ROUTER_VC_DEPTH | 8 | power of two, >= 2 | Router LOCAL input VC FIFO depth and NMU DAT sender-credit seed |
+| AXI_FIFO_DEPTH | 8 | power of two, >= 2 | Common AW/W/AR/B/R dual-clock FIFO depth |
+| `NOC_FIFO_DEPTH` | 8 | positive power of two | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
 | NMU_ROB_B_DEPTH | 128 | 1..256 | B slot pool |
 | NMU_ROB_R_DEPTH | 128 | 1..256 | R slot pool |
 | READ_ROB_ENABLED | 1 | {0,1} | RTL `generate if`: Normal R RoB or RoB-less per-ID ordering-domain counters |

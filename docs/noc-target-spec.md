@@ -243,8 +243,8 @@ credit counters; in-flight transactions are discarded rather than preserved or r
 
 Each AXI interface therefore has five dual-clock FIFOs. Their entries are AXI channel records, not
 physical flits. `AXI_FIFO_DEPTH` is their common entry count. The NoC side has four logical
-`noc_clk` class FIFOs: REQ, RSP, DAT Write and DAT Read. `NOC_FIFO_DEPTH`, default 8 with
-legal values 4, 8 and 16, is their common entry count. They are not CDC FIFOs and are not
+`noc_clk` class FIFOs: REQ, RSP, DAT Write and DAT Read. `NOC_FIFO_DEPTH`, default 8 and any
+positive power of two, is their common entry count. They are not CDC FIFOs and are not
 replicated per VC.
 
 | NoC class FIFO | NMU direction | NSU direction | AXI objects |
@@ -420,7 +420,7 @@ For Router-to-NI DAT ejection, a transfer occurs only when `RXDATVALID` and `RXD
 high. No NI receive-credit counter or `RXDATCRDVALID` exists. Inter-router DAT ports retain the
 symmetric per-VC credit signals specified by the Router.
 
-The five AXI channel async FIFOs use `AXI_FIFO_DEPTH`, default 8 with legal values 4, 8 and 16.
+The five AXI channel async FIFOs use `AXI_FIFO_DEPTH`, default 8 and any power of two at least 2.
 The implementation derives Gray-pointer widths from this entry count. These FIFOs absorb clock-ratio
 variation and temporary AXI backpressure; they do not define the number of outstanding AXI
 transactions. Outstanding capacity is owned separately by the per-ID order lists, RoBs and NSU
@@ -455,9 +455,10 @@ at simulation startup, and the verification flow checks the generated and runtim
 | AXI interface | `AXI_ID_WIDTH` | 1-8 (3) | NMU AXI ID and NoC-carried ID width; REQ/RSP flit widths derive from it at elaboration |
 | Flow control | `DAT_NUM_VC` | 1-8 (2) | Total DAT VC count and the Section 4.3 credit signal width; mode-specific legality applies below |
 | Flow control | `NOC_DAT_VC_MODE` | `SHARED`, `READ_WRITE_SPLIT` (`SHARED`) | System-wide eligible-VC policy for NI allocators and DAT router VA |
-| Flow control | `NOC_ROUTER_VC_DEPTH` | 1-16 (8) | Router DAT input FIFO depth and NI-to-Router sender-credit seed |
-| CDC | `AXI_FIFO_DEPTH` | 4, 8, 16 (8) | Common entry count of the AW/W/AR/B/R dual-clock FIFOs on each AXI interface |
-| NoC class queues | `NOC_FIFO_DEPTH` | 4, 8, 16 (8) | Common entry count of the REQ/RSP/DAT Write/DAT Read synchronous FIFOs |
+| Flow control | `NOC_ROUTER_VC_DEPTH` | power of two, >= 2 (8) | Router DAT input FIFO depth and NI-to-Router sender-credit seed |
+| Router staging | `NOC_ROUTER_OUTPUT_FIFO_DEPTH` | positive power of two (8) | DAT Router output FIFO depth; not credit-counted |
+| CDC | `AXI_FIFO_DEPTH` | power of two, >= 2 (8) | Common entry count of the AW/W/AR/B/R dual-clock FIFOs on each AXI interface |
+| NoC class queues | `NOC_FIFO_DEPTH` | positive power of two (8) | Common entry count of the REQ/RSP/DAT Write/DAT Read synchronous FIFOs |
 | Ordering | Outstanding transactions per ID | 1-32 (32) | Applies to both R modes. A master holds at most `32 x 2^AXI_ID_WIDTH` in total, 256 at the default; Enabled requests that require reordering additionally reserve an `ordering_tag`, see §6 |
 | Ordering | `READ_ROB_ENABLED` | enabled, disabled (enabled) | Selects the R path at elaboration with `generate if`. Disabled permits a same-ID streak only within one `{dst_id, dst_port_id, AXI class}` ordering domain. B always uses a per-ID metadata-only RoB. The §3 ordering requirement holds in either setting |
 | Address map | SAM address spaces | config, memory | Config space selects the narrow class, memory space the data class. Uniform across nodes and fixed for one elaborated RTL image |

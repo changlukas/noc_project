@@ -21,8 +21,8 @@ parameter source.
 | `AXI_ID_WIDTH` | 3 | 1..8 | REQ width is `133 + AXI_ID_WIDTH`; RSP width is `123 + AXI_ID_WIDTH`; DAT is 633 throughout the legal range |
 | `NOC_DAT_NUM_VC` | 2 | 1..8 | DAT VC count and credit-vector width; REQ and RSP remain single-VC |
 | `NOC_DAT_VC_MODE` | `NOC_DAT_VC_MODE_SHARED` (0) | `NOC_DAT_VC_MODE_SHARED` (0), `NOC_DAT_VC_MODE_READ_WRITE_SPLIT` (1) | One system-wide elaboration choice for NI allocation and DAT Router VA |
-| `AXI_FIFO_DEPTH` | 8 | 4, 8, 16 | Common depth of the five AXI-channel CDC FIFOs in each NI |
-| `NOC_FIFO_DEPTH` | 8 | 4, 8, 16 | Common depth of the REQ, RSP, DAT Write, and DAT Read class FIFOs in each NI |
+| `AXI_FIFO_DEPTH` | 8 | power of two, >= 2 | Common depth of the five AXI-channel CDC FIFOs in each NI |
+| `NOC_FIFO_DEPTH` | 8 | positive power of two | Common depth of the REQ, RSP, DAT Write, and DAT Read class FIFOs in each NI |
 
 `READ_WRITE_SPLIT` additionally requires `NOC_DAT_NUM_VC` in {2, 4, 6, 8}; the lower half is
 eligible for `DataAw`/`DataW` and the upper half for `DataR`. Every production top fails

@@ -315,9 +315,9 @@ at simulation startup. Synthesizable RTL receives the same fields from generated
 | `NSU_ARBITER_FIFO_DEPTH` [current model] | 4 | 1 to 64 | wormhole and VC-arbiter pending depths; not target NI VC storage |
 | `NOC_DAT_NUM_VC` | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector widths; wrapper-local `DAT_NUM_VC` is an alias |
 | `NOC_DAT_VC_MODE` | SHARED (0) | {SHARED (0), READ_WRITE_SPLIT (1)} | Target `DataR` eligible mask; system-wide with DAT router VA; current model implements SHARED only |
-| `NOC_ROUTER_VC_DEPTH` | 8 | 1 to 16 | Router LOCAL input VC FIFO depth and NSU DAT response sender-credit seed |
-| `AXI_FIFO_DEPTH` | 8 | {4,8,16} | common AW/W/AR/B/R dual-clock FIFO depth |
-| `NOC_FIFO_DEPTH` | 8 | {4,8,16} | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
+| `NOC_ROUTER_VC_DEPTH` | 8 | power of two, >= 2 | Router LOCAL input VC FIFO depth and NSU DAT response sender-credit seed |
+| `AXI_FIFO_DEPTH` | 8 | power of two, >= 2 | common AW/W/AR/B/R dual-clock FIFO depth |
+| `NOC_FIFO_DEPTH` | 8 | positive power of two | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
 | `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 136 / 126 / 633 | target `133 + AXI_ID_WIDTH` / `123 + AXI_ID_WIDTH` / 633 | per-network flit containers and DPI marshalling |
 | `AXI_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 48 / 512 | target ID 1..8, current model locked at 3 / 1..64 / {32,64,128,256,512,1024} | NoC-carried ID, beat structs and DPI |
 | create-time `src_id` | 0 | 8 bit | stamped into every response flit `src_id` |

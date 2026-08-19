@@ -83,9 +83,9 @@ axi:
   FIFO_DEPTH:
     type: int
     units: entries
-    description: "Common depth of the five AXI-channel asynchronous FIFOs in an NMU or NSU"
+    description: "Common depth of the five AXI-channel asynchronous FIFOs in an NMU or NSU; power of two and at least 2"
     default: 8
-    allowed: [4, 8, 16]
+    min: 2
     sv_symbol: AXI_FIFO_DEPTH_DFLT
     cpp_symbol: AXI_FIFO_DEPTH
 
@@ -171,27 +171,25 @@ noc:
   FIFO_DEPTH:
     type: int
     units: entries
-    description: "Common depth of the REQ, RSP, DAT Write and DAT Read synchronous NoC-class FIFOs in an NMU or NSU"
+    description: "Common depth of the REQ, RSP, DAT Write and DAT Read synchronous NoC-class FIFOs in an NMU or NSU; positive power of two"
     default: 8
-    allowed: [4, 8, 16]
+    min: 1
     sv_symbol: NOC_FIFO_DEPTH_DFLT
     cpp_symbol: NOC_FIFO_DEPTH
   ROUTER_VC_DEPTH:
     type: int
     units: flits
-    description: "Router input VC FIFO depth; defines the credit seed of the upstream sender"
+    description: "Router input VC FIFO depth; power of two and at least 2; defines the credit seed of the upstream sender"
     default: 8
-    min: 1
-    max: 16
+    min: 2
     sv_symbol: NOC_ROUTER_VC_DEPTH_DFLT
     cpp_symbol: NOC_ROUTER_VC_DEPTH
   ROUTER_OUTPUT_FIFO_DEPTH:
     type: int
     units: flits
-    description: "Router output FIFO depth (stage 3); not credit-counted"
-    default: 2
+    description: "Router output FIFO depth (stage 3); positive power of two; not credit-counted"
+    default: 8
     min: 1
-    max: 16
     sv_symbol: NOC_ROUTER_OUTPUT_FIFO_DEPTH_DFLT
     cpp_symbol: NOC_ROUTER_OUTPUT_FIFO_DEPTH
   MESH_X_DIM:

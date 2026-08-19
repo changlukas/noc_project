@@ -136,8 +136,12 @@ class Router {
             assert(false && "Router: num_vc out of range (1 .. 2^VC_ID_WIDTH)");
             std::abort();
         }
-        if (cfg_.vc_depth == 0 || cfg_.output_fifo_depth == 0) {
-            assert(false && "Router: zero FIFO depth");
+        if (cfg_.vc_depth < 2 || !is_power_of_two(cfg_.vc_depth)) {
+            assert(false && "Router: vc_depth must be a power of two and at least 2");
+            std::abort();
+        }
+        if (!is_power_of_two(cfg_.output_fifo_depth)) {
+            assert(false && "Router: output_fifo_depth must be a positive power of two");
             std::abort();
         }
         if (!(cfg_.x < cfg_.mesh_x_dim && cfg_.y < cfg_.mesh_y_dim)) {
