@@ -120,7 +120,7 @@ count, SAM-related parameter types, and constant array down as elaboration-time 
 is no runtime SAM programming interface.
 
 The shared pure-combinational `ni_sam` wrapper instantiates the pinned `common_cells`
-`addr_decode`; it is not a second decoder. Because that primitive grants the highest matching
+`cc_addr_decode`; it is not a second decoder. Because that primitive grants the highest matching
 array index, the generator stores authored rule `i` at `SAM[SAM_NUM_RULES-1-i]` to preserve
 authored first-match behavior. Independent AW and AR instances feed `nmu_packetize` destination,
 port, and class results. X/Y selectors are nonzero only for a range that explicitly has

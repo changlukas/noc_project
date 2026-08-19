@@ -30,13 +30,12 @@ module noc_reg_slice #(
         assign m_valid_o = s_valid_i;
         assign m_data_o = s_data_i;
     end else if (REG_TYPE == 1) begin : gen_simple
-        stream_register #(
-            .T ( T )
-        ) i_stream_register (
+        cc_stream_register #(
+            .data_t ( T )
+        ) i_cc_stream_register (
             .clk_i,
             .rst_ni,
             .clr_i      ( 1'b0      ),
-            .testmode_i ( 1'b0      ),
             .valid_i    ( s_valid_i ),
             .ready_o    ( s_ready_o ),
             .data_i     ( s_data_i  ),
@@ -45,11 +44,12 @@ module noc_reg_slice #(
             .data_o     ( m_data_o  )
         );
     end else begin : gen_spill
-        spill_register #(
-            .T ( T )
-        ) i_spill_register (
+        cc_spill_register #(
+            .data_t ( T )
+        ) i_cc_spill_register (
             .clk_i,
             .rst_ni,
+            .clr_i   ( 1'b0      ),
             .valid_i ( s_valid_i ),
             .ready_o ( s_ready_o ),
             .data_i  ( s_data_i  ),

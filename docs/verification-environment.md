@@ -166,22 +166,22 @@ DUT's own vocabulary.
 
 The production RTL primitive dependency is separate from that vendored DV closure and from the
 mounted FlooNoC reference's dependency revision. This project pins
-[`common_cells` 1.39.0](https://github.com/pulp-platform/common_cells/tree/9ca8a7655f741e7dd5736669a20a301325194c28)
-at commit `9ca8a7655f741e7dd5736669a20a301325194c28` through `rtl/Bender.yml`. The selected primitive
-interfaces are `fifo_v3`, `cdc_fifo_gray`, `stream_register`, `spill_register`, and
-[`addr_decode`](https://github.com/pulp-platform/common_cells/blob/9ca8a7655f741e7dd5736669a20a301325194c28/src/addr_decode.sv),
+[`common_cells` 2.0.0-beta.3](https://github.com/pulp-platform/common_cells/tree/63b7c50d43e462b59506f69d341ff1e40202866d)
+at commit `63b7c50d43e462b59506f69d341ff1e40202866d` through `rtl/Bender.yml`. The selected primitive
+interfaces are `cc_fifo`, `cc_cdc_fifo_gray`, `cc_stream_register`, `cc_spill_register`, and
+[`cc_addr_decode`](https://github.com/pulp-platform/common_cells/blob/63b7c50d43e462b59506f69d341ff1e40202866d/src/cc_addr_decode.sv),
 whose pinned source documents the overlap priority. Bender resolves
 their transitive sources and include order from `rtl/Bender.yml`. Production builds fetch that
 exact revision and do not copy or rewrite the files. The upstream license is
-[Solderpad Hardware License v0.51](https://github.com/pulp-platform/common_cells/blob/9ca8a7655f741e7dd5736669a20a301325194c28/LICENSE).
+[Solderpad Hardware License v0.51](https://github.com/pulp-platform/common_cells/blob/63b7c50d43e462b59506f69d341ff1e40202866d/LICENSE).
 
 For issue #43, the mounted production-approved FlooNoC reference was inspected at
 `2fa02eb23c1babef9a8f714715ea7c78de98c364`. Its `Bender.lock` resolves `common_cells`
 2.0.0-beta.3 at `63b7c50d43e462b59506f69d341ff1e40202866d`, and its
-`floo_id_translation.sv` calls the renamed `cc_addr_decode` interface. This project adopts the
-generated typed-SAM and elaboration-time parameter-passing pattern, while `ni_sam` targets the
-separately approved project pin and its `addr_decode` API. No FlooNoC RTL is copied or instantiated
-by this documentation-only change.
+`floo_id_translation.sv` calls the `cc_addr_decode` interface. This project adopts the generated
+typed-SAM and elaboration-time parameter-passing pattern, while `ni_sam` targets the same approved
+project pin and API. No FlooNoC RTL is copied or instantiated
+by production RTL.
 
 For issue #44, the same production-approved FlooNoC revision was inspected for packed AXI/flit
 typing, metadata lifetime, and RoB storage boundaries. Taxi was inspected at
@@ -505,7 +505,7 @@ semantic assertions without committing an SV golden. Both suites are one gate â€
 because regenerating a reference from one side alone would move that side's goalposts silently.
 
 YAML authorship order is endpoint, range, then increasing X-fast member. Overlap is legal and the
-earliest authored matching rule wins. The pinned `addr_decode` selects the highest matching array
+earliest authored matching rule wins. The pinned `cc_addr_decode` selects the highest matching array
 index, so package generation stores authored rule `i` at `SAM[SAM_NUM_RULES-1-i]`. Explicit
 `en_collective: true` alone emits collective enable and nonzero X/Y selectors; false or absent emits
 zero selector lengths. The invalid-range and exact 2x2/4x4 vectors are listed in `rtl/README.md` and

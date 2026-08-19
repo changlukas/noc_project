@@ -215,14 +215,12 @@ TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_vc$(TOPOLOGY_NUM_VC).sv
 
 # Address-map package (topology_pkg.sv): TILE_BASE_ADDR / TILE_SIZE /
 # NOC_EGRESS_BASE / the peripheral table, for tb_noc_mesh.sv to `import`.
-# Gitignored like FlooNoC's generated/ -- derived from a tracked config file,
-# rebuilt when it, the CONFIG stamp or the generator changes. The stamp is a
-# prerequisite because the NAME no longer carries the configuration: switching
-# CONFIG must rewrite this file, and the new config file is not necessarily
-# newer than the one the last build wrote.
+# The build-directory location permits different configurations to coexist.
+# The generated package is derived from a tracked config file and rebuilt when
+# the configuration, generator, or topology stamp changes.
 # Naming only -- the WRITE is a file-target recipe in each simulator Makefile
 # (mirrors the $(TB_TOP_SV) rule there), not a parse-time side effect here.
-TOPOLOGY_PKG_SV := $(SIM_ROOT)/tb/test/topology_pkg.sv
+TOPOLOGY_PKG_SV := $(BUILD_ROOT)/generated/$(CONFIG)/topology_pkg.sv
 
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \

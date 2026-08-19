@@ -176,7 +176,8 @@ def pack_config(cfg):
                     raise ValueError(
                         f"endpoint {ep['name']}: member {k} outside mesh {x_dim}x{y_dim}")
                 entries.append({"x": x, "y": y, "size": size, "base": base + stride * k,
-                                "dst_id": dst_id(x, y), "space": space, "port": port})
+                                "dst_id": dst_id(x, y), "space": space, "port": port,
+                                "en_collective": r.get("en_collective", False) is True})
     bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "memory"}
     return bases, entries
 

@@ -131,6 +131,7 @@ endif
 # TOPO_STAMP included: the file name is fixed, so switching CONFIG must rewrite
 # it even when the newly selected config file is older than the last build.
 $(TOPOLOGY_PKG_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP)
+	@mkdir -p $(dir $@)
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(CONFIG) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
 
 # DPI C++ is compiled and linked into simv by VCS itself; pass include dirs

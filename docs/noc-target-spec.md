@@ -543,7 +543,7 @@ and memory space data. The generated rule records the resulting class with its d
 port; no second runtime space decoder exists.
 
 **Destination and priority.** The shared `ni_sam` wrapper around the pinned `common_cells`
-`addr_decode` returns the entry's `dst_id`, `dst_port_id`, class, collective enable, and X/Y
+`cc_addr_decode` returns the entry's `dst_id`, `dst_port_id`, class, collective enable, and X/Y
 coordinate selectors. NMU instantiates it for AW and AR; NSU enables its instance only for
 multicast AW coordinate-layout lookup. The generated `sam_idx_t` contains no unused base ID.
 Authored rule order is endpoint, range, then increasing X-fast endpoint-array member order.

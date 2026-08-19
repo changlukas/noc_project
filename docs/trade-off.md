@@ -113,7 +113,7 @@ SRAM is needed.
 The first RTL milestone implements one generated table contract and one shared
 pure-combinational wrapper, `ni_sam`. The selected configuration's `endpoints:` block is the sole
 source; build-only `topology_pkg.sv` owns the typed rules and constant `SAM`, and the wrapper reuses
-the pinned `common_cells` `addr_decode`. There is no project-owned second decoder, runtime topology
+the pinned `common_cells` `cc_addr_decode`. There is no project-owned second decoder, runtime topology
 multiplexer, writable table, or default route. A lookup returns destination node, destination port,
 AXI class, collective enable, and X/Y coordinate layout while forwarding the global AXI address
 unchanged.

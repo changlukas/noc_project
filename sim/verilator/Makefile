@@ -202,6 +202,7 @@ endif
 # fixed: switching CONFIG must rewrite it, and the newly selected config file is
 # not necessarily newer than the package the last build wrote.
 $(TOPOLOGY_PKG_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP)
+	@mkdir -p $(dir $@)
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(CONFIG) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
 
 # yaml-cpp comes from the c_model CMake build; surface a clear hint instead

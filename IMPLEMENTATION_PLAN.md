@@ -25,6 +25,9 @@ Issue #44 freezes the generated per-channel AXI/flit containers, typed NMU/NSU l
 ready/valid child ports, canonical source order, and the zero-time elaboration harness without
 adding datapath RTL. Follow-on issues #21, #23, and #27 consume those contracts; the recorded C++
 overlap gap remains separate implementation work.
+Issue #48 implements the frozen generated SAM package and pure-combinational shared wrapper,
+updates the approved primitive dependency, and closes the focused generator/elaboration evidence
+without adding NMU/NSU datapath state.
 Complete NMU and NSU leaf RTL and paired DV first, then integrate each NI top and pass its hybrid
 zero-hop loopback. Router work starts only after both NI loopback gates pass.
 Status: In Progress
