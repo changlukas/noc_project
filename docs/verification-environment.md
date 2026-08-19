@@ -164,16 +164,24 @@ per-package version, upstream commit, and the one flagged local modification
 external IP; the rest of this document describes the environment in the
 DUT's own vocabulary.
 
-The production RTL primitive dependency is separate from that vendored DV closure. It pins
+The production RTL primitive dependency is separate from that vendored DV closure and from the
+mounted FlooNoC reference's dependency revision. This project pins
 [`common_cells` 1.39.0](https://github.com/pulp-platform/common_cells/tree/9ca8a7655f741e7dd5736669a20a301325194c28)
-at commit `9ca8a7655f741e7dd5736669a20a301325194c28`, matching
-`/references/FlooNoC/Bender.yml` and `/references/FlooNoC/Bender.lock`. The selected primitive
+at commit `9ca8a7655f741e7dd5736669a20a301325194c28` through `rtl/Bender.yml`. The selected primitive
 interfaces are `fifo_v3`, `cdc_fifo_gray`, `stream_register`, `spill_register`, and
 [`addr_decode`](https://github.com/pulp-platform/common_cells/blob/9ca8a7655f741e7dd5736669a20a301325194c28/src/addr_decode.sv),
 whose pinned source documents the overlap priority. Bender resolves
 their transitive sources and include order from `rtl/Bender.yml`. Production builds fetch that
 exact revision and do not copy or rewrite the files. The upstream license is
 [Solderpad Hardware License v0.51](https://github.com/pulp-platform/common_cells/blob/9ca8a7655f741e7dd5736669a20a301325194c28/LICENSE).
+
+For issue #43, the mounted production-approved FlooNoC reference was inspected at
+`2fa02eb23c1babef9a8f714715ea7c78de98c364`. Its `Bender.lock` resolves `common_cells`
+2.0.0-beta.3 at `63b7c50d43e462b59506f69d341ff1e40202866d`, and its
+`floo_id_translation.sv` calls the renamed `cc_addr_decode` interface. This project adopts the
+generated typed-SAM and elaboration-time parameter-passing pattern, while `ni_sam` targets the
+separately approved project pin and its `addr_decode` API. No FlooNoC RTL is copied or instantiated
+by this documentation-only change.
 
 Issues #11 and #12 inspected two additional source trees for NI verification planning. The
 classifications below govern those plans and do not change the license of any source:

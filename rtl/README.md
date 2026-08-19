@@ -121,11 +121,11 @@ typed constant `SAM` as required elaboration-time parameters, without functional
 defaults. Its ports are:
 
 ```systemverilog
-input  addr_t     addr_i,
-input  logic      lookup_en_i,
-output sam_idx_t  sam_idx_o,
-output logic      lookup_valid_o,
-output logic      lookup_error_o
+input  wire addr_t     addr_i,
+input  wire logic      lookup_en_i,
+output wire sam_idx_t  sam_idx_o,
+output wire logic      lookup_valid_o,
+output wire logic      lookup_error_o
 ```
 
 The wrapper instantiates the production-pinned `common_cells` `addr_decode`,

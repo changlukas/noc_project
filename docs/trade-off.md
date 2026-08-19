@@ -138,14 +138,16 @@ address-map flexibility without adding a datapath search: the SAM result already
 required X/Y slices. A future table-free offset decoder would instead require one global
 coordinate field.
 
-PPA cost is explicit: NMU has one comparator bank each for AW and AR, and NSU has one AW bank that
-is active only for multicast. Comparator count and priority fan-in scale linearly with
+PPA cost is explicit: NMU has one comparator bank each for AW and AR, and NSU has one AW bank whose
+result is functionally qualified only for multicast. The pinned decoder has no enable port, so this
+contract makes no unmeasured claim that the NSU bank is physically clock-gated or free of internal
+switching on unicast traffic. Comparator count and priority fan-in scale linearly with
 `SAM_NUM_RULES`; there is no SAM storage register, queue, extra arbitration layer, width expansion,
 or mandatory pipeline stage. The existing independent AW/AR register-slice controls remain the
 only timing cuts. Reusing the typed wrapper reduces duplicated control logic but does not share a
-physical comparator bank across concurrent channels. Any table-free or shared-bank optimization
-requires measured timing/area pressure and must preserve one-request-per-cycle availability,
-authored priority, and independent AW/AR progress.
+physical comparator bank across concurrent channels. Any input-isolation, table-free, or
+shared-bank optimization requires measured timing/area pressure and must preserve
+one-request-per-cycle availability, authored priority, and independent AW/AR progress.
 
 ## External AXI interface
 
