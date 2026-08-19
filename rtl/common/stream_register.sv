@@ -5,7 +5,7 @@
 `default_nettype none
 
 /* Ready/valid adapter selecting bypass, simple, or spill register storage. */
-module noc_reg_slice #(
+module stream_register #(
     // 0: bypass, 1: simple register, 2: full spill register.
     parameter int unsigned REG_TYPE = 0,
     // Complete transaction record type.

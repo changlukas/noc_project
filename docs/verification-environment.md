@@ -198,7 +198,7 @@ classifications below govern those plans and do not change the license of any so
 | ID | source and inspected revision | classification and permitted use | license obligation |
 |---|---|---|---|
 | P1 | FlooNoC at `cb7b2ba3fd4b7eac340a4117ffba05c2a9757699`; inspected `floo_rob.sv`, `floo_rob_wrapper.sv`, `tb_floo_rob.sv`, `floo_meta_buffer.sv`, and `floo_axi_chimney.sv` | production-approved external reference; architecture, behavior, and test intent may inform reviewed production work, but issues #11 and #12 copy or instantiate no RTL | inspected files carry `SPDX-License-Identifier: SHL-0.51`; preserve their copyright/SPDX notices and the repository's Solderpad Hardware License v0.51 terms in any separately approved reuse |
-| P2 | Taxi at `d5d38c268e1ec5a0bf55ea59b6c25fb59c7b73ad`; inspected AXI/stream register RTL plus register and async-FIFO test methods | reference-only; general test intent may inform project-owned DV, but its RTL must not be copied, adapted, or instantiated in production | inspected sources carry `SPDX-License-Identifier: CERN-OHL-S-2.0`; retain all notices in the reference tree and do not rewrite or remove them |
+| P2 | Taxi at `c71926499b47aa7e3dd963b994bd040319d596f5`; inspected complete AXI register/FIFO and AXI-Stream register/FIFO families plus their tests | production-approved for complete AXI-interface units when their exact contract is required; AXI-Stream units are not used to assemble project AXI channels | inspected RTL carries `SPDX-License-Identifier: CERN-OHL-S-2.0`; any vendored derivative retains copyright/SPDX notices and records its upstream revision and modifications |
 
 Issue #10's candidate inventory includes the upstream Router tops and wrappers, their directly
 relevant transitive modules, the deprecated VC-router family, direct Router tests, synthesis
@@ -247,12 +247,11 @@ third-party source-license delta. This issue performs no adaptation or RTL imple
 | P3-T01 | `hw/tb/tb_floo_router.sv` | adapt test intent only | upstream queue/record agents are not reused | project-owned DV retains connectivity, backpressure, and ordered-result intent but supplies independent predictors/fault injection | no test source copied by issue #10; any future derivative has obligations above |
 | P3-T02 | `hw/tb/tb_floo_vc_router.sv` | adapt test intent only | look-ahead/scalar-credit agents do not match target | project-owned DV retains VC/credit/worm stress intent and replaces the oracle, modes, assertions, and coverage | no test source copied by issue #10; any future derivative has obligations above |
 
-For issue #10, P2 inspection was limited to `src/prim/rtl/taxi_arbiter.sv`,
-`src/prim/tb/taxi_arbiter/test_taxi_arbiter.py`, `src/axis/rtl/taxi_axis_register.sv`, and
-`src/axis/tb/taxi_axis_register/test_taxi_axis_register.py`. The arbitration permutation and
-ready/valid pause-matrix ideas may inform independently written tests. The P2 classification is
-unchanged: reference-only, never copied, adapted, or instantiated, with all CERN-OHL-S-2.0 notices
-left intact.
+For issue #10, the earlier P2 inspection covered arbitration and AXI-Stream register behavior.
+The later production review covered the complete AXI register/FIFO family and established the
+classification above. Production use remains unit-by-unit: a complete AXI unit may be vendored
+when its interface and behavior match; AXI-Stream FIFO logic is not used as an AXI-channel CDC
+substitute. All CERN-OHL-S-2.0 notices remain intact.
 
 The project-owned C++ NMU and NSU models are conditional executable oracles rather than third-party
 sources. Their target-aligned and excluded comparison areas are listed in

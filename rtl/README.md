@@ -322,14 +322,15 @@ per-VC credit links.
 
 ## Shared foundation packages (Stage 2)
 
-These adapters may map project records and ready/valid names onto the pinned primitive ports. They
-must not implement storage arrays, pointers, synchronizers, or a second flow-control policy.
+Block tops map project records and ready/valid handshakes directly onto the approved primitive
+ports. Shared RTL must not add storage arrays, pointers, synchronizers, or a second flow-control
+policy.
 
 | Package/module | Child contract | State owner |
 |---|---|---|
-| `common/noc_sync_fifo` | One typed ready/valid input and output, `clk_i`/`rst_ni`, legal depth parameter; wraps the approved synchronous FIFO with non-fall-through behavior | shared primitive |
-| `common/axi_async_fifo` | One typed source ready/valid face and one typed destination ready/valid face, separate clock/reset pairs; depth is `AXI_FIFO_DEPTH` and maps to the primitive's log-depth | shared CDC primitive |
-| `common/noc_reg_slice` | Typed ready/valid stream; `REG_TYPE=0` bypass, 1 simple stream register, 2 full spill register; illegal values fail elaboration | shared register primitive for types 1/2; no state for type 0 |
+| upstream `cc_fifo` | Synchronous class FIFO; the owning block maps `valid && ready` to push/pop and checks its depth parameter | upstream primitive |
+| upstream `cc_cdc_fifo_gray` | One packed AXI channel per instance across the AXI/NoC clock boundary; the owning NI maps its channel record and checks `AXI_FIFO_DEPTH` | upstream CDC primitive |
+| `common/stream_register` | Ready/valid adapter over the upstream stream/spill registers; `REG_TYPE=0` bypass, 1 simple register, 2 spill register | upstream register state for types 1/2; no state for type 0 |
 | `common/ni_sam` | Qualified address -> typed SAM result plus valid/error; wraps the pinned `cc_addr_decode` | no state; generated constant `SAM` remains the sole rule storage |
 
 Custom reusable FIFO, CDC, or register-slice implementations are forbidden. Block-specific state
@@ -343,7 +344,7 @@ reset behavior, proposed replacement, DV evidence, and license impact must first
 | Package/module | Inputs -> outputs | Exclusive responsibility |
 |---|---|---|
 | `nmu/nmu_axi_cdc` | AXI slave records across ACLK <-> noc_clk | Exactly five AXI-channel CDC instances; no SAM, ordering, or packet state |
-| `nmu/nmu_sam` | accepted AW/AR -> destination, port, class, collective metadata | Instantiates the shared `ni_sam` for AW and AR, performs burst-footprint and collective validation/translation; AW and AR timing cuts use `noc_reg_slice` |
+| `nmu/nmu_sam` | accepted AW/AR -> destination, port, class, collective metadata | Instantiates the shared `ni_sam` for AW and AR, performs burst-footprint and collective validation/translation; AW and AR timing cuts use `stream_register` |
 | `nmu/nmu_rob` | decoded AW/AR and returning B/R metadata -> ordered request/response streams | Per-ID order lists, B/R slot pools, `READ_ROB_ENABLED` behavior, ordering tags, collective admission |
 | `nmu/nmu_packetize` | ordered AXI request records -> complete REQ or DAT flit records | Field mapping and AW-to-W metadata inheritance; no VC allocation or NoC queue |
 | `nmu/nmu_channel_assign` | packetized requests plus Router credits -> TX REQ/TX DAT | REQ and DAT Write class FIFOs, worm lock through WLAST, mode-eligible DAT VC choice and sender credit counters |

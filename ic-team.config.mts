@@ -14,7 +14,7 @@ export default {
     {
       name: "Taxi",
       path: taxiPath,
-      policy: "reference-only",
+      policy: "production-approved",
     },
   ],
   verification: [

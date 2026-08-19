@@ -507,6 +507,19 @@ tests, then maps the required semantics onto the production-approved primitive. 
 parameter keeps its separately approved default; this rule does not introduce a global default or
 permit reference-only source in the production build.
 
+The approved lookup order is exact-contract reuse, not brand preference. Complete AXI-interface
+register units may use the approved AXI library. Internal packed ready/valid paths do not assemble
+AXI behavior from AXI-Stream interfaces. Synchronous class FIFOs use `cc_fifo`; the five AXI CDC
+channels use `cc_cdc_fifo_gray`; SAM uses `cc_addr_decode`. The owning block maps handshakes and
+checks legal depth values. No project FIFO wrapper or duplicate wrapper-only regression is kept.
+
+This choice avoids the extra AXI-Stream sidebands and output-prefetch capacity semantics observed
+in the surveyed stream FIFO. It also avoids adopting a context-specific local FIFO whose full-rate
+behavior depends on caller-side gating and whose CDC pointer contract differs from the production
+requirement. The selected primitives keep exact power-of-two storage ownership and an already reviewed
+CDC implementation. The cost is that each block top must expose the primitive push/pop mapping;
+that mapping is local wiring, not a second storage abstraction.
+
 ## Model-facing REQ/RSP held-valid adaptation
 
 REQ and RSP retain standard held ready/valid semantics: a transfer occurs only on

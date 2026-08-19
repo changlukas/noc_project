@@ -38,7 +38,7 @@ task_sources=(
     "$task_common_cells/src/cc_spill_register_flushable.sv"
     "$task_common_cells/src/cc_spill_register.sv"
     "$task_root/rtl/common/ni_sam.sv"
-    "$task_root/rtl/common/noc_reg_slice.sv"
+    "$task_root/rtl/common/stream_register.sv"
     "$task_root/rtl/nmu/nmu_sam.sv"
     "$task_root/rtl/nmu/tests/tb_nmu_sam.sv"
 )
