@@ -155,17 +155,47 @@ struct RobTestbench {
 // rather than stalling. B RoB behavior is covered by the RobSameDestBypass / Enabled
 // tests below.
 
-TEST(NmuRob, Disabled_StallReleaseOnRlast) {
+TEST(NmuRob, Disabled_SameOrderingDomainAdmitsUpToPerIdBound) {
     RobTestbench r;
     ASSERT_TRUE(r.rob.push_ar(make_ar(0x05, 0x100)));
-    EXPECT_FALSE(r.rob.push_ar(make_ar(0x05, 0x200)));
+    EXPECT_TRUE(r.rob.push_ar(make_ar(0x05, 0x200)))
+        << "same {dst_id, dst_port_id, AXI class} reads share the disabled-mode domain";
+}
+
+TEST(NmuRob, Disabled_DifferentOrderingDomainStallsUntilRlast) {
+    RobTestbench r;
+    ASSERT_TRUE(r.rob.push_ar(make_ar(0x05, 0x100)));
+    EXPECT_FALSE(r.rob.push_ar(make_ar(0x05, 0x100000000ull + 0x200)));
     // Inject R(last=true)
     ASSERT_TRUE(r.noc.rsp_out().push_flit(make_r_flit(0x05, /*rlast=*/true)));
     r.depkt.tick();
     auto rb = r.rob.pop_r();
     ASSERT_TRUE(rb.has_value());
     EXPECT_TRUE(rb->last);
-    EXPECT_TRUE(r.rob.push_ar(make_ar(0x05, 0x200)));
+    EXPECT_TRUE(r.rob.push_ar(make_ar(0x05, 0x100000000ull + 0x200)));
+}
+
+TEST(NmuRob, Disabled_KeyRemainsLatchedUntilFinalRlast) {
+    ChannelModel noc{16, 16};
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt{noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {}};
+    Depacketize depkt{noc.rsp_in(), 16, 16};
+    Rob rob{pkt, depkt, RobMode::Disabled, legacy_sam(), 32, 32, /*max_txns_per_id=*/2};
+
+    ASSERT_TRUE(rob.push_ar(make_ar(/*id=*/5, /*addr=*/0x0100)));
+    ASSERT_TRUE(rob.push_ar(make_ar(/*id=*/5, /*addr=*/0x0200)));
+
+    ASSERT_TRUE(noc.rsp_out().push_flit(make_r_flit(/*rid=*/5, /*rlast=*/true)));
+    depkt.tick();
+    ASSERT_TRUE(rob.pop_r().has_value());
+    EXPECT_FALSE(rob.push_ar(make_ar(/*id=*/5, /*addr=*/0x100000000ull + 0x0300)))
+        << "one remaining same-domain transaction keeps the key latched";
+
+    ASSERT_TRUE(noc.rsp_out().push_flit(make_r_flit(/*rid=*/5, /*rlast=*/true)));
+    depkt.tick();
+    ASSERT_TRUE(rob.pop_r().has_value());
+    EXPECT_TRUE(rob.push_ar(make_ar(/*id=*/5, /*addr=*/0x100000000ull + 0x0300)))
+        << "the different key is legal only after the final RLAST";
 }
 
 TEST(NmuRob, Disabled_WCreditBlocksWBeforeAw) {
@@ -1281,10 +1311,10 @@ TEST(NmuRob, Enabled_MaxTxnsPerId1_MatchesDisabled) {
     ReqCapture w_d, ar_d;
     Packetize pkt_d(noc_d.req_out(), w_d, ar_d, noc_d.req_out(), w_d, kSrcId, {});
     Depacketize depkt_d(noc_d.rsp_in(), 64, 64);
-    Rob rob_d(pkt_d, depkt_d, RobMode::Disabled, legacy_sam());
+    Rob rob_d(pkt_d, depkt_d, RobMode::Disabled, legacy_sam(), 32, 32, 1);
 
     axi::ArBeat a0 = make_ar(0x01, 0x100);
-    axi::ArBeat a1 = make_ar(0x01, 0x200);  // same id: both must refuse
+    axi::ArBeat a1 = make_ar(0x01, 0x200);  // same id: the per-id bound refuses this one
     axi::ArBeat a2 = make_ar(0x02, 0x300);  // different id: both must accept
 
     EXPECT_EQ(rob_e.push_ar(a0), rob_d.push_ar(a0));
@@ -1851,6 +1881,22 @@ addr_trans::SamTable port_sam() {
         {{/*base=*/0x0, /*size=*/0x1000, /*dst_id=*/0x11, axi::AxiClass::Data, /*port=*/1}}};
 }
 
+// One router coordinate may expose multiple endpoint ports.  Keeping dst_id
+// constant makes a port-only change observable to the ordering-domain gate.
+addr_trans::SamTable multi_port_sam() {
+    return addr_trans::SamTable{{
+        {/*base=*/0x0000, /*size=*/0x1000, /*dst_id=*/0x11, axi::AxiClass::Data, /*port=*/1},
+        {/*base=*/0x1000, /*size=*/0x1000, /*dst_id=*/0x11, axi::AxiClass::Data, /*port=*/2},
+    }};
+}
+
+addr_trans::SamTable multi_class_sam() {
+    return addr_trans::SamTable{{
+        {/*base=*/0x0000, /*size=*/0x1000, /*dst_id=*/0x11, axi::AxiClass::Data, /*port=*/1},
+        {/*base=*/0x1000, /*size=*/0x1000, /*dst_id=*/0x11, axi::AxiClass::Narrow, /*port=*/1},
+    }};
+}
+
 struct PortIdTestbench {
     ChannelModel noc{16, 16};
     ReqCapture aw_cap, w_cap, ar_cap;
@@ -1888,4 +1934,70 @@ TEST(NmuRob, Disabled_CarriesTheSamEntrysPortThroughToTheArFlit) {
     auto ar_flit = t.ar_cap.pop();
     ASSERT_TRUE(ar_flit.has_value());
     EXPECT_EQ(ar_flit->get_header_field("dst_port_id"), 1u);
+}
+
+TEST(NmuRob, Enabled_PortChangeTriggersStickyFallback) {
+    ChannelModel noc{16, 16};
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt{noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {}};
+    Depacketize depkt{noc.rsp_in(), 16, 16};
+    Rob rob{pkt, depkt, RobMode::Enabled, multi_port_sam()};
+
+    ASSERT_TRUE(rob.push_ar(make_ar(/*id=*/3, /*addr=*/0x0040)));
+    auto first = ar_cap.pop();
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(first->get_header_field("ordering_req"), 0u);
+
+    ASSERT_TRUE(rob.push_ar(make_ar(/*id=*/3, /*addr=*/0x1040)));
+    auto second = ar_cap.pop();
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(second->get_header_field("ordering_req"), 1u)
+        << "dst_port_id is part of the enabled ordering-domain key";
+}
+
+TEST(NmuRob, Enabled_WritePortChangeTriggersStickyFallback) {
+    ChannelModel noc{16, 16};
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt{noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {}};
+    Depacketize depkt{noc.rsp_in(), 16, 16};
+    Rob rob{pkt, depkt, RobMode::Enabled, multi_port_sam()};
+
+    ASSERT_TRUE(rob.push_aw(make_aw(/*id=*/3, /*addr=*/0x0040)));
+    auto first = noc.req_in().pop_flit();
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(first->get_header_field("ordering_req"), 0u);
+
+    ASSERT_TRUE(rob.push_aw(make_aw(/*id=*/3, /*addr=*/0x1040)));
+    auto second = noc.req_in().pop_flit();
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(second->get_header_field("ordering_req"), 1u)
+        << "dst_port_id is part of the always-enabled B ordering-domain key";
+}
+
+TEST(NmuRob, Disabled_PortChangeStallsWhileIdIsNonIdle) {
+    ChannelModel noc{16, 16};
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt{noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {}};
+    Depacketize depkt{noc.rsp_in(), 16, 16};
+    Rob rob{pkt, depkt, RobMode::Disabled, multi_port_sam(), 32, 32, /*max_txns_per_id=*/2};
+
+    ASSERT_TRUE(rob.push_ar(make_ar(/*id=*/3, /*addr=*/0x0040)));
+    EXPECT_TRUE(rob.push_ar(make_ar(/*id=*/3, /*addr=*/0x0080)))
+        << "same ordering-domain reads remain admissible in disabled mode";
+    EXPECT_FALSE(rob.push_ar(make_ar(/*id=*/3, /*addr=*/0x1040)))
+        << "same dst_id but a different dst_port_id must stall while the ID is non-idle";
+}
+
+TEST(NmuRob, Disabled_ClassChangeStallsWhileIdIsNonIdle) {
+    ChannelModel noc{16, 16};
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt{noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {}};
+    Depacketize depkt{noc.rsp_in(), 16, 16};
+    Rob rob{pkt, depkt, RobMode::Disabled, multi_class_sam(), 32, 32, /*max_txns_per_id=*/2};
+
+    ASSERT_TRUE(rob.push_ar(make_ar(/*id=*/3, /*addr=*/0x0040)));
+    auto narrow = make_ar(/*id=*/3, /*addr=*/0x1040);
+    narrow.size = 3;
+    EXPECT_FALSE(rob.push_ar(narrow))
+        << "AXI class is part of the disabled-mode ordering-domain key";
 }

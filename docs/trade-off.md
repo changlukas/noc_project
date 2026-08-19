@@ -105,8 +105,6 @@ SRAM is needed.
   remains. This is the recurring cost of the small RoB.
 - No sweep exists for `max_txns_per_id` (default 32, `[TBD]`) or `r_rob_depth`
   (default 32, expressible to 256 via `R_ROB_DEPTH`).
-- The approved Disabled-mode counter/key policy and the `dst_port_id` term in Enabled-mode bypass
-  are not yet implemented in the C++ reference model.
 
 ## SAM destination decode
 
