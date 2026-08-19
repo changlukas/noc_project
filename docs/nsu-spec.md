@@ -15,7 +15,7 @@ The NSU is the slave-side network interface of the NoC. It terminates the reques
 **COMPUTE** depacketize each flit into exactly one AXI beat, remap the AXI id, remember per-request metadata, drive the beats out of an AXI4 master face in arrival order. When the tile slave answers, packetize each B/R beat into exactly one response flit, restoring the original id and the requester's node id from the remembered metadata, then arbitrate the flit onto a virtual channel.
 **OUTPUT** response flits to the router LOCAL input port on two faces, RSP (every B, plus narrow-class R) and DAT (data-class R). The current model exposes per-VC credit pulses in both DAT directions. Target RTL keeps per-VC credit only for DAT response injection into the Router and uses ready/valid for DAT request ejection from the Router.
 
-The NSU contains no reorder buffer and no address map. Requests are issued toward the slave in NoC arrival order per channel, regardless of AXI id. Reordering same-id responses back into request order is the job of the master-side NI, which the NSU supports only by echoing the `ordering_req` / `ordering_tag` header fields verbatim into every response flit.
+The NSU contains no reorder buffer and does not perform destination routing. Requests are issued toward the slave in NoC arrival order per channel, regardless of AXI id. Reordering same-id responses back into request order is the job of the master-side NI, which the NSU supports only by echoing the `ordering_req` / `ordering_tag` header fields verbatim into every response flit. For multicast AW address replacement only, the target NSU performs a combinational lookup in the same generated SAM table to recover that matched range's coordinate-field layout; this lookup does not change destination or AXI class.
 
 The AW/AR payload carries a global address. For unicast, its node-coordinate field already names this NSU and the address passes unchanged. For a multicast AW, the NSU selects the coordinate field associated with the request's AXI class and overwrites only that field with its own coordinate before issuing the AXI request; all other bits, including the node-local offset, remain unchanged. Config and Memory may use different coordinate fields. The NSU never subtracts a SAM region base. An endpoint without a declared coordinate field, including a peripheral endpoint, leaves the address unchanged.
 
@@ -311,6 +311,7 @@ at simulation startup. Synthesizable RTL receives the same fields from generated
 |---|---|---|---|
 | `NSU_AXI_ID_WIDTH` [target RTL] | `AXI_ID_WIDTH` (3) | 1 to 8 | downstream AXI AWID/ARID/BID/RID width |
 | `NSU_MAX_ACTIVE_IDS` [target RTL] | 8 | 1 to `2**NSU_AXI_ID_WIDTH` | live source-aware downstream-ID mappings, independently per read/write direction |
+| `NSU_MAX_OUTSTANDING` [target RTL] | 32 | power of two, 1 to 256 | Response Queue transaction records, independently per read/write direction |
 | `NSU_QUEUE_DEPTH` [current model] | 16 | 1 to 1024 | single-clock AW/W/AR/B/R queue depth in `AxiMasterPort` |
 | `NSU_META_BUFFER_MAX_OUTSTANDING` | 32 | 1 to 256 | MetaBuffer shared pool, per direction |
 | `NSU_META_BUFFER_MAX_UNIQUE_IDS` | 1 | {1, 8} only, constructor throws otherwise | id remap in Depacketize |

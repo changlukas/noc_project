@@ -293,6 +293,15 @@ nsu:
     max: 256
     sv_symbol: NSU_MAX_ACTIVE_IDS_DFLT
     cpp_symbol: NSU_MAX_ACTIVE_IDS
+  MAX_OUTSTANDING:
+    type: int
+    units: transactions
+    description: "Maximum Response Queue transaction records per NSU direction."
+    default: 32
+    min: 1
+    max: 256
+    sv_symbol: NSU_MAX_OUTSTANDING_DFLT
+    cpp_symbol: NSU_MAX_OUTSTANDING
   QUEUE_DEPTH:
     type: int
     units: beats

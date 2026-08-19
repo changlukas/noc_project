@@ -455,6 +455,7 @@ at simulation startup, and the verification flow checks the generated and runtim
 | AXI interface | `AXI_ID_WIDTH` | 1-8 (3) | NMU AXI ID and NoC-carried ID width; REQ/RSP flit widths derive from it at elaboration |
 | AXI interface | `NSU_AXI_ID_WIDTH` | 1-8 (`AXI_ID_WIDTH`, default 3) | ID width driven by the NSU downstream AXI interface |
 | AXI interface | `NSU_MAX_ACTIVE_IDS` | 1 to `2**NSU_AXI_ID_WIDTH` (8) | Live source-aware downstream-ID mappings per read/write direction; the default 3-bit interface permits up to 8 |
+| AXI interface | `NSU_MAX_OUTSTANDING` | power of two, 1-256 (32) | Response Queue transaction records per read/write direction; independent of active-ID capacity |
 | Flow control | `DAT_NUM_VC` | 1-8 (2) | Total DAT VC count and the Section 4.3 credit signal width; mode-specific legality applies below |
 | Flow control | `NOC_DAT_VC_MODE` | `SHARED`, `READ_WRITE_SPLIT` (`SHARED`) | System-wide eligible-VC policy for NI allocators and DAT router VA |
 | Flow control | `NOC_ROUTER_VC_DEPTH` | power of two, >= 2 (8) | Router DAT input FIFO depth and NI-to-Router sender-credit seed |

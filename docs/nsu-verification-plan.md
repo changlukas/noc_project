@@ -32,6 +32,8 @@ and is legal from 1 to 8. `NSU_MAX_ACTIVE_IDS` defaults to 8 and is legal from 1
 `2**NSU_AXI_ID_WIDTH`; therefore the default 3-bit interface supports 1 through 8 live mappings.
 The external initiator may use the independently wider `INITIATOR_ID_WIDTH`; the endpoint remapper
 compresses it to the NoC-carried `AXI_ID_WIDTH` before the request reaches the NI.
+`NSU_MAX_OUTSTANDING` defaults to 32 and is a power of two from 1 through 256; it independently
+sizes the read and write Response Queues and is not an alias for the live-mapping count.
 
 ## 2. Verification levels
 
@@ -181,12 +183,12 @@ A timeout or unrelated compile error is not a passing guard test.
 | `AXI_ID_WIDTH` | 1, default, 8; generated REQ/RSP widths agree at every port | 0 and 9; any generated-width mismatch |
 | `NSU_AXI_ID_WIDTH` | 1, default, 8 | 0 and 9 |
 | `NSU_MAX_ACTIVE_IDS` | 1, default; `2**NSU_AXI_ID_WIDTH` at widths 1, default, and 8 | 0 and `2**NSU_AXI_ID_WIDTH + 1` |
+| `NSU_MAX_OUTSTANDING` | 1, default, 256 | 0 and a positive non-power-of-two value |
 | `NOC_DAT_NUM_VC` | 1, default, 8 in `SHARED`; 2, 4, 6, 8 in `READ_WRITE_SPLIT` | 0, 9; split with 1 or any odd count; out-of-range credit-vector width |
 | `NOC_DAT_VC_MODE` | both approved encodings | any other encoding |
 | `AXI_FIFO_DEPTH` | 2, default, 32 | 0 and a positive non-power-of-two value |
 | `NOC_FIFO_DEPTH` | 1, default, 32 | 0 and a positive non-power-of-two value |
 | `NOC_ROUTER_VC_DEPTH` | 2, default, 32 | 0, 1, and a positive non-power-of-two value |
-| Response Queue mapping and entry-capacity parameters | boundary and capacity-consistency cases after their canonical defaults/ranges are approved | zero/unrepresentable capacity and out-of-range widths after approval; `[TBD]` until then |
 
 The test records the instance path and expected diagnostic for each guard. This prevents an
 unrelated fatal in another generated block from satisfying the test.

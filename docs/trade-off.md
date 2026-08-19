@@ -234,6 +234,19 @@ remapper before entering the NI. This follows the surveyed separation between in
 output ID width, and maximum unique IDs while retaining all eight default NoC IDs without
 serialization.
 
+`NSU_MAX_OUTSTANDING` independently sizes each read/write Response Queue, defaults to 32, and is
+legal for power-of-two values from 1 through 256. This follows the surveyed separation between
+transaction capacity and unique-ID capacity: one live mapping may own several outstanding
+transactions, so `NSU_MAX_ACTIVE_IDS` cannot size the transaction records.
+
+For multicast AW address replacement, the NSU follows the surveyed receiver-side table method.
+It performs a combinational lookup in the same generated SAM used by the NMU, obtains the matched
+range's X/Y coordinate offsets and widths, and replaces only those bits with the local node
+coordinate. The lookup neither reroutes nor reclassifies the request; `axi_ch` already carries the
+Config/Data class selected by the NMU. Unicast and ranges without collective coordinate metadata
+pass the address unchanged. This avoids adding coordinate metadata to every flit and supports
+different layouts across SAM ranges at the cost of an AW-side comparator table in each NSU.
+
 The target block is named **Response Queue** (`nsu_response_queue` in RTL), and one stored record
 is a `response_entry_t`. `ResponseHeader` is not used for this state because an entry also contains
 ID, ordering, class, collective and narrow-read context; `response_header_t` remains reserved for

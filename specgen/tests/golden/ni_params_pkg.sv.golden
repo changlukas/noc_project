@@ -41,6 +41,7 @@ package ni_params_pkg;
   // NSU depth defaults
   localparam int unsigned NSU_AXI_ID_WIDTH_DFLT                = 3;
   localparam int unsigned NSU_MAX_ACTIVE_IDS_DFLT              = 8;
+  localparam int unsigned NSU_MAX_OUTSTANDING_DFLT             = 32;
   localparam int unsigned NSU_QUEUE_DEPTH_DFLT                 = 16;
   localparam int unsigned NSU_META_BUFFER_MAX_OUTSTANDING_DFLT = 32;
   localparam int unsigned NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT  = 1;

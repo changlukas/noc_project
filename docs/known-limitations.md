@@ -71,7 +71,7 @@ not necessarily a larger config tile.
 
 | Gap | Consequence |
 |---|---|
-| Target Response Queue width/capacity defaults and legal ranges are absent from the canonical RTL parameter table; the current C++ `max_unique_ids` accepts only 1 or 8 | target elaboration guards and boundary tests remain `[TBD]`; the current collapse/pass-through model cannot stand in for the approved dynamic mapper |
+| The current C++ `max_unique_ids` accepts only 1 or 8 and does not model the approved independent `NSU_MAX_ACTIVE_IDS` and `NSU_MAX_OUTSTANDING` capacities | the current collapse/pass-through model cannot stand in for the approved dynamic mapper or independently sized Response Queues |
 | Per-tile compute rate appears in no spec or perf doc | every utilization figure and the minimum viable tile size depend on a number the model does not carry (`docs/noc-workload-benchmark.md` section 9) |
 
 ## Input validation
