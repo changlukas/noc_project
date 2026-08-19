@@ -5,6 +5,11 @@ export default {
   image: "ic-design-team:latest",
   baseBranch: "main",
   maxParallel: 1,
+  planning: {
+    enabled: true,
+    campaignLabel: "campaign:rtl-v1",
+    maxTasks: 8,
+  },
   references: [
     {
       name: "FlooNoC",
