@@ -19,8 +19,8 @@ SOURCE_DIR = Path(__file__).resolve().parent.parent / "source"
 def test_load_constants_returns_expected_shape():
     c = load_constants(SOURCE_DIR / "constants.yaml")
     assert c["schema_version"] == "1.0"
-    assert c["axi"]["ID_WIDTH"]["default"] == 3
-    assert (c["axi"]["ID_WIDTH"]["min"], c["axi"]["ID_WIDTH"]["max"]) == (1, 8)
+    assert c["axi"]["AXI_ID_WIDTH"]["default"] == 3
+    assert (c["axi"]["AXI_ID_WIDTH"]["min"], c["axi"]["AXI_ID_WIDTH"]["max"]) == (1, 8)
     assert c["axi"]["FIFO_DEPTH"]["min"] == 2
     assert c["axi"]["FIFO_DEPTH"]["default"] == 8
     assert c["axi"]["DATA_WIDTH"]["allowed"] == [32, 64, 128, 256, 512, 1024]
