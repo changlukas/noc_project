@@ -201,7 +201,7 @@ module nmu_sam #(
     assign ar_decoded.route.domain.dst_port_id = ar_sam_idx.dst_port_id;
     assign ar_decoded.route.domain.is_data = ar_sam_idx.is_data;
 
-    noc_reg_slice #(
+    stream_register #(
         .REG_TYPE ( AW_SAM_REG_TYPE ),
         .T        ( ni_child_types_pkg::nmu_sam_aw_result_t )
     ) i_aw_reg_slice (
@@ -215,7 +215,7 @@ module nmu_sam #(
         .m_data_o  ( m_aw_o                               )
     );
 
-    noc_reg_slice #(
+    stream_register #(
         .REG_TYPE ( AR_SAM_REG_TYPE ),
         .T        ( ni_child_types_pkg::nmu_sam_ar_result_t )
     ) i_ar_reg_slice (

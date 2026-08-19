@@ -1,5 +1,4 @@
-# Production RTL dependencies. Exact revisions keep builds reproducible without
-# vendoring or rewriting third-party primitive RTL.
+# Production RTL dependencies. Exact revisions keep builds reproducible.
 package:
   name: noc_rtl
 
@@ -11,7 +10,5 @@ dependencies:
 sources:
   - common/ni_child_types_pkg.sv
   - common/ni_sam.sv
-  - common/noc_sync_fifo.sv
-  - common/axi_async_fifo.sv
-  - common/noc_reg_slice.sv
+  - common/stream_register.sv
   - nmu/nmu_sam.sv
