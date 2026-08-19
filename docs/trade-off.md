@@ -110,10 +110,19 @@ SRAM is needed.
 
 ## SAM destination decode
 
-The first RTL milestone implements table decode only. A first-match range lookup returns the
-destination node, destination port and AXI class while forwarding the global AXI address unchanged.
-This covers every shipped mesh and peripheral map. Offset decode can replace the range comparators
-with fixed address-bit slices, but is deferred until table area or timing is a measured problem.
+The first RTL milestone implements one generated table contract and one shared
+pure-combinational wrapper, `ni_sam`. The selected configuration's `endpoints:` block is the sole
+source; build-only `topology_pkg.sv` owns the typed rules and constant `SAM`, and the wrapper reuses
+the pinned `common_cells` `addr_decode`. There is no project-owned second decoder, runtime topology
+multiplexer, writable table, or default route. A lookup returns destination node, destination port,
+AXI class, collective enable, and X/Y coordinate layout while forwarding the global AXI address
+unchanged.
+
+YAML order is the architectural priority. Overlap is legal, and the first authored matching rule
+wins. The pinned primitive instead grants its highest matching array index, so generation reverses
+the expanded rule array. This keeps the policy in generated constants and adds no priority network
+around the primitive. Offset decode can replace the range comparators only if table area or timing
+becomes a measured problem; it is not part of this contract.
 
 AW and AR use separate elaboration-time register-slice controls: `AW_SAM_REG_TYPE` and
 `AR_SAM_REG_TYPE`, both default 0. Value 0 bypasses the slice, value 1 adds a simple output
@@ -121,11 +130,24 @@ register, and value 2 adds a full skid buffer with registered backpressure. Keep
 independent allows the longer AW collective path to be cut without adding AR latency. These knobs
 are RTL timing controls and do not belong in the topology YAML.
 
-Table decode also selects collective coordinate metadata with the matched SAM rule. Each
-collective-capable address space has one internally uniform `node_stride`, but Config and Memory
-may use different strides and coordinate bit positions. This preserves address-map flexibility
-without adding a datapath search: the SAM result already identifies the required X/Y slices. A
-future table-free offset decoder would instead require one global coordinate field.
+Table decode also selects collective coordinate metadata with the matched SAM rule. Only a range
+explicitly authored with `en_collective: true` receives nonzero X/Y selectors; false or absent is
+unicast-only. Each collective-capable address space has one internally uniform `node_stride`, but
+Config and Memory may use different strides and coordinate bit positions. This preserves
+address-map flexibility without adding a datapath search: the SAM result already identifies the
+required X/Y slices. A future table-free offset decoder would instead require one global
+coordinate field.
+
+PPA cost is explicit: NMU has one comparator bank each for AW and AR, and NSU has one AW bank whose
+result is functionally qualified only for multicast. The pinned decoder has no enable port, so this
+contract makes no unmeasured claim that the NSU bank is physically clock-gated or free of internal
+switching on unicast traffic. Comparator count and priority fan-in scale linearly with
+`SAM_NUM_RULES`; there is no SAM storage register, queue, extra arbitration layer, width expansion,
+or mandatory pipeline stage. The existing independent AW/AR register-slice controls remain the
+only timing cuts. Reusing the typed wrapper reduces duplicated control logic but does not share a
+physical comparator bank across concurrent channels. Any input-isolation, table-free, or
+shared-bank optimization requires measured timing/area pressure and must preserve
+one-request-per-cycle availability, authored priority, and independent AW/AR progress.
 
 ## External AXI interface
 
@@ -239,13 +261,14 @@ legal for power-of-two values from 1 through 256. This follows the surveyed sepa
 transaction capacity and unique-ID capacity: one live mapping may own several outstanding
 transactions, so `NSU_MAX_ACTIVE_IDS` cannot size the transaction records.
 
-For multicast AW address replacement, the NSU follows the surveyed receiver-side table method.
-It performs a combinational lookup in the same generated SAM used by the NMU, obtains the matched
-range's X/Y coordinate offsets and widths, and replaces only those bits with the local node
-coordinate. The lookup neither reroutes nor reclassifies the request; `axi_ch` already carries the
-Config/Data class selected by the NMU. Unicast and ranges without collective coordinate metadata
-pass the address unchanged. This avoids adding coordinate metadata to every flit and supports
-different layouts across SAM ranges at the cost of an AW-side comparator table in each NSU.
+For multicast AW address replacement, the NSU follows the approved receiver-side table method.
+It enables `ni_sam` only for multicast AW, obtains the matched range's X/Y coordinate offsets and
+widths, and replaces only those bits with the local node coordinate. The lookup neither reroutes
+nor reclassifies the request; `axi_ch` already carries the Config/Data class selected by the NMU.
+Unicast bypasses lookup. A miss or a rule without explicit collective enable is malformed input,
+not an unchanged-address fallback. This avoids adding coordinate metadata to every flit and
+supports different layouts across SAM ranges at the cost of an AW-side comparator table in each
+NSU.
 
 The target block is named **Response Queue** (`nsu_response_queue` in RTL), and one stored record
 is a `response_entry_t`. `ResponseHeader` is not used for this state because an entry also contains

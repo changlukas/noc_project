@@ -49,7 +49,7 @@ N1's multi-destination ordering tests or model a Router.
 
 | Required behavior | Planned evidence |
 |---|---|
-| table SAM decode and unchanged global address | N0-SAM-01 through N0-SAM-06, NMU-A01 |
+| generated table contract, SAM decode, and unchanged global address | N0-SAM-01 through N0-SAM-14, NMU-A01 |
 | AW/AR register-slice modes | N0-SAM-07 through N0-SAM-10, NMU-A02 |
 | AW/W association and packet fields | N0-PKT-01 through N0-PKT-08, NMU-A03/NMU-A04 |
 | REQ/DAT parallelism and independent pressure | N1-REQ-01 through N1-REQ-04, NMU-A05 |
@@ -102,16 +102,21 @@ has one fault-injection or illegal-stimulus test that demonstrates it can fail.
 | N0-SAM-03 | simultaneous AW and AR lookups into different entries | both decoders accept and return their own complete metadata without shared priority or cross-coupling |
 | N0-SAM-04 | legal FIXED, INCR, and WRAP bursts ending at the last byte of one entry | the complete burst footprint stays in one rule and is accepted; a footprint crossing an entry boundary is rejected before packet emission |
 | N0-SAM-05 | unicast and legal collective AWs in each collective-capable space | unicast remains unchanged; collective destination/mask metadata follows the matched space; peripheral and malformed collective cases are rejected |
-| N0-SAM-06 | generated table compared entry-by-entry with the configuration expansion used by the C++ loader | rule order, base, size, destination, port, class, and coordinate metadata agree; an overlapping or otherwise illegal authored map fails generation/validation |
+| N0-SAM-06 | checker-owned broad authored rule 0 overlaps narrower authored rule 1; also probe a miss | the overlap selects authored rule 0, proving array reversal against highest-index priority; miss returns invalid/error with zero result and no default mapping |
 | N0-SAM-07 | `AW_SAM_REG_TYPE=0` and `AR_SAM_REG_TYPE=0`, including output stalls | bypass is combinational; valid/payload remain protocol-correct and no item is lost or duplicated |
 | N0-SAM-08 | each channel independently at type 1 under isolated and randomized stalls | one complete beat-plus-metadata record is held stable; unloaded latency is one cycle; any permitted post-backpressure bubble is recorded without loss or duplication |
 | N0-SAM-09 | each channel independently at type 2 under continuous traffic and randomized stalls | registered backpressure holds payload stable and, after fill, sustains one accepted request per cycle without avoidable bubbles |
 | N0-SAM-10 | all nine AW/AR mode pairs under simultaneous traffic | each channel follows only its own mode and pressure; no AW/AR coupling is introduced |
+| N0-SAM-11 | generate `mesh_2x2.yml` twice into separate temporary build roots | both packages are byte-identical; in addition to the existing topology symbols, their public SAM surface is exactly `SAM_NUM_RULES`, `SAM_MASK_SEL_WIDTH`, `sam_mask_sel_t`, `sam_idx_t`, `sam_rule_t`, and `SAM`; it contains no `base_id`, and compiles with `ni_sam` using only canonical generated widths |
+| N0-SAM-12 | parse or elaborate the 2x2 package | eight rules; authored memory rule 0 is `SAM[7]` with `[0x0,0x02000000)`, destination/port 0, data/collective set, X selector `{32,1}`, Y selector `{33,1}`; authored config rule 4 is `SAM[3]` with `[0x02000000,0x02001000)` and narrow class |
+| N0-SAM-13 | generate and parse `mesh_4x4.yml` twice | byte-identical 32-rule packages; authored memory rules 0 and 6 are `SAM[31]` and `SAM[25]`, rule 6 covers `[0x600000000,0x602000000)` and selects `{Y:1,X:2}`; X/Y selectors are `{32,2}`/`{34,2}`; authored config rule 16 is `SAM[15]` with `[0x02000000,0x02001000)` and narrow class |
+| N0-SAM-14 | synthetic invalid ranges plus explicit `en_collective: false` and absent cases; run `make clean-generated` | zero/negative or non-4-KiB-aligned size/base, start/end/stride overflow, `start >= end`, invalid destination/port/class/membership, incomplete required coverage, and unrepresentable requested collective layout fail generation; overlap remains legal; false/absent cases have `collective_en=0` and zero-length selectors; generated build-root packages are removed |
 
-The decoder predictor performs an ordered table scan. The DUT may evaluate entries in parallel, but
-the observable winner is the authored first match. Positive topology tests use legal non-overlapping
-maps; priority is still checked at the unit boundary with a checker-owned rule vector, while the
-production generator continues to reject overlapping authored maps.
+The decoder predictor performs an ordered authored-rule scan. The DUT evaluates entries in
+parallel through the pinned `common_cells` `addr_decode`, whose highest matching array index wins;
+the generator therefore emits authored rule `i` at `SAM[SAM_NUM_RULES-1-i]`. Overlap is a legal
+positive case at both generator and unit boundaries. The current C++ validator's overlap rejection
+is non-conforming follow-on work and is not accepted as target RTL evidence.
 
 ### 4.2 Packetization and AW/W association
 
@@ -257,7 +262,7 @@ are observed before time advances; an unrelated compile or simulator failure is 
 | `READ_ROB_ENABLED` | 0 and 1 | other values |
 | `AW_SAM_REG_TYPE`, `AR_SAM_REG_TYPE` | all independent pairs from 0, 1, 2 | any value outside 0..2 |
 | generated interface widths | every legal ID/VC configuration derives the specified REQ/RSP/DAT and credit widths | any independently overridden or mismatched flit/type/credit width |
-| generated SAM | each shipped valid topology | empty, overlapping, overflowing, uncovered, out-of-mesh, duplicate, illegal port/space, or otherwise invalid authored maps |
+| generated SAM | deterministic 2x2/4x4 packages, legal authored overlap, and explicit collective true/false/absent | empty, zero/negative, non-4-KiB-aligned, or overflowing range, uncovered required space, out-of-mesh, duplicate membership, illegal port/class/space, unrepresentable requested collective layout, or otherwise invalid authored map; overlap is not expected-fail |
 
 Other public AXI width guards are exercised at the canonical legal boundaries and sets stated in
 `specgen/source/constants.yaml`; this plan does not repeat them as an independent parameter source.
@@ -272,7 +277,7 @@ implementation.
 
 | ID | Boundary | Property |
 |---|---|---|
-| NMU-A01 | SAM | each accepted AW/AR has one legal first-match result; output address is unchanged; complete metadata is acceptance-stable |
+| NMU-A01 | SAM | each accepted AW/AR has one authored-first result; legal overlap resolves to the earliest authored rule; miss reports invalid/error with no default; output address is unchanged; complete metadata is acceptance-stable |
 | NMU-A02 | ready/valid slices | valid and complete payload stay stable while stalled; accepted-minus-emitted occupancy remains in the legal mode capacity; type 2 is bubble-free under continuous ready traffic |
 | NMU-A03 | AW/W association | no W is emitted without an accepted AW; beat count is `AWLEN + 1`; only WLAST retires metadata; inherited fields equal that AW |
 | NMU-A04 | packet fields | every accepted flit uses a legal channel/face, generated field layout, exact tail, and legal destination port; no reserved encoding or nonzero unused payload escapes |

@@ -48,7 +48,7 @@ emits one generated file per run class, never hand-edited:
 
 | file | content |
 |---|---|
-| `sim/tb/test/topology_pkg.sv` | the geometry and address-map package `tb_noc_mesh.sv` imports: node count, mesh dimensions, per-endpoint crossbar windows, the NoC egress aperture. The file name is fixed and its contents follow `CONFIG`, so switching configuration regenerates it. |
+| `$(BUILD_ROOT)/generated/<CONFIG>/topology_pkg.sv` | build-only per-config geometry, endpoint windows, NoC egress aperture, and the frozen typed SAM declarations/constant imported by the testbench and production NI RTL. Different configurations coexist by directory; no generated package or per-config golden RTL is committed. |
 | `sim/tb/soc/tb_top_dma_<CONFIG>.sv` | `DMA=1` only: the SoC-layer top, whose per-node region compare has to come from the same geometry as the job files. |
 
 The directed top is not generated. `sim/tb/tb_noc_mesh.sv` names the latency
@@ -164,14 +164,24 @@ per-package version, upstream commit, and the one flagged local modification
 external IP; the rest of this document describes the environment in the
 DUT's own vocabulary.
 
-The production RTL primitive dependency is separate from that vendored DV closure. It pins
+The production RTL primitive dependency is separate from that vendored DV closure and from the
+mounted FlooNoC reference's dependency revision. This project pins
 [`common_cells` 1.39.0](https://github.com/pulp-platform/common_cells/tree/9ca8a7655f741e7dd5736669a20a301325194c28)
-at commit `9ca8a7655f741e7dd5736669a20a301325194c28`, matching
-`/references/FlooNoC/Bender.yml` and `/references/FlooNoC/Bender.lock`. The selected primitive
-interfaces are `fifo_v3`, `cdc_fifo_gray`, `stream_register`, and `spill_register`; Bender resolves
+at commit `9ca8a7655f741e7dd5736669a20a301325194c28` through `rtl/Bender.yml`. The selected primitive
+interfaces are `fifo_v3`, `cdc_fifo_gray`, `stream_register`, `spill_register`, and
+[`addr_decode`](https://github.com/pulp-platform/common_cells/blob/9ca8a7655f741e7dd5736669a20a301325194c28/src/addr_decode.sv),
+whose pinned source documents the overlap priority. Bender resolves
 their transitive sources and include order from `rtl/Bender.yml`. Production builds fetch that
 exact revision and do not copy or rewrite the files. The upstream license is
 [Solderpad Hardware License v0.51](https://github.com/pulp-platform/common_cells/blob/9ca8a7655f741e7dd5736669a20a301325194c28/LICENSE).
+
+For issue #43, the mounted production-approved FlooNoC reference was inspected at
+`2fa02eb23c1babef9a8f714715ea7c78de98c364`. Its `Bender.lock` resolves `common_cells`
+2.0.0-beta.3 at `63b7c50d43e462b59506f69d341ff1e40202866d`, and its
+`floo_id_translation.sv` calls the renamed `cc_addr_decode` interface. This project adopts the
+generated typed-SAM and elaboration-time parameter-passing pattern, while `ni_sam` targets the
+separately approved project pin and its `addr_decode` API. No FlooNoC RTL is copied or instantiated
+by this documentation-only change.
 
 Issues #11 and #12 inspected two additional source trees for NI verification planning. The
 classifications below govern those plans and do not change the license of any source:
@@ -436,8 +446,8 @@ endpoints:
     array: [4, 4]             # member k is coordinate (x, y), k = (y << clog2(x_dim)) | x
     sbr_port_protocol: ["axi"]        # is_sbr() gates SAM participation
     addr_range:
-      - { base: 0x0,       size: 0x2000000, stride: 0x100000000, space: memory }
-      - { base: 0x2000000, size: 0x1000,    stride: 0x100000000, space: config }
+      - { base: 0x0,       size: 0x2000000, stride: 0x100000000, space: memory, en_collective: true }
+      - { base: 0x2000000, size: 0x1000,    stride: 0x100000000, space: config, en_collective: true }
 
 routers:
   - { name: "router", array: [4, 4], degree: 5 }   # N/E/S/W links are implicit
@@ -466,24 +476,31 @@ edge its coordinate is not on: on an edge router that port is terminal, while on
 an interior router it carries a live inter-router link and the peripheral's
 Y-to-X ejection turn closes a channel dependency cycle.
 
-The SAM is a first-match `{base, size, dst_id}` range table, expanded from
-these ranges by two readers that must agree rule for rule: `sim/tools/
-address_map.py` `pack_config()` at generate time, and `nmu/sam_yaml.hpp`
-`load_config_table()` at simulation time through `+sam_config`. The generator
-currently emits the testbench endpoint-window view into `topology_pkg.sv`; RTL
-handoff extends that same package with the NI's SAM and coordinate
-metadata. The C++ model keeps the runtime loader because it cannot consume an
-SV package. No synthesizable block parses YAML or exposes a runtime SAM
-programming interface. Both readers reject `routing.use_id_table: false` until
-offset decode is implemented. The generator places each request at
+The selected configuration's `endpoints:` block is the sole SAM source. It is expanded by two
+readers that must agree rule for rule: `sim/tools/address_map.py` `pack_config()` at generate time,
+and `nmu/sam_yaml.hpp` `load_config_table()` at simulation time through `+sam_config`. The generator
+emits the testbench topology view and the frozen typed NI rule table into the same build-only
+per-config `topology_pkg.sv`. The C++ model keeps the runtime loader because it cannot consume an SV
+package. No synthesizable block parses YAML or exposes a runtime SAM programming interface. Both
+readers reject `routing.use_id_table: false` until offset decode is implemented. The generator
+places each request at
 `base(dst) + offset` and the NMU SAM translates the
 address back to `dst_id`, so a divergence would leave the generated package and
 the generated stimulus agreeing with each other and disagreeing with the runtime
 translator. `sim/configs/sam_rules.golden` is where the two meet:
 `tests/nmu/test_sam_config.cpp` holds the C++ expansion to it and
 `sim/tools/test_sam_config_parity.py` holds the Python one, and equality is
-transitive. Both suites are one gate — `make check` — because regenerating the
-golden from one side alone would move that side's goalposts silently.
+transitive. This data golden is not generated RTL and is not per configuration. Package-specific
+tests instead generate 2x2 and 4x4 output twice, parse or elaborate the public types/rules, and make
+semantic assertions without committing an SV golden. Both suites are one gate — `make check` —
+because regenerating a reference from one side alone would move that side's goalposts silently.
+
+YAML authorship order is endpoint, range, then increasing X-fast member. Overlap is legal and the
+earliest authored matching rule wins. The pinned `addr_decode` selects the highest matching array
+index, so package generation stores authored rule `i` at `SAM[SAM_NUM_RULES-1-i]`. Explicit
+`en_collective: true` alone emits collective enable and nonzero X/Y selectors; false or absent emits
+zero selector lengths. The invalid-range and exact 2x2/4x4 vectors are listed in `rtl/README.md` and
+the NMU/NSU verification plans.
 
 Member k of a range lands at `base + stride * k`, where k is the host router's
 array index, X-fast: `k = (y << x_bits) | x` with `x_bits = clog2(x_dim)`. That
@@ -493,7 +510,7 @@ node a `0x100000000` block holding a `0x2000000` memory aperture at offset 0 and
 a `0x1000` config aperture at `0x2000000`. `TILE_TARGETS` is therefore 2
 everywhere, and the endpoint carries one decode path, the two-window one. The
 windows are per node and global. Unicast addresses do not rebase; a multicast
-replica changes only the request class's Config or Memory coordinate field at the destination
+replica changes only the matched SAM rule's Config or Memory coordinate field at the destination
 NSU, preserving the global map and the shared node-local offset. The two spaces may place their
 fields at different address bits. A disagreement between the two shows up as an
 address outside both windows, which DECERRs; the endpoint's `DECERR_FAULT_BIT`
@@ -507,12 +524,14 @@ address mask can wildcard: memory bases at `k * stride`, config bases at
 `gen_tb_top.py` rejects a configuration whose mesh dimensions or VC count exceed
 the flit field capacity (`X_WIDTH`/`Y_WIDTH`/`VC_ID_WIDTH` from the flit spec)
 before emitting anything. `sim/verilator/Makefile` regenerates
-`topology_pkg.sv` whenever the config file, the generator, or the `CONFIG` make
-variable changes. Adding a geometry needs only a new file under `sim/configs/`;
+`$(BUILD_ROOT)/generated/<CONFIG>/topology_pkg.sv` whenever the config file or generator changes.
+The per-config path prevents a `CONFIG` switch from overwriting another package. Adding a geometry
+needs only a new file under `sim/configs/`;
 `make sim CONFIG=<name> PATTERN=<p>` picks it up with no other change. The VC
 count and the NMU read RoB mode are not configuration: they are
 `noc.DAT_NUM_VC` and `nmu.READ_ROB_ENABLED` in `specgen/source/constants.yaml`,
-and changing either is an edit and a rebuild.
+and changing either is an edit and a rebuild. `make clean-generated` removes the complete
+`$(BUILD_ROOT)/generated/` subtree.
 
 ## Seed handling
 

@@ -99,17 +99,46 @@ R payload, `NarrowR` 78 b / `DataR` 526 b, consumed by the response path:
 
 ### 2.3 SAM address translation
 
-Destination derivation is a System Address Map (SAM) range lookup, not a bit-slice decode. The SAM is a list of entries {base, size, dst_id, class} (`nmu::addr_trans::SamTable`). On every shipped topology a node owns one memory-space entry and one config-space entry, and the two are far apart in the system map.
+Destination derivation is a System Address Map (SAM) range lookup, not a bit-slice decode. The
+selected `sim/configs/<CONFIG>.yml` `endpoints:` block is the sole source of entries. Each entry
+contains its exclusive address interval and the generated `sam_idx_t`: `dst_id`, `dst_port_id`,
+`is_data`, `collective_en`, and X/Y `{offset,len}` selectors. There is no `base_id` field.
 
-**INPUT** wire address A. **COMPUTE** scan entries in list order, first entry with base <= A < base+size wins. **OUTPUT** {dst_id, dst_port_id, AXI class, space coordinate metadata, A}.
+**INPUT** wire address A. **COMPUTE** scan entries in YAML-authored order, first entry with base <=
+A < base+size wins. Overlap is legal and deterministic. **OUTPUT** {dst_id, dst_port_id, AXI
+class, collective enable, X/Y coordinate selectors, A}; a miss reports invalid/error and has no
+default mapping.
 
 The NMU forwards the global address unchanged and never subtracts the matched SAM region base. For unicast, the destination NSU presents that same address to the tile. For multicast, every branch carries the original AW address and each destination NSU overwrites only its node-coordinate field before presenting it to the tile; all non-coordinate bits remain unchanged. The destination's two spaces remain distinct through the global bases assigned by the map.
 
-The authored SAM comes from the config file's `endpoints` block (`sim/configs/*.yml`). The C++ reference model loads it at simulation startup through `nmu/sam_yaml.hpp`; there is no built-in model default, and `NmuWrap::init` rejects a null or empty `config_path` with `std::invalid_argument`. Synthesizable RTL does not parse YAML: the generator emits the equivalent SAM and decode metadata into `topology_pkg.sv`, and the NMU consumes them as elaboration-time constants. There is no runtime SAM programming interface. Each collective-capable space has its own X/Y address ranges. The matched SAM rule selects those ranges for AWUSER mask translation, so Config and Memory may place their coordinate fields at different address bits.
+The C++ reference model loads the authored SAM at simulation startup through `nmu/sam_yaml.hpp`;
+there is no built-in model default, and `NmuWrap::init` rejects a null or empty `config_path` with
+`std::invalid_argument`. Synthesizable RTL does not parse YAML: the generator emits
+`SAM_NUM_RULES`, `SAM_MASK_SEL_WIDTH`, `sam_mask_sel_t`, `sam_idx_t`, `sam_rule_t`, and constant
+`SAM` into build-only `$(BUILD_ROOT)/generated/<CONFIG>/topology_pkg.sv`. The NMU passes the rule
+count, SAM-related parameter types, and constant array down as elaboration-time parameters. There
+is no runtime SAM programming interface.
 
-Example (`mesh_4x4`): A = 0x6_0000_0080. Matching entry: raster index 6, base = 6 * 0x1_0000_0000 = 0x6_0000_0000, size 0x1_0000_0000, dst_id = 8'h12 (x=2, y=1), memory space. Result: dst_id = 8'h12, local_addr = 0x6_0000_0080 (forwarded unchanged). Non-matching entry for contrast: the dst_id = 8'h11 entry covers [0x5_0000_0000, 0x6_0000_0000), which excludes A because A >= its base+size.
+The shared pure-combinational `ni_sam` wrapper instantiates the pinned `common_cells`
+`addr_decode`; it is not a second decoder. Because that primitive grants the highest matching
+array index, the generator stores authored rule `i` at `SAM[SAM_NUM_RULES-1-i]` to preserve
+authored first-match behavior. Independent AW and AR instances feed `nmu_packetize` destination,
+port, and class results. X/Y selectors are nonzero only for a range that explicitly has
+`en_collective: true`; `false` or absent remains unicast-only with zero-length selectors. The
+matched rule selects those ranges for AWUSER mask translation, so Config and Memory may place
+their coordinate fields at different address bits.
 
-Both windows of one node, on `mesh_2x2`: A = 0x1000 hits node (0,0)'s memory entry [0x0, 0x1_0000_0000) and translates to local_addr = 0x1000 (forwarded unchanged). A = 0x4_0000_0010 hits the same node's config entry at base 0x4_0000_0000 and translates to local_addr = 0x4_0000_0010 (forwarded unchanged) -- the two windows sit at distinct addresses because the map put them apart, not because either address was rebased.
+Example (`mesh_4x4`): A = 0x6_0000_0080. Matching entry: authored memory rule 6,
+base = 6 * 0x1_0000_0000 = 0x6_0000_0000, size 0x0200_0000, generated array index 25,
+dst_id = 8'h12 (x=2, y=1). Result: dst_id = 8'h12, local_addr = 0x6_0000_0080
+(forwarded unchanged). Address 0x6_0200_0000 is outside this half-open region and misses unless a
+separate authored rule covers it.
+
+Both windows of one node, on `mesh_2x2`: A = 0x1000 hits node (0,0)'s memory entry
+`[0x0, 0x0200_0000)` and translates to local_addr = 0x1000 (forwarded unchanged).
+A = 0x0200_0010 hits the same node's config entry at base 0x0200_0000 and translates to
+local_addr = 0x0200_0010 (forwarded unchanged). The two windows sit at distinct addresses because
+the map put them apart, not because either address was rebased.
 
 A SAM miss (address covered by no entry) cannot happen (Section 3.5, guarantee G1). The model aborts if violated. There is no DECERR generation in this block.
 
@@ -416,7 +445,7 @@ The implementation does not handle the following, they are guaranteed not to hap
 | G1 | Every issued address hits a SAM entry. | The system address map covers all issued addresses. Miss aborts (`SamTable::translate`). No DECERR path exists. |
 | G2 | Only B or R flits arrive on the response faces. | Fabric routes request and response classes on disjoint networks. Other axi_ch aborts (`Depacketize::drain_ingress_`). |
 | G3 | No burst crosses a SAM region boundary. | Regions are 4 KiB aligned and sized and AXI4 forbids 4 KiB crossings, so the upstream master never issues one. The model asserts this only on the direct Packetize path (`Packetize::push_aw` / `push_ar`). |
-| G4 | The SAM itself is well-formed: nonzero sizes, 4 KiB aligned base and size, no overlap, dst inside the mesh. | Checked once at load (`SamTable::validate`). |
+| G4 | The SAM itself is well-formed: nonzero representable 4 KiB-aligned ranges, valid destination/port/class membership, and complete required space coverage. Overlap is legal and authored-first deterministic. | Target generator checks these constraints. The current C++ `SamTable::validate` still rejects overlap; this is a recorded follow-on implementation gap. |
 | G5 | valid, once asserted, holds with stable payload until ready (both directions of the AXI face). | AXI4 A3.2.1. The one-shot ready policy depends on it: ready asserts one cycle after valid is first seen. |
 | G6 | W beat counts match their AWs (exactly awlen+1 beats, wlast on the final beat, no spurious W). | AXI4 legality is the master's job. The owed-W counter floors at 0 and does not reject an unexpected W. |
 | G7 | On DAT request injection, the Router never returns more credits than LOCAL input VC slots it freed. On target DAT response ejection, the Router holds valid/flit until NMU ready; the current model instead guarantees a response sender credit. | Request credit conservation uses `NOC_ROUTER_VC_DEPTH` = 8. Target response safety follows ready/valid; current-model credit lies abort in `VcAllocator::tick`. |
@@ -441,8 +470,22 @@ Each item names its verification and the failure condition. "ctest" items run in
 11. AW before W: a W flit never enters the network before its AW flit. The RoB refuses W beats while no AW-accepted burst owes beats, and W flits inherit dst_id / ordering_req / ordering_tag from the AW-ordered metadata FIFO. Verified: `TEST(NmuRob, Disabled_WCreditBlocksWBeforeAw)`, `TEST(NmuPacketize, WMetaFifoInheritsAwDst)`, `TEST(NmuReqBridge, PushWBackpressuresOnEmptyMeta)`. Failure: W flit precedes its AW flit or carries wrong metadata.
 12. Wormhole atomicity: after an AW flit drains on REQ or DAT, only W flits of that burst drain on that same network until the header.flit_tail = 1 W flit; the other physical network remains independently grantable. Verified: `TEST(NocWormholeArbiter, ArCannotInterleaveDuringLock)`, `MultiBeatWBurstFlowsAndUnlocks` (`ref_model/c_model/tests/router/test_wormhole_arbiter.cpp`), plus `TEST(NmuDatFace, ReqBackpressureDoesNotStallDat)` and `DatBackpressureDoesNotStallReq` for cross-network independence. Same-cycle dual-egress coverage is `[TBD]`. Failure: any foreign flit between an AW and its final W on one network, or backpressure crossing from one already-buffered network path into the other.
 13. IMPORTANT wormhole tie-break: each network owns an independent round-robin pointer. REQ scans inputs 0 = AW, 1 = W, 2 = AR; DAT scans inputs 0 = AW, 1 = W. The scan starts after that network's last drained input and the first non-empty input wins, at most 1 flit per network per cycle. Example on REQ: pointer at 0 with AW and AR pending drains AW, locks to W, and after wlast drains from input 1 the pointer is 2, so AR wins the next free REQ cycle even if a new AW is pending. Verified: `TEST(NocWormholeArbiter, AwTriggersLock)` and the co-sim throughput scenarios. Failure: wrong winner or shared arbitration state between REQ and DAT.
-14. SAM lookup: destination is the first entry (list order) whose [base, base+size) contains the address, output {dst_id, class, addr}. Verified: `TEST(SamTable, PackedTranslateForwardsTheAddressUnchanged)`, `TEST(SamTable, TranslateIsInjectiveAcrossSpacesOfOneNode)`, `TEST(SamYaml, SpaceAttributeSelectsClass)` (both spaces of one node). Failure: wrong dst_id, or an address altered on the way through.
-15. SAM validation: a loaded SAM is rejected at load if any entry is zero-size, has a base or size that is not 4 KiB aligned, has base + size overflowing 64 b, or names an out-of-mesh dst; if a node appears more than once in one space; if the memory space does not cover every mesh node exactly once; or if any two ranges overlap. Verified: `TEST(SamValidator, RejectsZeroSize)`, `RejectsNon4KBSize`, `RejectsBasePlusSizeOverflow`, `RejectsDstOutsideMesh`, `RejectsDuplicateNode`, `RejectsMissingNode`, `RejectsOverlap` (`ref_model/c_model/tests/nmu/test_sam_table.cpp`). Failure: bad SAM accepted.
+14. SAM lookup: destination is the first authored entry whose `[base, base+size)` contains the
+address, output `{dst_id, dst_port_id, class, collective metadata, addr}`. Overlap is a positive
+priority case, not an error. Verified for non-overlap by `TEST(SamTable,
+PackedTranslateForwardsTheAddressUnchanged)`, `TEST(SamTable,
+TranslateIsInjectiveAcrossSpacesOfOneNode)`, and `TEST(SamYaml, SpaceAttributeSelectsClass)`.
+Target overlap and generated-array reversal coverage is specified in `docs/nmu-verification-plan.md`.
+Failure: wrong authored winner, wrong metadata, or an address altered on the way through.
+15. SAM generation validation: reject zero or negative size, non-4-KiB-aligned base or size,
+unrepresentable or overflowing base, end, or stride expansion, `start_addr >= end_addr`, invalid
+destination/port/class/endpoint membership, duplicate node membership, or incomplete required
+space coverage. Explicit
+`en_collective: true` additionally requires a representable coordinate layout. Do not reject a
+range overlap. Existing C++ tests cover the older validation paths, but
+`TEST(SamValidator, RejectsOverlap)` documents current non-conforming behavior and must change in
+the follow-on implementation task. Failure: an invalid range accepted, a legal overlap rejected,
+or `false`/absent collective authorship producing nonzero coordinate selectors.
 16. Same-ID response ordering: B and R beats presented to the master for one AXI ID follow the issue order of their requests, in every mode (B side always via the RoB, R side via slot pool when Enabled, via ordering-domain admission when Disabled). Cross-ID order and write-to-read same-address order are NOT guaranteed by this block. Verified for the current model by the existing Enabled tests; Disabled ordering-domain coverage is `[TBD]` until the model is aligned. Failure: any same-ID response inversion.
 17. IMPORTANT admission classification: exactly one of {idle-ID bypass, same-ordering-domain bypass, fall-back allocate} applies per AW / AR, in that priority, per the Section 2.5 tree, with the sticky flag reset only by the idle-ID branch. The key is `{dst_id, dst_port_id, AXI class}`. Example: Section 2.5 five-AW trace, AW#4 allocates although its destination matches AW#3 because the ID is already sticky. Existing destination/class tests remain applicable; `dst_port_id` coverage is `[TBD]` until the model is aligned. Failure: wrong branch taken.
 18. Slot reservation: AW takes 1 slot, AR takes arlen+1 consecutive slots, base = pool depth - free space, refused when free space is short, and refusal mutates no state. Free space is the count above the highest allocated range top (high-water stack, Appendix 7.1). Verified: `TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst)`, `Enabled_LzcAllocator_IsAStack`, `Enabled_PushAw_PoolFull_ReturnFalseAtomic`, `Enabled_PushAr_DownstreamBackpressure_AtomicRollback`. Failure: wrong base, overlapping ranges, or state change on refusal.

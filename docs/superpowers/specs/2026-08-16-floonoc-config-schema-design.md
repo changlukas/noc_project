@@ -55,7 +55,7 @@ supplies zeros, so those parameters are not a difference between them.
 | subordinate test | `endpoint.py:87-89` — `is_sbr()` is `sbr_port_protocol is not None` | an endpoint contributes to the SAM only if it declares `sbr_port_protocol` |
 | `AddrRange` | `model/routing.py:382-391` | `start`, `end`, `size`, `base`, `arr_idx`, `arr_dim`, `rdl_name`, `rdl_as_mem`, `en_collective: bool = False`, `desc` |
 | array expansion | `routing.py:440-449` — `start = base + size * (m * arr_dim[1] + n)` | one range declaration expands to N per-instance ranges over an `array:` endpoint, row-major |
-| SAM derivation | `network.py:686` `gen_sam()` | the address map is derived from endpoint declarations, not hand-listed; `RouteMap` rejects overlapping ranges |
+| SAM derivation | `network.py:686` `gen_sam()` | the address map is derived from endpoint declarations, not hand-listed; upstream `RouteMap` rejects overlapping ranges, but the later approved project contract deliberately does not adopt that rejection: project overlap is legal and authored-first |
 | `en_collective` | `routing.py:377` — "marks this range as a multicast/collective destination" | replaces our AWUSER-mask-only expression of the same idea |
 | `ConnectionDesc` | `model/connection.py:19-31` | `src`, `dst`, `src_range`, `dst_range`, `src_idx`, `dst_idx`, `src_lvl`, `dst_lvl`, `dst_dir: int`, `src_dir: int`, `allow_multi`, `bidirectional` |
 | `XYDirections` | `routing.py:245-252` | `NORTH=0, EAST=1, SOUTH=2, WEST=3, EJECT=4` — `dst_dir`/`src_dir` are these values |
