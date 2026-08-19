@@ -32,6 +32,23 @@ Complete NMU and NSU leaf RTL and paired DV first, then integrate each NI top an
 zero-hop loopback. Router work starts only after both NI loopback gates pass.
 Status: In Progress
 
+### Issue #21: NMU SAM decode and timing cuts
+
+#### Stage 1: Contract and focused DV
+Goal: Bind the generated SAM contract to the NMU child boundary and encode independent AW/AR decode and slice behavior in a focused harness.
+Success Criteria: The harness checks authored-first route/class decode, unchanged AXI addresses, complete AW collective metadata, and independently stalled AW/AR streams for every legal slice mode.
+Status: Complete
+
+#### Stage 2: Leaf implementation
+Goal: Implement `nmu_sam` solely from `ni_sam` and `noc_reg_slice`.
+Success Criteria: Both decode paths use the generated constant `SAM`; modes 0, 1, and 2 preserve complete typed records; unsupported slice modes and incompatible SAM parameters fail explicitly.
+Status: Complete
+
+#### Stage 3: Focused verification and cleanup
+Goal: Run the leaf lint/behavior suite and generated-contract checks, then remove build and generated artifacts.
+Success Criteria: Focused checks pass, `make clean` completes, no generated or build artifact remains, and the issue change is committed from a clean worktree.
+Status: Complete
+
 ## Stage 4: 2x2 Integration
 Goal: Close the first end-to-end RTL write/readback path on a 2x2 mesh.
 Success Criteria: The standing pre-clean runs first; clean RTL build and `2x2 verify` pass with a non-vacuous scoreboard result; no disabled checker or unresolved production tie-off remains.
