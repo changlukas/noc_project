@@ -19,7 +19,7 @@ while buffer and outstanding depths move the queuing part.
 
 | Parameter | Affects | Effect | Default (range) |
 |---|---|---|---|
-| `AXI_ID_WIDTH` [target derived width] | Outstanding capacity, REQ/RSP area | Sets the NoC-carried ID width and the per-ID state count. REQ flit width is `133 + AXI_ID_WIDTH`; RSP is `123 + AXI_ID_WIDTH`; DAT remains 633 b over the legal range because DataW is wider than DataR | 3 (1 to 8); current model locked at 3 |
+| `AXI_ID_WIDTH` [external AXI width] | Outstanding capacity, remap-table area | Sets the external AXI ID space and per-ID state count. The NI remaps it to fixed 3-bit `NOC_ID_WIDTH`; REQ/RSP/DAT remain 136/126/633 b | 3 (1 to 8) |
 | `AXI_DATA_WIDTH` | Peak bandwidth, area | Sets the data-class payload, hence the DAT flit width (`DAT_FLIT_WIDTH` = 633 b = 48 b header + 585 b payload) and per-router buffer and crossbar area | 512 b (32, 64, 128, 256, 512, 1024) |
 | `REQ_NUM_VC`, `RSP_NUM_VC`, `DAT_NUM_VC` | Peak bandwidth, area | Recover link bandwidth lost to head-of-line blocking, at a buffer cost that is `flit width x depth x NUM_VC` per network. Only DAT is swept by the topology set, REQ and RSP being scalar ready/valid | implemented 1, 1, 1; target 1, 1, 2 (1 to 8) |
 | `NOC_DAT_VC_MODE` [target] | Head-of-line blocking, usable capacity | `SHARED` lets every DAT class use every VC. `READ_WRITE_SPLIT` reserves equal lower/upper halves for Write/Read, removing cross-class blocking but potentially stranding capacity under asymmetric traffic | `SHARED` (`SHARED`, `READ_WRITE_SPLIT`); Split requires `DAT_NUM_VC` in {2, 4, 6, 8} |
