@@ -28,7 +28,8 @@
 
 module user_node_endpoint #(
     parameter int unsigned NODE_ID      = 0,
-    parameter int unsigned ID_WIDTH     = ni_params_pkg::AXI_ID_WIDTH_DFLT,
+    parameter int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_ID_WIDTH_DFLT,
+    parameter int unsigned NOC_ID_WIDTH = ni_params_pkg::NOC_ID_WIDTH_DFLT,
     parameter int unsigned ADDR_WIDTH   = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
     parameter int unsigned DATA_WIDTH   = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
     // THIS node's own crossbar windows, stamped by gen_tb_top.py from the
@@ -93,13 +94,14 @@ module user_node_endpoint #(
     // by them. Slave-port ID width is one initiator's own share of the field,
     // and the master-port width adds the $clog2(NoSlvPorts) index axi_xbar
     // appends to route responses back (axi/doc/axi_xbar.md:15, the master-port
-    // index of AXI4 IHI 0022 A5.3.5). Neither follows ID_WIDTH: the tile's id
-    // space is a property of its initiators, the NI's is a property of the NoC,
-    // and i_noc_id_remap below converts between them -- the tile's is the WIDER
-    // of the two.
+    // index of AXI4 IHI 0022 A5.3.5). The tile's external AXI ID space and
+    // the NI's fixed NoC ID space are independent; i_noc_id_remap converts
+    // between them.
     localparam int unsigned XBAR_SLV_PORTS = 2;
-    localparam int unsigned XBAR_SLV_ID_W  = ni_params_pkg::AXI_ID_WIDTH_DFLT;
+    localparam int unsigned XBAR_SLV_ID_W  = AXI_ID_WIDTH;
     localparam int unsigned XBAR_MST_ID_W  = XBAR_SLV_ID_W + $clog2(XBAR_SLV_PORTS);
+    localparam int unsigned NOC_MAX_UNIQ_IDS =
+        1 << ((XBAR_MST_ID_W < NOC_ID_WIDTH) ? XBAR_MST_ID_W : NOC_ID_WIDTH);
 
     // ------------------------------------------------------------------
     // DV interfaces + flat-struct bridging (explicit wiring, both faces)
@@ -170,8 +172,8 @@ module user_node_endpoint #(
     ni_signals_pkg::axi_req_t mst_flat_req;
     ni_signals_pkg::axi_rsp_t mst_flat_rsp;
     logic [AWUSER_WIDTH-1:0]  mst_flat_awuser;
-    // The flat structs are the NI's types, so their id fields are ID_WIDTH
-    // wide -- narrower than one initiator's share. The master face's four ids
+    // The flat structs are NoC-bound NI types, so their id fields are
+    // NOC_ID_WIDTH wide. The external master face's four ids
     // therefore ride BESIDE the structs at XBAR_SLV_ID_W and the corresponding
     // struct fields stay unused (zero). Every id-bearing reader below takes
     // these instead.
@@ -288,7 +290,7 @@ module user_node_endpoint #(
     // downstream id, so per-id ordering survives the fold.
     AXI_BUS #(
         .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ID_WIDTH(NOC_ID_WIDTH), .AXI_USER_WIDTH(AWUSER_WIDTH)
     ) noc_mst ();
 
     // Fault injection for the DECERR gate (standing red-test rule, same shape
@@ -411,7 +413,7 @@ module user_node_endpoint #(
 
     // Both initiators are held to their share of the field: the stimulus
     // generator caps its ids at 2**AXI_ID_WIDTH (gen_test_patterns.py
-    // axi_widths) and the NSU's collapsed downstream id is all-ones of ID_WIDTH
+    // axi_widths) and the NSU's collapsed downstream id is all-ones of NOC_ID_WIDTH
     // (nsu::remap_downstream_id). Nothing asserts that here, and nothing needs
     // to: the master face is XBAR_SLV_ID_W wide, which is exactly the cap, and
     // the NSU's id is narrower still, so an over-range id cannot be represented
@@ -548,9 +550,9 @@ module user_node_endpoint #(
     // through the id remap that converts the tile's id space into the NI's.
     axi_id_remap_intf #(
         .AXI_SLV_PORT_ID_WIDTH(XBAR_MST_ID_W),
-        .AXI_SLV_PORT_MAX_UNIQ_IDS(1 << ID_WIDTH),
+        .AXI_SLV_PORT_MAX_UNIQ_IDS(NOC_MAX_UNIQ_IDS),
         .AXI_MAX_TXNS_PER_ID(ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT),
-        .AXI_MST_PORT_ID_WIDTH(ID_WIDTH),
+        .AXI_MST_PORT_ID_WIDTH(NOC_ID_WIDTH),
         .AXI_ADDR_WIDTH(ADDR_WIDTH),
         .AXI_DATA_WIDTH(DATA_WIDTH),
         .AXI_USER_WIDTH(AWUSER_WIDTH)
@@ -1049,7 +1051,7 @@ module user_node_endpoint #(
     axi_bw_monitor #(
         .req_t(axi_vip_types_pkg::vip_req_t),
         .rsp_t(axi_vip_types_pkg::vip_resp_t),
-        .AxiIdWidth(ID_WIDTH),
+        .AxiIdWidth(NOC_ID_WIDTH),
         .Name($sformatf("node%0d.master", NODE_ID))
     ) u_bw_mst (
         .clk_i(clk_i), .en_i(rst_ni), .end_of_sim_i(end_of_sim_o),

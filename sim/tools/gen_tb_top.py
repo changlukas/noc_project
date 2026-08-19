@@ -702,7 +702,8 @@ def emit_tb_top(topo: dict, dma: bool = False,
         w("    // endpoint but no router. Each carries stimulus of its own, so the exit")
         w("    // logic gates on all of them.")
         w(f"    localparam int unsigned NUM_ENDPOINTS = {n_ep};")
-    w("    localparam int unsigned ID_WIDTH      = ni_params_pkg::AXI_ID_WIDTH_DFLT;")
+    w("    localparam int unsigned AXI_ID_WIDTH  = ni_params_pkg::AXI_ID_WIDTH_DFLT;")
+    w("    localparam int unsigned NOC_ID_WIDTH  = ni_params_pkg::NOC_ID_WIDTH_DFLT;")
     w("    localparam int unsigned ADDR_WIDTH    = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;")
     w("    localparam int unsigned DATA_WIDTH    = ni_params_pkg::AXI_DATA_WIDTH_DFLT;")
     w(f"    localparam int unsigned DAT_NUM_VC     = {dat_num_vc};"
@@ -956,7 +957,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w("    // -------------------------------------------------------------------------")
     w("    noc_fabric #(")
     w(f"        .X_DIM({x_dim}), .Y_DIM({y_dim}),")
-    w("        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
+    w("        .ID_WIDTH(NOC_ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
     w("        .DAT_NUM_VC(DAT_NUM_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),")
     w("        .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH),")
     if peripherals:
@@ -1014,7 +1015,8 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w(f"    for (genvar i = 0; i < {n_ep}; i++) begin : g_endpoint")
     w(f"        {'dma_node_endpoint' if dma else 'user_node_endpoint'} #(")
     w("            .NODE_ID(i),")
-    w("            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
+    w("            .AXI_ID_WIDTH(AXI_ID_WIDTH), .NOC_ID_WIDTH(NOC_ID_WIDTH),")
+    w("            .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
     w("            .TILE_TARGETS(TILE_TARGETS), .TILE_BASE_ADDR(TILE_BASE_ADDR[i]),")
     w("            .TILE_SIZE(TILE_SIZE[i]), .NOC_EGRESS_BASE(NOC_EGRESS_BASE),")
     w("            .MEM_STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),")

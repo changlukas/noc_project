@@ -27,11 +27,11 @@ Two naming and behavior gates must be resolved before their dependent RTL packag
   current-model acceptance section of `docs/nsu-spec.md` describes `MetaBuffer`, not target RTL.
   S0 differential comparison is gated on the selective model alignment in Section 9.
 
-The target downstream-ID contract is approved. `NSU_AXI_ID_WIDTH` defaults to `AXI_ID_WIDTH = 3`
+The target downstream-ID contract is approved. `NSU_AXI_ID_WIDTH` defaults to `NOC_ID_WIDTH = 3`
 and is legal from 1 to 8. `NSU_MAX_ACTIVE_IDS` defaults to 8 and is legal from 1 through
 `2**NSU_AXI_ID_WIDTH`; therefore the default 3-bit interface supports 1 through 8 live mappings.
 The external initiator may use the independently wider `AXI_ID_WIDTH`; the endpoint remapper
-compresses it to the NoC-carried `AXI_ID_WIDTH` before the request reaches the NI.
+compresses it to the fixed NoC-carried `NOC_ID_WIDTH` before the request reaches the NI.
 `NSU_MAX_OUTSTANDING` defaults to 32 and is a power of two from 1 through 256; it independently
 sizes the read and write Response Queues and is not an alias for the live-mapping count.
 
@@ -202,7 +202,8 @@ A timeout or unrelated compile error is not a passing guard test.
 
 | Parameter/contract | Positive matrix | Negative matrix |
 |---|---|---|
-| `AXI_ID_WIDTH` | 1, default, 8; generated REQ/RSP widths agree at every port | 0 and 9; any generated-width mismatch |
+| `AXI_ID_WIDTH` | 1, default, 8; endpoint remap restores B/R IDs | 0 and 9 |
+| `NOC_ID_WIDTH` | 3; generated REQ/RSP/DAT widths agree at every port | any value other than 3; any generated-width mismatch |
 | `NSU_AXI_ID_WIDTH` | 1, default, 8 | 0 and 9 |
 | `NSU_MAX_ACTIVE_IDS` | 1, default; `2**NSU_AXI_ID_WIDTH` at widths 1, default, and 8 | 0 and `2**NSU_AXI_ID_WIDTH + 1` |
 | `NSU_MAX_OUTSTANDING` | 1, default, 256 | 0 and a positive non-power-of-two value |

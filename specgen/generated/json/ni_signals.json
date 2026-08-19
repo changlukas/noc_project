@@ -37,7 +37,7 @@
           "carrier": "request",
           "signals": [
             {
-              "width_param": "AXI_ID_WIDTH",
+              "width_param": "NOC_ID_WIDTH",
               "pin_name": "axi_awid_i",
               "reset_behavior": {
                 "kind": "external_driven"
@@ -186,7 +186,7 @@
           "carrier": "request",
           "signals": [
             {
-              "width_param": "AXI_ID_WIDTH",
+              "width_param": "NOC_ID_WIDTH",
               "pin_name": "axi_arid_i",
               "reset_behavior": {
                 "kind": "external_driven"
@@ -292,7 +292,7 @@
           "carrier": "response",
           "signals": [
             {
-              "width_param": "AXI_ID_WIDTH",
+              "width_param": "NOC_ID_WIDTH",
               "pin_name": "axi_bid_o",
               "reset_behavior": {
                 "kind": "async-active-low",
@@ -332,7 +332,7 @@
           "carrier": "response",
           "signals": [
             {
-              "width_param": "AXI_ID_WIDTH",
+              "width_param": "NOC_ID_WIDTH",
               "pin_name": "axi_rid_o",
               "reset_behavior": {
                 "kind": "async-active-low",
@@ -550,7 +550,7 @@
           "carrier": "request",
           "signals": [
             {
-              "width_param": "AXI_ID_WIDTH",
+              "width_param": "NOC_ID_WIDTH",
               "pin_name": "csr_awid_i",
               "reset_behavior": {
                 "kind": "external_driven"
@@ -699,7 +699,7 @@
           "carrier": "request",
           "signals": [
             {
-              "width_param": "AXI_ID_WIDTH",
+              "width_param": "NOC_ID_WIDTH",
               "pin_name": "csr_arid_i",
               "reset_behavior": {
                 "kind": "external_driven"
@@ -805,7 +805,7 @@
           "carrier": "response",
           "signals": [
             {
-              "width_param": "AXI_ID_WIDTH",
+              "width_param": "NOC_ID_WIDTH",
               "pin_name": "csr_bid_o",
               "reset_behavior": {
                 "kind": "async-active-low",
@@ -845,7 +845,7 @@
           "carrier": "response",
           "signals": [
             {
-              "width_param": "AXI_ID_WIDTH",
+              "width_param": "NOC_ID_WIDTH",
               "pin_name": "csr_rid_o",
               "reset_behavior": {
                 "kind": "async-active-low",
@@ -1063,7 +1063,7 @@
           "carrier": "request",
           "signals": [
             {
-              "width_param": "AXI_ID_WIDTH",
+              "width_param": "NOC_ID_WIDTH",
               "pin_name": "axi_awid_o",
               "reset_behavior": {
                 "kind": "async-active-low",
@@ -1242,7 +1242,7 @@
           "carrier": "request",
           "signals": [
             {
-              "width_param": "AXI_ID_WIDTH",
+              "width_param": "NOC_ID_WIDTH",
               "pin_name": "axi_arid_o",
               "reset_behavior": {
                 "kind": "async-active-low",
@@ -1370,7 +1370,7 @@
           "carrier": "response",
           "signals": [
             {
-              "width_param": "AXI_ID_WIDTH",
+              "width_param": "NOC_ID_WIDTH",
               "pin_name": "axi_bid_i",
               "reset_behavior": {
                 "kind": "external_driven"
@@ -1404,7 +1404,7 @@
           "carrier": "response",
           "signals": [
             {
-              "width_param": "AXI_ID_WIDTH",
+              "width_param": "NOC_ID_WIDTH",
               "pin_name": "axi_rid_i",
               "reset_behavior": {
                 "kind": "external_driven"

@@ -40,7 +40,7 @@ NsuConfig make_cfg(uint8_t src_id) {
     cfg.port_params.b_queue_depth = 16;
     cfg.port_params.r_queue_depth = 16;
     cfg.port_params.meta_buffer_max_outstanding = 32;
-    cfg.port_params.meta_buffer_max_unique_ids = axi::AXI_ID_SPACE;
+    cfg.port_params.meta_buffer_max_unique_ids = axi::NOC_ID_SPACE;
     return cfg;
 }
 

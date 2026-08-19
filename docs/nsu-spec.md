@@ -53,9 +53,8 @@ One 48-bit header layout, three flit widths, one per network (`specgen/generated
 | RSP | 126 | [125:48], 78 b | out: `NarrowB`, `DataB`, `NarrowR` |
 | DAT | 633 | [632:48], 585 b | in: `DataAw`, `DataW`; out: `DataR` |
 
-This table is the current `AXI_ID_WIDTH = 3` model layout. The NI remaps external AXI IDs to the
-fixed 3-bit `NOC_ID_WIDTH` field before packetization, so REQ, RSP and DAT remain 136, 126 and
-633 bits for every legal external ID width. The 585-bit `DataW` payload remains the maximum.
+This is the fixed `NOC_ID_WIDTH = 3` layout: REQ is 136 bits, RSP is 126 bits, and DAT is 633
+bits. `AXI_ID_WIDTH` applies before the endpoint remap and does not change the flit layout.
 
 Header, flit bits [47:0], identical on all three:
 
@@ -348,7 +347,7 @@ second decoder. The complete generated type and array contract is in `rtl/README
 
 | Parameter | Default | Legal range | Consumed at |
 |---|---|---|---|
-| `NSU_AXI_ID_WIDTH` [target RTL] | `AXI_ID_WIDTH` (3) | 1 to 8 | downstream AXI AWID/ARID/BID/RID width |
+| `NSU_AXI_ID_WIDTH` [target RTL] | `NOC_ID_WIDTH` (3) | 1 to 8 | downstream AXI AWID/ARID/BID/RID width |
 | `NSU_MAX_ACTIVE_IDS` [target RTL] | 8 | 1 to `2**NSU_AXI_ID_WIDTH` | live source-aware downstream-ID mappings, independently per read/write direction |
 | `NSU_MAX_OUTSTANDING` [target RTL] | 32 | power of two, 1 to 256 | Response Queue transaction records, independently per read/write direction |
 | `NSU_QUEUE_DEPTH` [current model] | 16 | 1 to 1024 | single-clock AW/W/AR/B/R queue depth in `AxiMasterPort` |
@@ -361,7 +360,7 @@ second decoder. The complete generated type and array contract is in `rtl/README
 | `AXI_FIFO_DEPTH` | 8 | power of two, >= 2 | common AW/W/AR/B/R dual-clock FIFO depth |
 | `NOC_FIFO_DEPTH` | 8 | positive power of two | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
 | `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 136 / 126 / 633 | fixed | per-network flit containers and DPI marshalling |
-| `AXI_ID_WIDTH` / `NOC_ID_WIDTH` | 3 / 3 | AXI ID 1..8 / fixed NoC ID 3 | external AXI ID and mapped NoC ID |
+| `AXI_ID_WIDTH` / `NOC_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 3 / 48 / 512 | external ID 1..8 / fixed 3 / 1..64 / {32,64,128,256,512,1024} | external endpoint ID / NoC-carried ID, beat structs and DPI |
 | create-time `src_id` | 0 | 8 bit | stamped into every response flit `src_id` |
 
 The request ingress stage is a 1-entry register per channel plus the single pending slot. It has no configurable depth.

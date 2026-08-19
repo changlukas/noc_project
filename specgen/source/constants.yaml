@@ -11,14 +11,15 @@ axi:
     default: 3
     min: 1
     max: 8
-    # The NI remaps this external width to the fixed NOC_ID_WIDTH carried in
-    # NoC metadata. The remap backpressures when all live NoC IDs are in use.
+    # The endpoint remaps this external width into the fixed NOC_ID_WIDTH
+    # carried by every NoC flit. New upstream IDs backpressure when all NoC
+    # IDs are live; distinct live upstream IDs never share a NoC ID.
     sv_symbol: AXI_ID_WIDTH_DFLT
     cpp_symbol: AXI_ID_WIDTH
   NOC_ID_WIDTH:
     type: int
     units: bits
-    description: "Fixed NoC transaction ID width after the NI AXI-ID remap"
+    description: "Fixed NoC transaction ID width after AXI-ID remapping"
     default: 3
     allowed: [3]
     sv_symbol: NOC_ID_WIDTH_DFLT

@@ -63,18 +63,18 @@ TEST(MetaBuffer, PeekEmptyReturnsNullopt) {
 using ni::cmodel::nsu::remap_downstream_id;
 
 TEST(RemapDownstreamId, CollapsesToAllOnesOfTheDrivenIdWidth) {
-    constexpr uint8_t collapsed = (1u << ni::AXI_ID_WIDTH) - 1u;
-    EXPECT_LT(collapsed, ni::cmodel::axi::AXI_ID_SPACE) << "must fit the port it is driven onto";
+    constexpr uint8_t collapsed = (1u << ni::NOC_ID_WIDTH) - 1u;
+    EXPECT_LT(collapsed, ni::cmodel::axi::NOC_ID_SPACE) << "must fit the port it is driven onto";
     EXPECT_EQ(remap_downstream_id(0x00, 1), collapsed);
     EXPECT_EQ(remap_downstream_id(0x05, 1), collapsed);
     EXPECT_EQ(remap_downstream_id(collapsed, 1), collapsed);
 }
 
 TEST(RemapDownstreamId, IdentityWhenFullIdSpace) {
-    constexpr uint8_t kMaxId = ni::cmodel::axi::AXI_ID_SPACE - 1u;
-    EXPECT_EQ(remap_downstream_id(0x00, ni::cmodel::axi::AXI_ID_SPACE), 0x00);
-    EXPECT_EQ(remap_downstream_id(0x05, ni::cmodel::axi::AXI_ID_SPACE), 0x05);
-    EXPECT_EQ(remap_downstream_id(kMaxId, ni::cmodel::axi::AXI_ID_SPACE), kMaxId);
+    constexpr uint8_t kMaxId = ni::cmodel::axi::NOC_ID_SPACE - 1u;
+    EXPECT_EQ(remap_downstream_id(0x00, ni::cmodel::axi::NOC_ID_SPACE), 0x00);
+    EXPECT_EQ(remap_downstream_id(0x05, ni::cmodel::axi::NOC_ID_SPACE), 0x05);
+    EXPECT_EQ(remap_downstream_id(kMaxId, ni::cmodel::axi::NOC_ID_SPACE), kMaxId);
 }
 
 TEST(MetaBuffer, SharedPoolFullReportsInsteadOfAborting) {

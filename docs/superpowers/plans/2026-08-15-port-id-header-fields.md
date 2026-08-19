@@ -570,7 +570,7 @@ helper at `:15`; the `Depacketize` construction copies
 TEST(NsuDepacketize, RecordsTheRequestersPortInTheMetaEntry) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::NOC_ID_SPACE);
     auto f = make_aw_flit(0x05, 0x1000, /*src_id=*/0x12);
     f.set_header_field("src_port_id", 1);
     ASSERT_TRUE(noc.req_out().push_flit(f));
@@ -583,7 +583,7 @@ TEST(NsuDepacketizeDeath, RejectsARequestAddressedToAnotherPort) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     // port_id is the seventh constructor argument, after space_coords.
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE,
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::NOC_ID_SPACE,
                       router::null_req_in(), /*src_id=*/0x02, /*space_coords=*/{},
                       /*port_id=*/0);
     auto f = make_aw_flit(0x05, 0x1000, /*src_id=*/0x12);
@@ -595,7 +595,7 @@ TEST(NsuDepacketizeDeath, RejectsARequestAddressedToAnotherPort) {
 
 `MetaBuffer::peek_write(uint8_t bid)` returns `std::optional<MetaEntry>` (`meta_buffer.hpp:93`)
 and the entry is allocated inside `pop_aw`, not at `tick` — hence the ordering above.
-`max_unique_ids = AXI_ID_SPACE` makes `remap_downstream_id` the identity, so `0x05` is the key.
+`max_unique_ids = NOC_ID_SPACE` makes `remap_downstream_id` the identity, so `0x05` is the key.
 
 - [ ] **Step 2: Run them and watch them fail**
 

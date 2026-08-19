@@ -1,6 +1,6 @@
 #pragma once
 #include "axi/types.hpp"
-#include "ni_params.h"  // AXI_ID_WIDTH
+#include "ni_params.h"  // NOC_ID_WIDTH
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -49,19 +49,15 @@ struct MetaEntry {
 // Ported from FlooNoC floo_meta_buffer.sv:89-91 (collapse to '1) and :138-139
 // (offset by MaxAtomicTxns, which is 0 here because AtopSupport is off).
 //
-// '1 is all-ones of the width the NSU DRIVES, which is the NI-facing
-// ni::AXI_ID_WIDTH the flit carries. Upstream keeps the input and output widths
-// apart as axi_cfg_t.InIdWidth and .OutIdWidth (floo_pkg.sv:182-184) and its '1
-// is OutIdWidth-wide; here the two are the same width, so all-ones of
-// AXI_ID_WIDTH is that value. AXI_ID_WIDTH is a tile-side width
-// upstream of the endpoint's axi_id_remap and does not reach this port.
+// '1 is all-ones of the fixed NoC ID width the NSU drives. The endpoint remap
+// owns the independently sized external AXI ID and does not reach this port.
 //
 // The remap is a function of upstream_id ALONE, matching the ported source
 // above. Ordering no longer depends on this choice: the response-path fixed
 // VC map keys on (dst_id ^ id), so same-id streams from different sources
 // land on distinct keys instead of contending.
 inline uint8_t remap_downstream_id(uint8_t upstream_id, std::size_t max_unique_ids) {
-    constexpr uint8_t collapsed = static_cast<uint8_t>((1u << ni::AXI_ID_WIDTH) - 1u);
+    constexpr uint8_t collapsed = static_cast<uint8_t>((1u << ni::NOC_ID_WIDTH) - 1u);
     return max_unique_ids == 1 ? collapsed : upstream_id;
 }
 
@@ -130,12 +126,12 @@ class MetaBuffer {
     void advance_read_beat(uint8_t rid) noexcept { ++read_beat_counter_[rid]; }
 
   private:
-    // One bucket per AXI id (AXI_ID_SPACE); occupancy is bounded by the shared
+    // One bucket per AXI id (NOC_ID_SPACE); occupancy is bounded by the shared
     // counters, not by the bucket count. Static footprint is a modelling
     // artifact, not an RTL cost.
-    std::array<std::deque<MetaEntry>, axi::AXI_ID_SPACE> write_;  // per downstream awid
-    std::array<std::deque<MetaEntry>, axi::AXI_ID_SPACE> read_;   // per downstream arid
-    std::array<uint16_t, axi::AXI_ID_SPACE> read_beat_counter_{};
+    std::array<std::deque<MetaEntry>, axi::NOC_ID_SPACE> write_;  // per downstream awid
+    std::array<std::deque<MetaEntry>, axi::NOC_ID_SPACE> read_;   // per downstream arid
+    std::array<uint16_t, axi::NOC_ID_SPACE> read_beat_counter_{};
     std::size_t max_outstanding_;
     std::size_t write_count_ = 0;
     std::size_t read_count_ = 0;
