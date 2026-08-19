@@ -210,6 +210,23 @@ Per-cycle evaluation order inside the model (`Nmu::tick`, this order is the spec
 response faces -> Depacketize -> Rob -> S2 (1-entry register per channel) -> AxiSlavePort -> AXI master
 ```
 
+Target RTL child ports use the generated per-channel AXI payloads and the packed records in
+`ni_child_types_pkg`; `valid` and `ready` are independent wires. `nmu_sam` accepts
+`nmu_sam_aw_t` and `axi_ar_t`, then produces `nmu_sam_aw_result_t` and
+`nmu_sam_ar_result_t`. `nmu_rob` produces `nmu_aw_request_t` / `nmu_ar_request_t`, accepts
+decoded `nmu_b_response_t` / `nmu_r_response_t`, and returns ordered `axi_b_t` / `axi_r_t`.
+The complete ordering-domain record is `nmu_ordering_domain_t {dst_id, dst_port_id, is_data}`;
+no address, AXI ID, VC, or ordering tag is part of that comparison key.
+
+RoB storage is frozen as four records. `nmu_rob_order_entry_t` contains `base`, a nine-bit
+`beat_count`, `ordering_req`, and the write-only `collective` interlock. `nmu_b_rob_entry_t`
+contains `occupied`, `complete`, and one `axi_b_t beat`. `nmu_r_rob_entry_t` contains
+`occupied`, `complete`, the three-bit `narrow_lane`, and one `axi_r_t beat`.
+`nmu_read_context_t {local_addr, len, size, burst, beat_index}` retains the narrow-read address
+basis for Enabled bypass and the structural `READ_ROB_ENABLED=0` path. Allocation/completion bits
+are not overloaded: reservation sets `occupied`; response arrival sets `complete`; AXI-side
+retirement releases the slot.
+
 **Target integration overlay.** RSP and DAT Read enter independent `noc_clk` class FIFOs under
 ready/valid. The NoC-to-AXI assigner depacketizes them and writes the B or R dual-clock FIFO;
 `vc_id` is not used for NI queue selection. B and R may therefore assert `bvalid` and `rvalid` in

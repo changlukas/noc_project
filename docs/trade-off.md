@@ -276,6 +276,15 @@ ID, ordering, class, collective and narrow-read context; `response_header_t` rem
 an actual NoC response header. The current C++ class remains `MetaBuffer` until the reference-model
 alignment work begins.
 
+The frozen entry fields are `src_id`, `src_port_id`, `noc_id`, `ordering_req`, `ordering_tag`,
+`is_data`, `local_addr`, `len`, `size`, `burst`, `collective_op`, and `collective_mask`. Queue valid,
+mapped downstream ID, mapping reference count, and the front-read beat counter remain separate
+state because each is owned at another lifetime granularity. A single uniform NI request record
+was rejected: carrying AW-only USER/collective fields through AR timing cuts and queues increases
+stored width without adding information. The adopted channel-specific packed records keep those
+bits only on AW while preserving common named ordering-domain and response-entry types. Packed
+typing changes no combinational depth or register count beyond the fields listed.
+
 ## NI CDC and Router VC ownership
 
 The adopted CDC boundary reuses the five AXI channel FIFOs. AW, W and AR cross toward the NI core;

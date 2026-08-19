@@ -97,6 +97,27 @@ Response payloads produced by the NSU:
 
 ### 2.3 Metadata buffer and id remap
 
+The target RTL block is `nsu_response_queue`; its stored transaction type is the packed
+`ni_child_types_pkg::response_entry_t` with exactly these fields:
+
+| Field | Meaning |
+|---|---|
+| `src_id`, `src_port_id` | requester endpoint restored into the response destination |
+| `noc_id` | original NoC-carried AXI ID restored into BID/RID |
+| `ordering_req`, `ordering_tag` | request ordering context echoed on every response flit |
+| `is_data` | Narrow/Data response-class selection |
+| `local_addr`, `len`, `size`, `burst` | read-only narrow-lane address basis; zero in write entries |
+| `collective_op`, `collective_mask` | write-only collective echo; zero in read entries |
+
+The record does not contain valid state, a mapped downstream ID, a mapping reference count, or a
+read beat counter. Those belong respectively to the queue storage, the independent read/write
+mapping tables, and the active front-read state. This prevents one transaction record from
+duplicating per-mapping state. `nsu_depacketize` produces independent `nsu_aw_request_t`,
+`axi_w_t`, and `nsu_ar_request_t` ready/valid streams. `nsu_response_queue` maps AW/AR into
+independent `axi_aw_t` / `axi_ar_t` streams and restores B/R into independent
+`nsu_b_response_t` / `nsu_r_response_t` streams. All payloads are held stable while stalled;
+handshake is never a member of a packed record.
+
 An AXI B or R beat carries only an id. It does not say which node asked, nor which reorder slot the master-side NI reserved. The NSU therefore captures, at the moment an AW or AR is admitted toward the slave, the 4-tuple
 
 `{src_id, upstream_id, ordering_req, ordering_tag}`

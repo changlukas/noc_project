@@ -48,6 +48,16 @@ def emit(packet_json: Path, spec_version: str) -> str:
         emit_param(f"  localparam int unsigned {k:<15} = {val};", k)
     out.append("")
 
+    out.append("  // --- per-network packed flit containers (header occupies the LSBs) ---")
+    for network in C.network_names(spec):
+        payload_width = C.network_payload_width_resolved(spec, network)
+        header_width = C.header_width_resolved(spec)
+        out.append("  typedef struct packed {")
+        out.append(f"    logic [{payload_width - 1}:0] payload;")
+        out.append(f"    logic [{header_width - 1}:0] header;")
+        out.append(f"  }} {network.lower()}_flit_t;")
+    out.append("")
+
     out.append("  // --- header field bit positions (from flit.header_fields) ---")
     for f in spec["flit"]["header_fields"]:
         n = f["name"].upper()

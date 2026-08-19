@@ -183,6 +183,15 @@ generated typed-SAM and elaboration-time parameter-passing pattern, while `ni_sa
 separately approved project pin and its `addr_decode` API. No FlooNoC RTL is copied or instantiated
 by this documentation-only change.
 
+For issue #44, the same production-approved FlooNoC revision was inspected for packed AXI/flit
+typing, metadata lifetime, and RoB storage boundaries. Taxi was inspected at
+`c71926499b47aa7e3dd963b994bd040319d596f5` only for ready/valid naming and source-organization
+guidance. This project keeps its already-approved header-at-LSB flit layout, independent
+valid/ready child ports, source-aware NSU mapping, and B-always-enabled RoB policy; it does not
+instantiate or copy either reference's NI RTL. `ni_child_types_pkg.sv` and
+`tb_ni_type_contract.sv` are project-authored from the approved project specs. Third-party license
+files and source notices are unchanged.
+
 Issues #11 and #12 inspected two additional source trees for NI verification planning. The
 classifications below govern those plans and do not change the license of any source:
 

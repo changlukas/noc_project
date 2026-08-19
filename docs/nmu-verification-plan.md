@@ -49,6 +49,7 @@ N1's multi-destination ordering tests or model a Router.
 
 | Required behavior | Planned evidence |
 |---|---|
+| generated NI payloads, child records, and independent handshake ports | N0-TYPE-01 through N0-TYPE-05 |
 | generated table contract, SAM decode, and unchanged global address | N0-SAM-01 through N0-SAM-14, NMU-A01 |
 | AW/AR register-slice modes | N0-SAM-07 through N0-SAM-10, NMU-A02 |
 | AW/W association and packet fields | N0-PKT-01 through N0-PKT-08, NMU-A03/NMU-A04 |
@@ -93,7 +94,17 @@ has one fault-injection or illegal-stimulus test that demonstrates it can fail.
 
 ## 4. N0 request-side tests
 
-### 4.1 SAM and register slices
+### 4.1 Generated types and leaf contract
+
+| Test | Stimulus | Required evidence |
+|---|---|---|
+| N0-TYPE-01 | regenerate `ni_signals_pkg` and elaborate the five `axi_*_t` channel payloads | widths are 80/577/5/80/518; every named field occupies the `rtl/README.md` LSB-to-MSB position; no payload contains `valid`, `ready`, or an unexposed USER field |
+| N0-TYPE-02 | elaborate `req_flit_t`, `rsp_flit_t`, and `dat_flit_t`; set header and payload members independently | widths are 136/126/633; header remains bits `[47:0]`; payload occupies every remaining bit with no gap or handshake member |
+| N0-TYPE-03 | compile every `nmu_*` child/storage record and compare `$bits`/field names against `ni_child_types_pkg` | ordering-domain, request, response, order-list, B/R slot, and read-context fields match the frozen contract; generated field-width constants are the only width source |
+| N0-TYPE-04 | drive the AW/W/AR/B/R leaf-boundary streams with independent valid/ready stalls | each source holds its complete typed payload; pressure on one stream changes no payload or handshake on another |
+| N0-TYPE-05 | run `python3 -m pytest specgen/tests/test_ni_type_contract.py -q`, inspect the result, then run `make clean` | canonical source order elaborates and the zero-time type harness passes; its build directory is temporary and repository build/generated artifacts are absent after cleanup |
+
+### 4.2 SAM and register slices
 
 | Test | Stimulus | Required evidence |
 |---|---|---|
@@ -118,7 +129,7 @@ the generator therefore emits authored rule `i` at `SAM[SAM_NUM_RULES-1-i]`. Ove
 positive case at both generator and unit boundaries. The current C++ validator's overlap rejection
 is non-conforming follow-on work and is not accepted as target RTL evidence.
 
-### 4.2 Packetization and AW/W association
+### 4.3 Packetization and AW/W association
 
 | Test | Stimulus | Required evidence |
 |---|---|---|

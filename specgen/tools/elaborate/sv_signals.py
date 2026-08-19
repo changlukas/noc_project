@@ -1,7 +1,8 @@
 """SV emitter for signals domain.
 
 Produces rtl_pkg/ni_signals_pkg.sv: reset constants + the packed-struct
-typedefs (axi_req_t / axi_rsp_t) used on every AXI wrap port. Uses
+typedefs (per-channel axi_*_t payloads and axi_req_t / axi_rsp_t aggregates)
+used on AXI ports. Uses
 localparam int unsigned for reset constants (design doc 6.2).
 
 SV interface blocks (axi4_intf / noc_intf) were removed in the FlooNoC struct
@@ -97,6 +98,26 @@ _MASTER_DRIVES_AXI: frozenset[str] = frozenset({
 })
 
 
+# Canonical packed-payload field order, least-significant field first.  VALID
+# and READY remain independent stream ports and are deliberately absent.  The
+# production AXI faces expose AWUSER separately at the NMU and expose no other
+# USER fields, so USER is likewise not part of these child-boundary payloads.
+# Widths still come from _AXI_CHANNEL_SIGNALS; this table fixes order only.
+_AXI_PAYLOAD_FIELD_LSB_ORDER: dict[str, list[str]] = {
+    "AW": [
+        "awid", "awaddr", "awlen", "awsize", "awburst", "awcache", "awlock",
+        "awprot", "awregion", "awqos",
+    ],
+    "W": ["wlast", "wstrb", "wdata"],
+    "B": ["bid", "bresp"],
+    "AR": [
+        "arid", "araddr", "arlen", "arsize", "arburst", "arcache", "arlock",
+        "arprot", "arregion", "arqos",
+    ],
+    "R": ["rlast", "rid", "rresp", "rdata"],
+}
+
+
 # ---------------------------------------------------------------------------
 # Width token translation for packed-struct typedefs (parameters not allowed).
 # Interface uses parameterized widths; struct must use fully-qualified pkg refs.
@@ -145,10 +166,11 @@ def emit_noc_types_pkg(num_vc: int, spec_version: str) -> str:
 
 
 def _emit_axi_structs(channels: list[str]) -> list[str]:
-    """Emit axi_req_t (master-driven) and axi_rsp_t (slave-driven) typedef lines.
+    """Emit per-channel payload types plus aggregate AXI port types.
 
-    Iterates _AXI_CHANNEL_SIGNALS in channel order (same as interface), separates
-    signals by direction using _MASTER_DRIVES_AXI, translates width tokens to
+    The per-channel types have an explicit LSB-first protocol order and exclude
+    handshake signals.  The existing aggregate types retain their established
+    field order.  All widths come from _AXI_CHANNEL_SIGNALS and translate to
     fully-qualified ni_params_pkg::*_DFLT references.
     """
     req_fields: list[tuple[str, str]] = []
@@ -170,9 +192,22 @@ def _emit_axi_structs(channels: list[str]) -> list[str]:
         ]
 
     out: list[str] = [
-        "  // AXI packed-struct typedefs (replaced axi4_intf; widths fixed-default).",
-        "  typedef struct packed {",
+        "  // AXI channel payloads. VALID and READY are independent stream ports.",
+        "  // Fields are declared MSB-to-LSB; packed index zero is the first protocol field.",
     ]
+    for ch in channels:
+        width_by_name = dict(_AXI_CHANNEL_SIGNALS[ch])
+        lsb_fields = _AXI_PAYLOAD_FIELD_LSB_ORDER[ch]
+        fields = [(name, _IFACE_WIDTH_TO_STRUCT[width_by_name[name]]) for name in lsb_fields]
+        out.append("  typedef struct packed {")
+        out.extend(_fields_to_sv(list(reversed(fields))))
+        out.append(f"  }} axi_{ch.lower()}_t;")
+
+    out.extend([
+        "",
+        "  // AXI wrap-port aggregates (widths fixed-default).",
+        "  typedef struct packed {",
+    ])
     out.extend(_fields_to_sv(req_fields))
     out.append("  } axi_req_t;")
     out.append("  typedef struct packed {")
