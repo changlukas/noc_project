@@ -155,12 +155,12 @@ a blocked downstream is not an opportunity.
 
 | Test | Stimulus | Required evidence |
 |---|---|---|
-| R0-ROUTE-01 | every source/destination pair on each legal mesh geometry | X mismatch chooses E/W before any Y move; Y and LOCAL follow only after X matches |
+| R0-ROUTE-01 | every source/destination pair on each legal mesh geometry, including 2x4 and 4x2 | X mismatch chooses E/W before any Y move; Y and LOCAL follow only after X matches |
 | R0-ROUTE-02 | each edge coordinate and each legal boundary destination port | ejection uses the named boundary face; interior use of a boundary face is rejected |
 | R0-ROUTE-03 | self destination and LOCAL port | route is LOCAL with no external turn |
 | R0-ROUTE-04 | random flits with every non-routing field toggled | route is independent of payload and non-routing header fields |
 | R0-ROUTE-05 | reserved port and out-of-mesh coordinates | fail-loud checker/guard fires before a transfer |
-| R0-COL-01 | exhaustive legal masks on small geometries | fork mask equals the independently enumerated member-tree edges |
+| R0-COL-01 | exhaustive legal masks on small square geometries | fork mask equals the independently enumerated member-tree edges |
 | R0-COL-02 | same mask/source space as R0-COL-01 | join mask equals actual unicast return-path contributors |
 | R0-COL-03 | zero mask | both functions reduce to the approved unicast behavior |
 
@@ -233,8 +233,8 @@ functional failure and cannot count as positive coverage.
 | R1-TOP-03 | all legal DAT turns, modes, fixed values, and pressure combinations | per-hop VA, output FIFO behavior, and class/fixed eligibility are exact |
 | R1-TOP-04 | many-to-one traffic from all inputs and VCs | exact two-level arbitration, work conservation, and bounded-opportunity fairness |
 | R1-TOP-05 | mixed packet lengths, locked-empty gaps, and independent outputs | no interleave or lock leak; uncongested outputs progress |
-| R1-TOP-06 | legal disjoint multicast trees with asymmetric branch stalls | branch synchronization, one upstream dequeue, and whole-flit replication |
-| R1-TOP-07 | legal CollectB trees, error mixes, and mid-worm arrival | exact contributor set, reduction, strict priority, and boundary hold |
+| R1-TOP-06 | legal disjoint multicast trees on square meshes with asymmetric branch stalls | branch synchronization, one upstream dequeue, and whole-flit replication |
+| R1-TOP-07 | legal CollectB trees on square meshes, error mixes, and mid-worm arrival | exact contributor set, reduction, strict priority, and boundary hold |
 | R1-TOP-08 | saturate DAT links, withhold and return credits in random batches | all per-VC conservation equations hold and every seed is restored after drain |
 | R1-TOP-09 | assert reset in every nonidle state class | target reset semantics, quiescence, state discard, and post-reset recovery |
 | R1-TOP-10 | drive each network alone while the other two are blocked | no cross-network state or backpressure |
@@ -245,9 +245,10 @@ functional failure and cannot count as positive coverage.
 
 Separate elaboration builds cover every legal set named by `docs/router-spec.md` and generated
 constants: mesh geometries, coordinate classes, DAT VC count/mode combinations, input and output
-FIFO depths, and ready-slack settings. Pairwise legal combinations are sufficient except that all
-VC counts cross all VC modes and all FIFO depth endpoints. Current generated defaults are always
-included. This plan does not change any value, range, or default.
+FIFO depths, and ready-slack settings. Unicast positive tests include rectangular power-of-two
+geometries; multicast/collective positive tests use square geometries only. Pairwise legal
+combinations are sufficient except that all VC counts cross all VC modes and all FIFO depth
+endpoints. Current generated defaults are always included.
 
 Expected-fail elaboration jobs independently violate:
 
@@ -262,6 +263,11 @@ Each job must fail because RTR-A22 reports the intended constraint. Compiler fai
 unrelated syntax, missing-file, or type error is not evidence. The ready-slack numerical
 calibration remains `[TBD]` as specified; verification may test approved settings but may not infer
 a production default from simulation.
+
+A rectangular Router remains a legal elaboration for unicast, so no Router parameter guard can
+infer that collective traffic will be used. The verification/config flow rejects a multicast or
+collective run when the selected dimensions differ; this is an acceptance-policy check, not
+RTR-A22 evidence.
 
 ## 7. Assertion plan and fault-injection evidence
 
