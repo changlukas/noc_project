@@ -72,8 +72,8 @@ def test_signal_interface_pins_unknown_iface_raises(signals_spec):
 # -- pin width resolution -----------------------------------------
 
 def test_pin_width_from_packet_field_widths(signals_spec, packet_spec):
-    """axi_awid_i.width_param = AXI_ID_WIDTH; resolved from packet field_widths."""
-    expected = packet_spec["flit"]["field_widths"]["AXI_ID_WIDTH"]
+    """axi_awid_i carries the fixed NoC ID at the c_model/DPI boundary."""
+    expected = packet_spec["flit"]["field_widths"]["NOC_ID_WIDTH"]
     actual = C.signal_pin_width(signals_spec, packet_spec,
                                 "AXI_SLAVE_PORT", "axi_awid_i")
     assert actual == expected
@@ -128,11 +128,11 @@ def test_signal_eval_expr_bogus_symbol_raises(signals_spec, packet_spec):
 
 def test_signal_eval_expr_arithmetic(signals_spec, packet_spec):
     """Arithmetic over packet symbols composes in signals namespace."""
-    # AXI_ID_WIDTH + AXI_LEN_WIDTH = 8 + 8 = 16
-    expected = (packet_spec["flit"]["field_widths"]["AXI_ID_WIDTH"]
+    # NOC_ID_WIDTH + AXI_LEN_WIDTH = 3 + 8 = 11
+    expected = (packet_spec["flit"]["field_widths"]["NOC_ID_WIDTH"]
                 + packet_spec["flit"]["field_widths"]["AXI_LEN_WIDTH"])
     actual = C.signal_eval_expr(signals_spec, packet_spec,
-                                "AXI_SLAVE_PORT", "AXI_ID_WIDTH + AXI_LEN_WIDTH")
+                                "AXI_SLAVE_PORT", "NOC_ID_WIDTH + AXI_LEN_WIDTH")
     assert actual == expected
 
 

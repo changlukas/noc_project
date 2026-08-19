@@ -20,7 +20,7 @@ struct PortParams {
     // NSU MetaBuffer shared outstanding pool size, per direction (write / read).
     std::size_t meta_buffer_max_outstanding = ni::NSU_META_BUFFER_MAX_OUTSTANDING;
     // Count of distinct AXI IDs the NSU presents downstream. 1 collapses every
-    // request onto the all-ones ID; AXI_ID_SPACE passes the master's ID through.
+    // request onto the all-ones ID; NOC_ID_SPACE passes the master's ID through.
     std::size_t meta_buffer_max_unique_ids = ni::NSU_META_BUFFER_MAX_UNIQUE_IDS;
 };
 

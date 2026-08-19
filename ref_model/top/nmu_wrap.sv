@@ -39,7 +39,7 @@
 `define NMU_WRAP_SV
 
 module nmu_wrap #(
-    parameter int unsigned ID_WIDTH       = ni_params_pkg::AXI_ID_WIDTH_DFLT,
+    parameter int unsigned ID_WIDTH       = ni_params_pkg::NOC_ID_WIDTH_DFLT,
     parameter int unsigned ADDR_WIDTH     = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
     parameter int unsigned DATA_WIDTH     = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
     parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,

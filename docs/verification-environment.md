@@ -61,7 +61,7 @@ inter-router links through a `genvar` generate loop. Boundary directions are
 tied off; a tied-off direction driving a valid flit is a `$fatal`.
 
 `router_wrap` carries three physical networks, each with its current generated flit width
-(`ni_params_pkg`, `AXI_ID_WIDTH = 3`: REQ 136 b, RSP 126 b, DAT 633 b):
+(`ni_params_pkg`, fixed `NOC_ID_WIDTH = 3`: REQ 136 b, RSP 126 b, DAT 633 b):
 
 | network | flow control | carries |
 |---|---|---|
@@ -278,8 +278,8 @@ Upstream references:
   (pulp-platform axi v0.39.7), instantiated as `i_noc_id_remap` in
   `user_node_endpoint.sv`. Its input is the crossbar master-port id space,
   `AXI_ID_WIDTH` + `$clog2(XBAR_SLV_PORTS)` = 5 b, not
-  `AXI_ID_WIDTH` itself, so it folds 32 tile ids onto the NI's
-  `AXI_ID_WIDTH` = 3, 8 ids.
+  `AXI_ID_WIDTH` itself, so it folds 32 tile ids onto the NI's fixed
+  `NOC_ID_WIDTH` = 3, 8 ids.
 - Traffic patterns and injection process: BookSim2 `src/traffic.cpp`
   (`NeighborTrafficPattern`, `TransposeTrafficPattern`,
   `UniformRandomTrafficPattern`, `HotSpotTrafficPattern`) and

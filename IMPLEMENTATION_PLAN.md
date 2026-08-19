@@ -35,6 +35,23 @@ or NoC-to-AXI dataflow order and pass the NMU hybrid zero-hop loopback. Repeat f
 starts only after both NI loopback gates pass.
 Status: In Progress
 
+### Issue #53: AXI ID to fixed NoC ID boundary
+
+#### Stage 1: Contract and focused DV
+Goal: Separate the external AXI ID parameter from the fixed NoC ID field and capture the approved remap primitive contract.
+Success Criteria: Generated C++/SV constants expose AXI_ID_WIDTH=1..8 and NOC_ID_WIDTH=3; flit IDs and NoC link widths remain fixed; focused tests cover widths 1, 3, 8 and illegal widths.
+Status: Complete
+
+#### Stage 2: Boundary integration
+Goal: Bind the existing AXI ID remap primitive to the simulation endpoint and make C++/DPI use the fixed NoC ID width.
+Success Criteria: The endpoint wires the primitive with a 3-bit NoC master ID; model containers and DPI/flit contracts use NOC_ID_WIDTH; source identity remains independent.
+Status: Complete
+
+#### Stage 3: Verification and cleanup
+Goal: Run focused C++/SV/specgen checks, clean generated/build artifacts, and commit the complete change.
+Success Criteria: Allocation/reuse, exhaustion/backpressure, response restoration, legal/illegal parameter checks, drift gate, and clean target pass.
+Status: Complete
+
 ### Issue #21: NMU SAM decode and timing cuts
 
 #### Stage 1: Contract and focused DV

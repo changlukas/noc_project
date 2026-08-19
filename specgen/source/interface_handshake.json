@@ -4,7 +4,7 @@
     "axi4_intf": {
       "kind": "axi4",
       "parameters": [
-        { "name": "ID_WIDTH",   "constants_yaml_key": "axi.AXI_ID_WIDTH"   },
+        { "name": "ID_WIDTH",   "constants_yaml_key": "axi.NOC_ID_WIDTH"   },
         { "name": "ADDR_WIDTH", "constants_yaml_key": "axi.ADDR_WIDTH" },
         { "name": "DATA_WIDTH", "constants_yaml_key": "axi.DATA_WIDTH" }
       ],

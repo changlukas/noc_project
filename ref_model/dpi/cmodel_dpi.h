@@ -149,7 +149,7 @@ void cmodel_dat_merge_get_outputs(unsigned long long ctx, svBitVecVal* nmu_tx_da
 // config_path: a sim/configs file with an `endpoints` block (NULL/empty ->
 // legacy 16x16 uniform, no-rebase SAM).
 // max_txns_per_id: per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId). With no
-// aggregate pool above it, this times 2**AXI_ID_WIDTH is the master-side
+// aggregate pool above it, this times 2**NOC_ID_WIDTH is the master-side
 // injection budget.
 unsigned long long cmodel_nmu_create(const char* name, int src_id, int dat_num_vc,
                                      const char* config_path);
@@ -206,9 +206,9 @@ void cmodel_nmu_admission_stats(unsigned long long ctx, unsigned int* aw_idle_by
 // (REQ/RSP are fixed single-VC, S1 Q2). tx_dat_crdvalid / rx_dat_crdvalid
 // are per-VC: ONE svBitVecVal word, bit vc = credit pulse on VC vc.
 // max_unique_ids: 1 collapses every master onto the all-ones downstream AXI id
-// (FlooNoC's ChimneyDefaultCfg); 2**AXI_ID_WIDTH passes the master's id
+// (FlooNoC's ChimneyDefaultCfg); 2**NOC_ID_WIDTH passes the master's id
 // through. No other value is legal, and the Depacketize constructor throws on
-// one. Pass the width symbolically (ni_params_pkg::AXI_ID_WIDTH_DFLT on the SV
+// one. Pass the width symbolically (ni_params_pkg::NOC_ID_WIDTH_DFLT on the SV
 // side) -- a literal goes stale the next time the id width moves.
 // max_outstanding: shared MetaBuffer pool size per direction (FlooNoC MaxTxns).
 // config_path: the config file. The NSU reads one thing out of it -- where

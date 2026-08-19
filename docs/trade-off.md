@@ -203,16 +203,17 @@ it independently drains REQ and DAT ingress, round-robins simultaneous AW classe
 and burst length in `w_order_`, and blocks W behind the FIFO head. Direct tests for simultaneous
 AW fairness and blocked-head W behavior are still missing.
 
-The NI remaps external AXI IDs to a fixed 3-bit `NOC_ID_WIDTH` before packetization. `AXI_ID_WIDTH`
-is legal from 1 to 8 and defaults to 3, while REQ/RSP/DAT remain fixed at 136/126/633 bits. DAT
-stays 633 bits because its 585-bit `DataW` payload remains wider than `DataAw` and `DataR`. The
-generated field positions, flit containers, router ports and NoC class FIFOs therefore have one
-stable NoC width; each AXI async FIFO still derives its entry width from its own AXI channel type.
+The NoC carries a fixed 3-bit ID field (`NOC_ID_WIDTH`), so REQ/RSP/DAT links are fixed at
+136/126/633 bits. The external `AXI_ID_WIDTH` is independently legal from 1 to 8 and is remapped
+at the endpoint. The remap allocates one of eight NoC IDs to each distinct live external ID,
+backpressures only an unseen ID when all eight are live, and restores the original AXI ID on B/R.
+The generated field positions, flit containers, router ports and NoC class FIFOs therefore remain
+one coherent fixed-width contract; `SRC_ID` and `SRC_PORT_ID` remain NI identity fields.
 
-This avoids widening every NoC link for a wider customer AXI ID and keeps the router/fabric
-interface stable. The cost is a live ID mapping table and backpressure when all eight 3-bit NoC
-IDs are occupied. The mapping is per direction and responses restore the original AXI ID. The
-surveyed reference likewise separates input ID width, output ID width and unique-ID capacity
+This trades at most eight live external-ID mappings per direction for fixed router wires, buffers,
+crossbars, DPI records, and flit storage. No router or NoC FIFO pays for the maximum 8-bit external
+ID. The endpoint table is supplied by the approved AXI remap primitive, so no project-local mapping
+table or allocator is introduced. The surveyed reference likewise composes flits from parameterized packed header and payload types
 ([type definitions](https://github.com/pulp-platform/FlooNoC/blob/2fa02eb23c1babef9a8f714715ea7c78de98c364/hw/include/floo_noc/typedef.svh#L34-L81)).
 
 ## NSU downstream ID mapping
@@ -246,7 +247,7 @@ mapping live while transactions of that key remain outstanding. The tables live 
 request allocation occurs before AW/AR enter their AXI async FIFOs, and response retirement occurs
 after B/R leave those FIFOs. The FIFOs carry the mapped AXI ID; live mapping state never crosses.
 
-`NSU_AXI_ID_WIDTH` defaults to the 3-bit NoC-carried `AXI_ID_WIDTH` and is legal from 1 to 8.
+`NSU_AXI_ID_WIDTH` defaults to the 3-bit NoC-carried `NOC_ID_WIDTH` and is legal from 1 to 8.
 `NSU_MAX_ACTIVE_IDS` defaults to 8 and is legal from 1 through `2**NSU_AXI_ID_WIDTH`; it counts
 live mappings, not ID bits. A wider external `AXI_ID_WIDTH` is compressed by the endpoint
 remapper before entering the NI. This follows the surveyed separation between input ID width,
@@ -381,7 +382,7 @@ This policy has the following advantages:
 - Different sources using the same `noc_id` can remain independently outstanding and may complete
   without artificial same-ID serialization at the downstream AXI interface.
 - ID values remain unchanged in the common no-collision case, while independent
-  `AXI_ID_WIDTH` and `NSU_AXI_ID_WIDTH` values remain legal.
+  external `AXI_ID_WIDTH` and downstream `NSU_AXI_ID_WIDTH` values remain legal.
 - Storage scales with `NSU_MAX_ACTIVE_IDS`, not with the Cartesian product of all source and ID
   widths.
 - Deterministic lowest-free allocation makes cycle-level verification reproducible.
@@ -473,7 +474,7 @@ implements only the `SHARED` candidate set and requires alignment for `READ_WRIT
 
 The deferred DAT-only QoS design keeps QoS metadata separate from `vc_id`. It adds the complete
 4-bit `AxQOS` value as router-visible header metadata, increasing the common header from 48 to
-52 bits and, at the default `AXI_ID_WIDTH = 3`, REQ/RSP/DAT widths from 136/126/633 to
+52 bits and, at fixed `NOC_ID_WIDTH = 3`, REQ/RSP/DAT widths from 136/126/633 to
 140/130/637 bits. `DataAw` and every owning
 `DataW` flit carry `AWQOS`; the NSU Response Queue preserves `ARQOS` and restores it on each
 `DataR` flit. At each packet boundary, an output arbiter selects the highest eligible QoS value,
