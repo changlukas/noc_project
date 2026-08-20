@@ -18,7 +18,7 @@ CMODEL_BUILD     = $(BUILD_ROOT)/cmodel
 SIM_VERILATOR := sim/verilator
 SIM_VCS       := sim/vcs
 
-.PHONY: help build build-cmodel build-yamlcpp build-verilator test rtl-sam-lint rtl-sam-test rtl-id-remap-test rtl-nmu-paths-test \
+.PHONY: help build build-cmodel build-yamlcpp build-verilator test rtl-sam-lint rtl-sam-test rtl-id-remap-test rtl-nmu-paths-test rtl-nmu-ctrl-test \
         pytest check docker-build docker-shell docker-test docker-pytest docker-sim-setup docker-sim-smoke docker-sim-tier2 \
         clean clean-cmodel clean-verilator clean-vcs clean-generated
 
@@ -162,6 +162,9 @@ rtl-nmu-lint:
 
 rtl-nmu-test:
 	@bash rtl/nmu/test.sh test
+
+rtl-nmu-ctrl-test:
+	@bash rtl/nmu/test_req_rsp_ctrl.sh
 
 PYTHON3 ?= python3
 

@@ -9,6 +9,7 @@ dependencies:
 
 sources:
   - common/axi_if.sv
+  - common/nmu_req_rsp_ctrl_if.sv
   - common/ni_child_types_pkg.sv
   - common/ni_sam.sv
   - common/stream_register.sv
@@ -18,3 +19,4 @@ sources:
   - nmu/nmu_response_path.sv
   - nmu/nmu.sv
   - nmu/nmu_request_fifo.sv
+  - nmu/nmu_req_rsp_ctrl_shell.sv
