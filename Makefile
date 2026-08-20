@@ -149,6 +149,12 @@ rtl-common-lint:
 rtl-common-test:
 	@bash rtl/common/test.sh test
 
+rtl-nmu-lint:
+	@bash rtl/nmu/test.sh lint
+
+rtl-nmu-test:
+	@bash rtl/nmu/test.sh test
+
 PYTHON3 ?= python3
 
 # Python suites: specgen (codegen/golden drift gate -- a stale golden, e.g. an

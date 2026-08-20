@@ -12,3 +12,4 @@ sources:
   - common/noc_sync_fifo.sv
   - common/axi_async_fifo.sv
   - common/noc_reg_slice.sv
+  - nmu/nmu_request_fifo.sv
