@@ -86,6 +86,7 @@ __pycache__/
 
 # Local-only doc references (not version-controlled)
 /docs/probe_section_layout_draft.md
+/docs/image/draw.vsdx
 /docs/backlog.md
 
 # SDD scratch (ledger, briefs, reports, codex reviews) — not version-controlled

@@ -123,7 +123,7 @@ _AXI_PAYLOAD_FIELD_LSB_ORDER: dict[str, list[str]] = {
 # Interface uses parameterized widths; struct must use fully-qualified pkg refs.
 # ---------------------------------------------------------------------------
 _IFACE_WIDTH_TO_STRUCT: dict[str, str] = {
-    "[ID_WIDTH-1:0]":   "[ni_params_pkg::NOC_ID_WIDTH_DFLT-1:0]",
+    "[ID_WIDTH-1:0]":   "[ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0]",
     "[ADDR_WIDTH-1:0]": "[ni_params_pkg::AXI_ADDR_WIDTH_DFLT-1:0]",
     "[DATA_WIDTH-1:0]": "[ni_params_pkg::AXI_DATA_WIDTH_DFLT-1:0]",
     "[WSTRB_WIDTH-1:0]": "[ni_params_pkg::AXI_DATA_WIDTH_DFLT/8-1:0]",
