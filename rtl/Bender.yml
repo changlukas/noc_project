@@ -8,7 +8,7 @@ dependencies:
     rev: 63b7c50d43e462b59506f69d341ff1e40202866d
 
 sources:
-  - common/taxi_axi_if.sv
+  - common/axi_if.sv
   - common/ni_child_types_pkg.sv
   - common/ni_sam.sv
   - common/stream_register.sv

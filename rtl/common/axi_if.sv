@@ -8,7 +8,7 @@ Authors:
 
 */
 
-interface taxi_axi_if #(
+interface axi_if #(
     // Width of data bus in bits
     parameter DATA_W = 32,
     // Width of address bus in bits

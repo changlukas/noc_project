@@ -10,7 +10,7 @@ task_sources=(
     "$task_root/specgen/generated/sv/ni_params_pkg.sv"
     "$task_root/specgen/generated/sv/ni_signals_pkg.sv"
     "$task_root/specgen/generated/sv/ni_flit_pkg.sv"
-    "$task_root/rtl/common/taxi_axi_if.sv"
+    "$task_root/rtl/common/axi_if.sv"
     "$task_root/rtl/nmu/nmu.sv"
     "$task_root/rtl/nmu/tests/tb_nmu_elaborate.sv"
 )

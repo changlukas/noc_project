@@ -7,7 +7,7 @@ module tb_nmu_elaborate;
     logic noc_clk;
     logic noc_rst_n;
 
-    taxi_axi_if #(
+    axi_if #(
         .DATA_W(ni_params_pkg::AXI_DATA_WIDTH_DFLT),
         .ADDR_W(ni_params_pkg::AXI_ADDR_WIDTH_DFLT),
         .ID_W(8),
