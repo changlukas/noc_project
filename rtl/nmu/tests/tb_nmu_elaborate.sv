@@ -7,9 +7,13 @@ module tb_nmu_elaborate;
     logic noc_clk;
     logic noc_rst_n;
 
-    ni_signals_pkg::axi_req_t axi_req_i;
-    logic [ni_params_pkg::AXI_AWUSER_WIDTH_DFLT-1:0] awuser_i;
-    ni_signals_pkg::axi_rsp_t axi_rsp_o;
+    taxi_axi_if #(
+        .DATA_W(ni_params_pkg::AXI_DATA_WIDTH_DFLT),
+        .ADDR_W(ni_params_pkg::AXI_ADDR_WIDTH_DFLT),
+        .ID_W(8),
+        .AWUSER_EN(1'b1),
+        .AWUSER_W(ni_params_pkg::AXI_AWUSER_WIDTH_DFLT)
+    ) axi_if();
 
     logic tx_req_valid_o;
     logic [ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT-1:0] tx_req_flit_o;
@@ -26,14 +30,15 @@ module tb_nmu_elaborate;
     logic [ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT-1:0] rx_dat_flit_i;
     logic rx_dat_ready_o;
 
-    nmu dut (
+    nmu #(
+        .AXI_ID_WIDTH(8)
+    ) dut (
         .ACLK               ( ACLK               ),
         .ARESETn            ( ARESETn            ),
         .noc_clk            ( noc_clk            ),
         .noc_rst_n          ( noc_rst_n          ),
-        .axi_req_i          ( axi_req_i          ),
-        .awuser_i           ( awuser_i           ),
-        .axi_rsp_o          ( axi_rsp_o          ),
+        .axi_wr_i           ( axi_if.wr_slv      ),
+        .axi_rd_i           ( axi_if.rd_slv      ),
         .tx_req_valid_o     ( tx_req_valid_o     ),
         .tx_req_flit_o      ( tx_req_flit_o      ),
         .tx_req_ready_i     ( tx_req_ready_i     ),
@@ -49,13 +54,13 @@ module tb_nmu_elaborate;
     );
 
     initial begin
-        assert ($bits(axi_req_i.awid) == ni_params_pkg::AXI_ID_WIDTH_DFLT)
+        assert ($bits(axi_if.awid) == 8)
             else $fatal(1, "AXI request ID width mismatch");
-        assert ($bits(axi_req_i.awaddr) == ni_params_pkg::AXI_ADDR_WIDTH_DFLT)
+        assert ($bits(axi_if.awaddr) == ni_params_pkg::AXI_ADDR_WIDTH_DFLT)
             else $fatal(1, "AXI request address width mismatch");
-        assert ($bits(axi_req_i.wdata) == ni_params_pkg::AXI_DATA_WIDTH_DFLT)
+        assert ($bits(axi_if.wdata) == ni_params_pkg::AXI_DATA_WIDTH_DFLT)
             else $fatal(1, "AXI request data width mismatch");
-        assert ($bits(awuser_i) == ni_params_pkg::AXI_AWUSER_WIDTH_DFLT)
+        assert ($bits(axi_if.awuser) == ni_params_pkg::AXI_AWUSER_WIDTH_DFLT)
             else $fatal(1, "AWUSER width mismatch");
         assert ($bits(tx_req_flit_o) == ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT)
             else $fatal(1, "REQ flit width mismatch");

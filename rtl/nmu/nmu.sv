@@ -34,9 +34,8 @@ module nmu #(
     input  wire logic                                                   noc_clk,
     input  wire logic                                                   noc_rst_n,
 
-    input  wire ni_signals_pkg::axi_req_t                              axi_req_i,
-    input  wire logic [AXI_AWUSER_WIDTH-1:0]                           awuser_i,
-    output wire ni_signals_pkg::axi_rsp_t                              axi_rsp_o,
+    taxi_axi_if.wr_slv                                                  axi_wr_i,
+    taxi_axi_if.rd_slv                                                  axi_rd_i,
 
     output wire logic                                                   tx_req_valid_o,
     output wire logic [ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT-1:0]    tx_req_flit_o,
