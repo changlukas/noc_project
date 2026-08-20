@@ -366,7 +366,7 @@ All ports below are the current C++/DPI `nmu_wrap` ports (`ref_model/top/nmu_wra
 | rst_ni | 1 | Synchronous active-low reset. Given only once, at the beginning of simulation. |
 | ctx_i | 64 | Model instance handle returned by `cmodel_nmu_create`. Constant after creation. |
 | axi_req_i.awvalid | 1 | AW valid. Must stay high until awready is observed. |
-| axi_req_i.awid | 3 | Write transaction ID. Sampled only on the awvalid && awready cycle. |
+| axi_req_i.awid | AXI_ID_WIDTH (default 3) | Write transaction ID. Sampled only on the awvalid && awready cycle. |
 | axi_req_i.awaddr | 48 | Write address. Must hit a SAM entry (guarantee G1). |
 | axi_req_i.awlen | 8 | Burst length minus 1, 0 <= awlen <= 8'hFF (256 beats max). |
 | axi_req_i.awsize | 3 | Beats of 2^awsize bytes, awsize <= 3'h6 = 64 bytes. |
@@ -398,10 +398,10 @@ Every output is a registered signal: it changes only at posedge clk_i and reflec
 | axi_rsp_o.wready | 1 | Pre-asserted: high whenever accepted AWs still owe W beats and the W FIFO has space. Does not wait for wvalid. |
 | axi_rsp_o.arready | 1 | One-shot, same policy as awready, independent of the write side. |
 | axi_rsp_o.bvalid | 1 | B beat available. Held high until bready is observed (AXI4 IHI 0022 A3.2.1). |
-| axi_rsp_o.bid | 3 | B transaction ID. 0 when bvalid is low. |
+| axi_rsp_o.bid | AXI_ID_WIDTH (default 3) | B transaction ID. 0 when bvalid is low. |
 | axi_rsp_o.bresp | 2 | Write response, masked to 2 bits. 0 when bvalid is low. |
 | axi_rsp_o.rvalid | 1 | R beat available. Held high until rready is observed. |
-| axi_rsp_o.rid, rdata, rresp, rlast | 3, 512, 2, 1 | Read response fields. 0 when rvalid is low. |
+| axi_rsp_o.rid, rdata, rresp, rlast | AXI_ID_WIDTH (default 3), 512, 2, 1 | Read response fields. 0 when rvalid is low. |
 | tx_req_valid_o | 1 | REQ request flit on the wire. The model-facing wrapper holds `valid` and `tx_req_flit_o` until `tx_req_ready_i` is sampled high. At most one flit transfers per cycle. |
 | tx_req_flit_o | 136 | REQ request flit, format of Section 2.2. 0 when valid is low. |
 | rx_rsp_ready_o | 1 | RSP ingress ready. Tied true: the model's ingress queue is unbounded (`nmu_wrap.hpp`). |
