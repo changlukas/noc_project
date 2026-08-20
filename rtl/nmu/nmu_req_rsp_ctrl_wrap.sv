@@ -4,8 +4,8 @@
 `timescale 1ns / 1ps
 `default_nettype none
 
-// Boundary-only shell. Storage and ordering policy belong to the next issue.
-module nmu_req_rsp_ctrl_shell #(
+// Boundary-only wrapper. Storage and ordering policy belong to the next issue.
+module nmu_req_rsp_ctrl_wrap #(
     parameter int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_ID_WIDTH_DFLT,
     parameter int unsigned MAX_TXNS_PER_ID = ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT
 ) (

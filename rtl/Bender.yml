@@ -19,4 +19,4 @@ sources:
   - nmu/nmu_response_path.sv
   - nmu/nmu.sv
   - nmu/nmu_request_fifo.sv
-  - nmu/nmu_req_rsp_ctrl_shell.sv
+  - nmu/nmu_req_rsp_ctrl_wrap.sv
