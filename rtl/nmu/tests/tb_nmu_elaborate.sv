@@ -49,7 +49,7 @@ module tb_nmu_elaborate;
     );
 
     initial begin
-        assert ($bits(axi_req_i.awid) == ni_params_pkg::NOC_ID_WIDTH_DFLT)
+        assert ($bits(axi_req_i.awid) == ni_params_pkg::AXI_ID_WIDTH_DFLT)
             else $fatal(1, "AXI request ID width mismatch");
         assert ($bits(axi_req_i.awaddr) == ni_params_pkg::AXI_ADDR_WIDTH_DFLT)
             else $fatal(1, "AXI request address width mismatch");
