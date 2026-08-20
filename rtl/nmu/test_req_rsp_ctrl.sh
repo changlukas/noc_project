@@ -9,7 +9,7 @@ task_sources=(
     "$task_root/specgen/generated/sv/ni_params_pkg.sv"
     "$task_root/specgen/generated/sv/ni_flit_pkg.sv"
     "$task_root/rtl/common/nmu_req_rsp_ctrl_if.sv"
-    "$task_root/rtl/nmu/nmu_req_rsp_ctrl_shell.sv"
+    "$task_root/rtl/nmu/nmu_req_rsp_ctrl_wrap.sv"
     "$task_root/rtl/nmu/tests/tb_nmu_req_rsp_ctrl.sv"
 )
 

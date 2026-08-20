@@ -12,7 +12,7 @@ module tb_nmu_req_rsp_ctrl #(
         .MAX_TXNS_PER_ID ( MAX_TXNS_PER_ID )
     ) ctrl ();
 
-    nmu_req_rsp_ctrl_shell #(
+    nmu_req_rsp_ctrl_wrap #(
         .AXI_ID_WIDTH    ( AXI_ID_WIDTH ),
         .MAX_TXNS_PER_ID ( MAX_TXNS_PER_ID )
     ) dut ( .ctrl ( ctrl ) );
