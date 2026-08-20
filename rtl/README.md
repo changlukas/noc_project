@@ -190,7 +190,8 @@ Generator tests use semantic assertions rather than committed golden RTL:
 
 `ni_signals_pkg` is the sole AXI payload-type source. Its channel records contain data only;
 `valid` and `ready` remain independent child ports. Packed field order below is LSB to MSB. The
-widths are the generated fixed-default widths already used by `axi_req_t` and `axi_rsp_t`:
+widths are the generated default widths used by `axi_req_t` and `axi_rsp_t`; AXI ID fields use
+`AXI_ID_WIDTH_DFLT`, while NoC-carried ID fields remain `NOC_ID_WIDTH_DFLT`:
 
 | Type | Width | Packed fields, LSB to MSB |
 |---|---:|---|
