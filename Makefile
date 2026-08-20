@@ -157,6 +157,12 @@ rtl-id-remap-test:
 rtl-nmu-paths-test:
 	@$(PYTHON3) scripts/test_nmu_paths.py
 
+rtl-nmu-lint:
+	@bash rtl/nmu/test.sh lint
+
+rtl-nmu-test:
+	@bash rtl/nmu/test.sh test
+
 PYTHON3 ?= python3
 
 # Python suites: specgen (codegen/golden drift gate -- a stale golden, e.g. an

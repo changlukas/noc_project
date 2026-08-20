@@ -5,14 +5,16 @@ package:
 dependencies:
   common_cells:
     git: https://github.com/pulp-platform/common_cells.git
-    rev: 63b7c50d43e462b59506f69d341ff1e40202866d
+    rev: 9ca8a7655f741e7dd5736669a20a301325194c28
 
 sources:
   - common/axi_if.sv
   - common/ni_child_types_pkg.sv
   - common/ni_sam.sv
   - common/stream_register.sv
+  - common/axi_async_fifo.sv
   - nmu/nmu_sam.sv
   - nmu/nmu_request_path.sv
   - nmu/nmu_response_path.sv
   - nmu/nmu.sv
+  - nmu/nmu_request_fifo.sv
