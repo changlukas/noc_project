@@ -308,10 +308,10 @@ cycle, but once assigned to B and R neither AXI response channel waits on the ot
 Each NMU and NSU exposes exactly one AXI4 interface with a fixed 512-bit data bus; Narrow and Data
 are internal NoC traffic classes, not separate AXI interfaces. The tables below define the logical
 protocol fields and packet-format source values. The frozen production RTL overlay in
-`rtl/README.md` follows the existing wrapper contract: NMU exposes the 58-bit `AWUSER` separately,
-NSU exposes no USER port, and no other USER signal crosses either production top. Canonical child
-`axi_aw_t`/`axi_w_t`/`axi_b_t`/`axi_ar_t`/`axi_r_t` therefore contain only the non-handshake,
-non-USER fields below; `nmu_sam_aw_t` composes `axi_aw_t` with the separate full-width AWUSER.
+`rtl/README.md` follows the existing wrapper contract: NMU exposes the 58-bit `AWUSER`, NSU
+exposes no USER port, and no other USER signal crosses either production top. The canonical child
+`axi_aw_t`/`axi_w_t`/`axi_b_t`/`axi_ar_t`/`axi_r_t` records carry the complete payload, including
+AWUSER in `axi_aw_t`.
 Packetization ties or drops the logical USER fields where the production face does not expose
 them. Adding another USER port is a separate wrapper-interface change, not an alternate child
 record layout.

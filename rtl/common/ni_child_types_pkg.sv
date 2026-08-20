@@ -41,12 +41,6 @@ package ni_child_types_pkg;
         logic [ni_flit_pkg::ORDERING_TAG_WIDTH-1:0] ordering_tag;
     } nmu_response_t;
 
-    // nmu_sam input/output stream payloads.
-    typedef struct packed {
-        ni_signals_pkg::axi_aw_t                         axi;
-        logic [ni_params_pkg::AXI_AWUSER_WIDTH_DFLT-1:0] awuser;
-    } nmu_sam_aw_t;
-
     typedef struct packed {
         ni_signals_pkg::axi_aw_t axi;
         nmu_aw_route_t            route;

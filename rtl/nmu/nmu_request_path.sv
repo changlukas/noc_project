@@ -9,7 +9,7 @@
  */
 module nmu_request_path (
     // s_aw_i/s_aw_valid_i: nmu_axi_cdc -> SAM/RoB. s_aw_ready_o: SAM/RoB -> nmu_axi_cdc.
-    input  wire ni_child_types_pkg::nmu_sam_aw_t s_aw_i,
+    input  wire ni_signals_pkg::axi_aw_t          s_aw_i,
     input  wire logic                             s_aw_valid_i,
     output wire logic                             s_aw_ready_o,
     // s_w_i/s_w_valid_i: nmu_axi_cdc -> RoB/packetize. s_w_ready_o: RoB/packetize -> nmu_axi_cdc.

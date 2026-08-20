@@ -553,3 +553,16 @@ routers, while collective implementation and signoff stay aligned with the inten
 workload. Cons: enabling collectives can require a different topology, and reference-model success
 on a rectangular collective case is not production conformance evidence. Rectangular collective
 support should be added only with explicit product demand and complete fork/join signoff.
+
+## Canonical AXI AW payload
+
+`AWUSER` is part of the canonical `ni_signals_pkg::axi_aw_t` payload. The temporary
+`nmu_sam_aw_t` wrapper is removed; `nmu_sam` and the NMU request path consume `axi_aw_t`
+directly.
+
+This keeps the AXI channel record self-contained and prevents a SAM-specific type from
+leaking into generic request-path, CDC, FIFO, and testbench boundaries. The cost is explicit:
+`axi_aw_t` grows from 80 to 138 bits, and records containing it grow by 58 bits. That storage
+and CDC-width increase is required because AWUSER must remain associated with AW through the
+request path; dropping or carrying it in a parallel untyped sideband would make the channel
+contract easier to misuse.

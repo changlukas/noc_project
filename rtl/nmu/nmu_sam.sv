@@ -22,7 +22,7 @@ module nmu_sam #(
     input  wire logic                                  noc_rst_ni,
     input  wire logic                                  s_aw_valid_i,
     output wire logic                                  s_aw_ready_o,
-    input  wire ni_child_types_pkg::nmu_sam_aw_t       s_aw_i,
+    input  wire ni_signals_pkg::axi_aw_t              s_aw_i,
     output wire logic                                  m_aw_valid_o,
     input  wire logic                                  m_aw_ready_i,
     output wire ni_child_types_pkg::nmu_sam_aw_result_t m_aw_o,
@@ -162,7 +162,7 @@ module nmu_sam #(
         .sam_rule_t     ( sam_rule_t     ),
         .SAM            ( SAM            )
     ) i_aw_ni_sam (
-        .addr_i         ( s_aw_i.axi.awaddr ),
+        .addr_i         ( s_aw_i.awaddr ),
         .lookup_en_i    ( noc_rst_ni && s_aw_valid_i ),
         .sam_idx_o      ( aw_sam_idx        ),
         .lookup_valid_o ( aw_lookup_valid   ),
@@ -187,7 +187,7 @@ module nmu_sam #(
     assign s_aw_ready_o = noc_rst_ni && aw_slice_ready;
     assign s_ar_ready_o = noc_rst_ni && ar_slice_ready;
 
-    assign aw_decoded.axi = s_aw_i.axi;
+    assign aw_decoded.axi = s_aw_i;
     assign aw_decoded.route.route.domain.dst_id = aw_sam_idx.dst_id;
     assign aw_decoded.route.route.domain.dst_port_id = aw_sam_idx.dst_port_id;
     assign aw_decoded.route.route.domain.is_data = aw_sam_idx.is_data;
@@ -234,14 +234,14 @@ module nmu_sam #(
             if (s_aw_valid_i && aw_lookup_error) begin
                 $fatal(0, "Error: invalid AW SAM mapping (instance %m)");
             end else if (s_aw_valid_i && burst_footprint_error(
-                    s_aw_i.axi.awaddr, s_aw_i.axi.awlen,
-                    s_aw_i.axi.awsize, s_aw_i.axi.awburst)) begin
+                    s_aw_i.awaddr, s_aw_i.awlen,
+                    s_aw_i.awsize, s_aw_i.awburst)) begin
                 $fatal(0, "Error: AW burst footprint crosses a SAM region boundary: addr=%h last=%h (instance %m)",
-                    s_aw_i.axi.awaddr, burst_last_byte(
-                        s_aw_i.axi.awaddr, s_aw_i.axi.awlen,
-                        s_aw_i.axi.awsize, s_aw_i.axi.awburst));
+                    s_aw_i.awaddr, burst_last_byte(
+                        s_aw_i.awaddr, s_aw_i.awlen,
+                        s_aw_i.awsize, s_aw_i.awburst));
             end else if (s_aw_valid_i && collective_error(
-                    s_aw_i.awuser, s_aw_i.axi.awlock, aw_sam_idx)) begin
+                    s_aw_i.awuser, s_aw_i.awlock, aw_sam_idx)) begin
                 $fatal(0, "Error: invalid AW collective mapping (instance %m)");
             end
             if (s_ar_valid_i && ar_lookup_error) begin

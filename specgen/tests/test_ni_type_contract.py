@@ -31,8 +31,8 @@ def test_axi_channel_payload_fields_and_packed_order():
     text = (SV_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
     expected_msb_to_lsb = {
         "axi_aw_t": [
-            "awqos", "awregion", "awprot", "awlock", "awcache", "awburst",
-            "awsize", "awlen", "awaddr", "awid",
+            "awuser", "awqos", "awregion", "awprot", "awlock", "awcache",
+            "awburst", "awsize", "awlen", "awaddr", "awid",
         ],
         "axi_w_t": ["wdata", "wstrb", "wlast"],
         "axi_b_t": ["bresp", "bid"],
@@ -62,7 +62,6 @@ def test_child_record_field_sets():
         "nmu_aw_route_t": ["route", "user", "collective_op", "collective_mask"],
         "nmu_request_t": ["route", "ordering_req", "ordering_tag"],
         "nmu_response_t": ["is_data", "ordering_req", "ordering_tag"],
-        "nmu_sam_aw_t": ["axi", "awuser"],
         "nmu_sam_aw_result_t": ["axi", "route"],
         "nmu_sam_ar_result_t": ["axi", "route"],
         "nmu_aw_request_t": ["axi", "meta", "user", "collective_op", "collective_mask"],

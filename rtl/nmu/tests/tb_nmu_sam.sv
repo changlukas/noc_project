@@ -15,7 +15,7 @@ module tb_nmu_sam;
 
     logic [NUM_MODE_PAIRS-1:0] s_aw_valid;
     logic [NUM_MODE_PAIRS-1:0] s_aw_ready;
-    ni_child_types_pkg::nmu_sam_aw_t [NUM_MODE_PAIRS-1:0] s_aw;
+    ni_signals_pkg::axi_aw_t [NUM_MODE_PAIRS-1:0] s_aw;
     logic [NUM_MODE_PAIRS-1:0] m_aw_valid;
     logic [NUM_MODE_PAIRS-1:0] m_aw_ready;
     ni_child_types_pkg::nmu_sam_aw_result_t [NUM_MODE_PAIRS-1:0] m_aw;
@@ -79,16 +79,16 @@ module tb_nmu_sam;
         sampled_m_ar <= m_ar;
     end
 
-    function automatic ni_child_types_pkg::nmu_sam_aw_t make_aw(input int unsigned index);
-        ni_child_types_pkg::nmu_sam_aw_t value;
+    function automatic ni_signals_pkg::axi_aw_t make_aw(input int unsigned index);
+        ni_signals_pkg::axi_aw_t value;
 
         value = '0;
-        value.axi.awid = index[ni_params_pkg::NOC_ID_WIDTH_DFLT-1:0];
-        value.axi.awlen = index[0] ? 8'd3 : 8'd1;
-        value.axi.awsize = 3'd3;
-        value.axi.awburst = 2'(index % 3);
+        value.awid = index[ni_params_pkg::NOC_ID_WIDTH_DFLT-1:0];
+        value.awlen = index[0] ? 8'd3 : 8'd1;
+        value.awsize = 3'd3;
+        value.awburst = 2'(index % 3);
         value.awuser[7:0] = 8'h80 + 8'(index);
-        value.axi.awaddr = 48'h0000_01ff_ffe0;
+        value.awaddr = 48'h0000_01ff_ffe0;
         if (!index[0]) begin
             value.awuser[9:8] = 2'd1;
             value.awuser[57:10] = 48'h0003_0000_0000;
@@ -109,19 +109,19 @@ module tb_nmu_sam;
     endfunction
 
     task automatic drive_aw(input int unsigned n, input int unsigned index);
-        ni_child_types_pkg::nmu_sam_aw_t value;
+        ni_signals_pkg::axi_aw_t value;
 
         value = make_aw(index);
-        s_aw[n].axi.awid = value.axi.awid;
-        s_aw[n].axi.awaddr = value.axi.awaddr;
-        s_aw[n].axi.awlen = value.axi.awlen;
-        s_aw[n].axi.awsize = value.axi.awsize;
-        s_aw[n].axi.awburst = value.axi.awburst;
-        s_aw[n].axi.awcache = value.axi.awcache;
-        s_aw[n].axi.awlock = value.axi.awlock;
-        s_aw[n].axi.awprot = value.axi.awprot;
-        s_aw[n].axi.awregion = value.axi.awregion;
-        s_aw[n].axi.awqos = value.axi.awqos;
+        s_aw[n].awid = value.awid;
+        s_aw[n].awaddr = value.awaddr;
+        s_aw[n].awlen = value.awlen;
+        s_aw[n].awsize = value.awsize;
+        s_aw[n].awburst = value.awburst;
+        s_aw[n].awcache = value.awcache;
+        s_aw[n].awlock = value.awlock;
+        s_aw[n].awprot = value.awprot;
+        s_aw[n].awregion = value.awregion;
+        s_aw[n].awqos = value.awqos;
         s_aw[n].awuser = value.awuser;
     endtask
 
@@ -145,13 +145,13 @@ module tb_nmu_sam;
         input int unsigned index
     );
         ni_child_types_pkg::nmu_sam_aw_result_t value;
-        ni_child_types_pkg::nmu_sam_aw_t input_value;
+        ni_signals_pkg::axi_aw_t input_value;
         int unsigned rule_index;
 
         value = '0;
         input_value = make_aw(index);
         rule_index = 7;
-        value.axi = input_value.axi;
+        value.axi = input_value;
         value.route.route.domain.dst_id = SAM[rule_index].idx.dst_id;
         value.route.route.domain.dst_port_id = SAM[rule_index].idx.dst_port_id;
         value.route.route.domain.is_data = SAM[rule_index].idx.is_data;
