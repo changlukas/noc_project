@@ -35,6 +35,23 @@ or NoC-to-AXI dataflow order and pass the NMU hybrid zero-hop loopback. Repeat f
 starts only after both NI loopback gates pass.
 Status: In Progress
 
+### Issue #76: NMU request/response path shells
+
+#### Stage 1: Boundary contract and compile harness
+Goal: Freeze the typed AW/AR/W-to-REQ/DAT and RSP/DAT-to-B/R shell boundaries from the approved NMU/NSU diagrams and RTL contract.
+Success Criteria: A focused harness independently elaborates both path modules with generated AXI/flit records and all ready/credit directions.
+Status: Complete
+
+#### Stage 2: Shell implementation
+Goal: Add the two production path modules with no packetization, ordering, buffering, or state.
+Success Criteria: Every port names its producer and consumer in the module contract; ports use only the canonical generated record types and existing DAT credit convention.
+Status: Complete
+
+#### Stage 3: Focused verification and cleanup
+Goal: Run the path elaboration check from a clean tree, remove generated artifacts, and commit the focused change.
+Success Criteria: Both modules elaborate independently, the production source list includes them, `make clean` leaves no generated/build artifacts, and the worktree is clean after commit.
+Status: Complete
+
 ### Issue #53: AXI ID to fixed NoC ID boundary
 
 #### Stage 1: Contract and focused DV
