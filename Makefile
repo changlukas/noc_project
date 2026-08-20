@@ -18,7 +18,7 @@ CMODEL_BUILD     = $(BUILD_ROOT)/cmodel
 SIM_VERILATOR := sim/verilator
 SIM_VCS       := sim/vcs
 
-.PHONY: help build build-cmodel build-yamlcpp build-verilator test rtl-sam-lint rtl-sam-test rtl-id-remap-test \
+.PHONY: help build build-cmodel build-yamlcpp build-verilator test rtl-sam-lint rtl-sam-test rtl-id-remap-test rtl-nmu-paths-test \
         pytest check docker-build docker-shell docker-test docker-pytest docker-sim-setup docker-sim-smoke docker-sim-tier2 \
         clean clean-cmodel clean-verilator clean-vcs clean-generated
 
@@ -40,8 +40,9 @@ help:
 	@echo "  make test             run c_model ctest suite"
 	@echo "  make rtl-sam-test     lint and behavior-test the generated SAM wrapper"
 	@echo "  make rtl-id-remap-test test AXI-to-fixed-NoC-ID remap boundary"
+	@echo "  make rtl-nmu-paths-test independently elaborate NMU request/response path shells"
 	@echo "  make pytest           specgen + sim/tools suites, golden drift gate"
-	@echo "  make check            both of the above -- run this before committing"
+	@echo "  make check            run c_model, Python, and focused RTL gates"
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker-build     build noc-dev Docker image"
@@ -153,6 +154,9 @@ rtl-id-remap-test:
 	@bash rtl/common/test_axi_id_remap.sh test
 	@bash rtl/common/test_axi_id_remap.sh illegal
 
+rtl-nmu-paths-test:
+	@$(PYTHON3) scripts/test_nmu_paths.py
+
 PYTHON3 ?= python3
 
 # Python suites: specgen (codegen/golden drift gate -- a stale golden, e.g. an
@@ -175,7 +179,7 @@ pytest:
 # compared when both have run. A change to a helper they share (address_map.py's
 # dst_id(), say) moves both sides of the Python-side cross-format check
 # together, leaves pytest green, and shows up in ctest alone.
-check: test pytest rtl-id-remap-test
+check: test pytest rtl-id-remap-test rtl-nmu-paths-test
 
 # --- docker ---
 

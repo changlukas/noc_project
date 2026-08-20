@@ -13,4 +13,6 @@ sources:
   - common/ni_sam.sv
   - common/stream_register.sv
   - nmu/nmu_sam.sv
+  - nmu/nmu_request_path.sv
+  - nmu/nmu_response_path.sv
   - nmu/nmu.sv
