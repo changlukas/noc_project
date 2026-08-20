@@ -13,7 +13,7 @@ module tb_nmu_sam_vectors;
     logic rst_ni = 1'b0;
     logic s_aw_valid = 1'b0;
     logic s_aw_ready;
-    ni_child_types_pkg::nmu_sam_aw_t s_aw = '0;
+    ni_signals_pkg::axi_aw_t s_aw = '0;
     logic m_aw_valid;
     logic m_aw_ready = 1'b1;
     ni_child_types_pkg::nmu_sam_aw_result_t m_aw;
@@ -67,8 +67,8 @@ module tb_nmu_sam_vectors;
     );
         s_aw = '0;
         s_ar = '0;
-        s_aw.axi.awid = ni_params_pkg::NOC_ID_WIDTH_DFLT'(aw_rule);
-        s_aw.axi.awaddr = rule_address(aw_rule, point);
+        s_aw.awid = ni_params_pkg::NOC_ID_WIDTH_DFLT'(aw_rule);
+        s_aw.awaddr = rule_address(aw_rule, point);
         s_aw.awuser[7:0] = 8'h80 + 8'(aw_rule);
         s_ar.arid = ni_params_pkg::NOC_ID_WIDTH_DFLT'(ar_rule);
         s_ar.araddr = rule_address(ar_rule, point);
@@ -77,7 +77,7 @@ module tb_nmu_sam_vectors;
         #1ps;
         assert (s_aw_ready && s_ar_ready && m_aw_valid && m_ar_valid)
             else $fatal(1, "Mode-0 AW/AR pair did not remain independent");
-        assert (m_aw.axi == s_aw.axi && m_aw.route.route.domain.dst_id == SAM[aw_rule].idx.dst_id &&
+        assert (m_aw.axi == s_aw && m_aw.route.route.domain.dst_id == SAM[aw_rule].idx.dst_id &&
                 m_aw.route.route.domain.dst_port_id == SAM[aw_rule].idx.dst_port_id &&
                 m_aw.route.route.domain.is_data == SAM[aw_rule].idx.is_data &&
                 m_aw.route.user == s_aw.awuser[7:0] && m_aw.route.collective_op == '0 &&

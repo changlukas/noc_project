@@ -2,7 +2,7 @@
 
 module tb_nmu_request_path;
 
-    ni_child_types_pkg::nmu_sam_aw_t s_aw;
+    ni_signals_pkg::axi_aw_t         s_aw;
     logic                             s_aw_valid;
     logic                             s_aw_ready;
     ni_signals_pkg::axi_w_t           s_w;

@@ -212,7 +212,7 @@ response faces -> Depacketize -> Rob -> S2 (1-entry register per channel) -> Axi
 
 Target RTL child ports use the generated per-channel AXI payloads and the packed records in
 `ni_child_types_pkg`; `valid` and `ready` are independent wires. `nmu_sam` accepts
-`nmu_sam_aw_t` and `axi_ar_t`, then produces `nmu_sam_aw_result_t` and
+`axi_aw_t` and `axi_ar_t`, then produces `nmu_sam_aw_result_t` and
 `nmu_sam_ar_result_t`. `nmu_rob` produces `nmu_aw_request_t` / `nmu_ar_request_t`, accepts
 decoded `nmu_b_response_t` / `nmu_r_response_t`, and returns ordered `axi_b_t` / `axi_r_t`.
 The complete ordering-domain record is `nmu_ordering_domain_t {dst_id, dst_port_id, is_data}`;

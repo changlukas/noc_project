@@ -45,6 +45,7 @@ _AXI_CHANNEL_SIGNALS: dict[str, list[tuple[str, str]]] = {
         ("awprot",   "[2:0]"),
         ("awqos",    "[3:0]"),
         ("awregion", "[3:0]"),
+        ("awuser",   "[AWUSER_WIDTH-1:0]"),
         ("awvalid",  ""),
         ("awready",  ""),
     ],
@@ -89,7 +90,7 @@ _AXI_CHANNEL_SIGNALS: dict[str, list[tuple[str, str]]] = {
 # channel matrix is slave-driven. Used to compose modport direction lists.
 _MASTER_DRIVES_AXI: frozenset[str] = frozenset({
     "awid", "awaddr", "awlen", "awsize", "awburst", "awlock", "awcache",
-    "awprot", "awqos", "awregion", "awvalid",
+    "awprot", "awqos", "awregion", "awuser", "awvalid",
     "wdata", "wstrb", "wlast", "wvalid",
     "bready",
     "arid", "araddr", "arlen", "arsize", "arburst", "arlock", "arcache",
@@ -100,13 +101,14 @@ _MASTER_DRIVES_AXI: frozenset[str] = frozenset({
 
 # Canonical packed-payload field order, least-significant field first.  VALID
 # and READY remain independent stream ports and are deliberately absent.  The
-# production AXI faces expose AWUSER separately at the NMU and expose no other
-# USER fields, so USER is likewise not part of these child-boundary payloads.
+    # AWUSER is part of the canonical AW payload; no other USER fields cross the
+    # production child boundaries.
 # Widths still come from _AXI_CHANNEL_SIGNALS; this table fixes order only.
 _AXI_PAYLOAD_FIELD_LSB_ORDER: dict[str, list[str]] = {
     "AW": [
         "awid", "awaddr", "awlen", "awsize", "awburst", "awcache", "awlock",
         "awprot", "awregion", "awqos",
+        "awuser",
     ],
     "W": ["wlast", "wstrb", "wdata"],
     "B": ["bid", "bresp"],
@@ -131,6 +133,7 @@ _IFACE_WIDTH_TO_STRUCT: dict[str, str] = {
     "[2:0]":  "[2:0]",
     "[1:0]":  "[1:0]",
     "[3:0]":  "[3:0]",
+    "[AWUSER_WIDTH-1:0]": "[ni_params_pkg::AXI_AWUSER_WIDTH_DFLT-1:0]",
     "":       "",
 }
 

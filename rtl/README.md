@@ -195,18 +195,16 @@ widths are the generated default widths used by `axi_req_t` and `axi_rsp_t`; AXI
 
 | Type | Width | Packed fields, LSB to MSB |
 |---|---:|---|
-| `axi_aw_t` | 80 | `awid`, `awaddr`, `awlen`, `awsize`, `awburst`, `awcache`, `awlock`, `awprot`, `awregion`, `awqos` |
+| `axi_aw_t` | 138 | `awid`, `awaddr`, `awlen`, `awsize`, `awburst`, `awcache`, `awlock`, `awprot`, `awregion`, `awqos`, `awuser` |
 | `axi_w_t` | 577 | `wlast`, `wstrb`, `wdata` |
 | `axi_b_t` | 5 | `bid`, `bresp` |
 | `axi_ar_t` | 80 | `arid`, `araddr`, `arlen`, `arsize`, `arburst`, `arcache`, `arlock`, `arprot`, `arregion`, `arqos` |
 | `axi_r_t` | 518 | `rlast`, `rid`, `rresp`, `rdata` |
 
-The 58-bit NMU `AWUSER` remains a sideband of the wrapper-facing AW channel and is part of
-`nmu_sam_aw_t`, not `axi_aw_t`. Its lower eight bits become the NoC AW payload `user`; the upper
-50 bits are consumed by collective translation. No other AXI USER pin crosses the production
-top, so adding it to every channel record would widen CDC and queue storage without carrying
-information. The existing `axi_req_t` and `axi_rsp_t` aggregates remain the wrapper-facing types;
-children use the per-channel records above. Production RTL tops use the parameterized
+The 58-bit NMU `AWUSER` is part of `axi_aw_t`. Its lower eight bits become the NoC AW payload
+`user`; the upper 50 bits are consumed by collective translation. No other AXI USER pin crosses
+the production top. The existing `axi_req_t` and `axi_rsp_t` aggregates remain the wrapper-facing
+types; children use the per-channel records above. Production RTL tops use the parameterized
 `axi_if` interface, so `AXI_ID_WIDTH`, `AXI_ADDR_WIDTH`, and `AXI_DATA_WIDTH` are
 elaboration-time port widths rather than fixed package typedef widths.
 
@@ -243,8 +241,8 @@ request-ordering projection used after SAM translation, not a replacement SAM re
 | `nmu_read_context_t` | `local_addr`, `len`, `size`, `burst`, `beat_index` |
 | `response_entry_t` | `src_id`, `src_port_id`, `noc_id`, `ordering_req`, `ordering_tag`, `is_data`, `local_addr`, `len`, `size`, `burst`, `collective_op`, `collective_mask` |
 
-`nmu_sam_aw_t`, `nmu_sam_aw_result_t`, `nmu_sam_ar_result_t`, `nmu_aw_request_t`,
-`nmu_ar_request_t`, `nmu_b_response_t`, `nmu_r_response_t`, `nsu_aw_request_t`,
+`nmu_sam_aw_result_t`, `nmu_sam_ar_result_t`, `nmu_aw_request_t`, `nmu_ar_request_t`,
+`nmu_b_response_t`, `nmu_r_response_t`, `nsu_aw_request_t`,
 `nsu_ar_request_t`, `nsu_b_response_t`, and `nsu_r_response_t` compose those records with the
 applicable generated AXI channel type. They add no `valid` or `ready` member. Write
 `response_entry_t` values zero the read-only context; read values zero the AW-only collective
@@ -260,7 +258,7 @@ streams; no row's readiness may be inferred from another row.
 
 | Child | Input streams | Output streams |
 |---|---|---|
-| `nmu_sam` | `s_aw: nmu_sam_aw_t`, `s_ar: axi_ar_t` | `m_aw: nmu_sam_aw_result_t`, `m_ar: nmu_sam_ar_result_t` |
+| `nmu_sam` | `s_aw: axi_aw_t`, `s_ar: axi_ar_t` | `m_aw: nmu_sam_aw_result_t`, `m_ar: nmu_sam_ar_result_t` |
 | `nmu_rob` | `s_aw: nmu_sam_aw_result_t`, `s_w: axi_w_t`, `s_ar: nmu_sam_ar_result_t`, `s_b: nmu_b_response_t`, `s_r: nmu_r_response_t` | `m_aw: nmu_aw_request_t`, `m_w: axi_w_t`, `m_ar: nmu_ar_request_t`, `m_b: axi_b_t`, `m_r: axi_r_t` |
 | `nsu_depacketize` | `s_req: req_flit_t`, `s_dat: dat_flit_t` | `m_aw: nsu_aw_request_t`, `m_w: axi_w_t`, `m_ar: nsu_ar_request_t` |
 | `nsu_response_queue` | `s_aw: nsu_aw_request_t`, `s_ar: nsu_ar_request_t`, `s_b: axi_b_t`, `s_r: axi_r_t` | `m_aw: axi_aw_t`, `m_ar: axi_ar_t`, `m_b: nsu_b_response_t`, `m_r: nsu_r_response_t` |

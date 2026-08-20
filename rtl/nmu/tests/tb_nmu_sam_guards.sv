@@ -15,7 +15,7 @@ module tb_nmu_sam_guards #(
     logic rst_ni = 1'b0;
     logic s_aw_valid = 1'b0;
     logic s_aw_ready;
-    ni_child_types_pkg::nmu_sam_aw_t s_aw = '0;
+    ni_signals_pkg::axi_aw_t s_aw = '0;
     logic m_aw_valid;
     logic m_aw_ready = 1'b0;
     ni_child_types_pkg::nmu_sam_aw_result_t m_aw;
@@ -69,10 +69,10 @@ module tb_nmu_sam_guards #(
         case (INVALID_CASE)
             2: begin
                 s_aw = '0;
-                s_aw.axi.awaddr = 48'h0000_01ff_ffc0;
-                s_aw.axi.awlen = 8'd1;
-                s_aw.axi.awsize = 3'd6;
-                s_aw.axi.awburst = 2'd1;
+                s_aw.awaddr = 48'h0000_01ff_ffc0;
+                s_aw.awlen = 8'd1;
+                s_aw.awsize = 3'd6;
+                s_aw.awburst = 2'd1;
                 s_aw_valid = 1'b1;
             end
             3: begin
@@ -85,13 +85,13 @@ module tb_nmu_sam_guards #(
             end
             4: begin
                 s_aw = '0;
-                s_aw.axi.awaddr = 48'h0000_0000_0080;
+                s_aw.awaddr = 48'h0000_0000_0080;
                 s_aw.awuser[9:8] = 2'd2;
                 s_aw_valid = 1'b1;
             end
             5: begin
                 s_aw = '0;
-                s_aw.axi.awaddr = 48'hffff_ffff_f000;
+                s_aw.awaddr = 48'hffff_ffff_f000;
                 s_aw_valid = 1'b1;
             end
             6: begin
@@ -101,7 +101,7 @@ module tb_nmu_sam_guards #(
             end
             default: begin
                 s_aw = '0;
-                s_aw.axi.awaddr = 48'h0004_0000_0080;
+                s_aw.awaddr = 48'h0004_0000_0080;
                 s_aw.awuser[9:8] = 2'd1;
                 s_aw.awuser[57:10] = 48'h0003_0000_0000;
                 s_aw_valid = 1'b1;

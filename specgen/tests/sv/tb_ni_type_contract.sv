@@ -19,7 +19,6 @@ module tb_ni_type_contract;
     ni_child_types_pkg::nmu_aw_route_t nmu_aw_route;
     ni_child_types_pkg::nmu_request_t nmu_request;
     ni_child_types_pkg::nmu_response_t nmu_response;
-    ni_child_types_pkg::nmu_sam_aw_t nmu_sam_aw;
     ni_child_types_pkg::nmu_sam_aw_result_t nmu_sam_aw_result;
     ni_child_types_pkg::nmu_sam_ar_result_t nmu_sam_ar_result;
     ni_child_types_pkg::nmu_aw_request_t nmu_aw_request;
@@ -49,7 +48,7 @@ module tb_ni_type_contract;
     logic [7:0] nsu_response_queue_ready;
 
     initial begin
-        if ($bits(axi_aw) != 80)  $fatal(1, "axi_aw_t width");
+        if ($bits(axi_aw) != 138) $fatal(1, "axi_aw_t width");
         if ($bits(axi_w)  != 577) $fatal(1, "axi_w_t width");
         if ($bits(axi_b)  != 5)   $fatal(1, "axi_b_t width");
         if ($bits(axi_ar) != 80)  $fatal(1, "axi_ar_t width");
@@ -66,10 +65,9 @@ module tb_ni_type_contract;
         if ($bits(nmu_aw_route) != 29) $fatal(1, "nmu_aw_route_t width");
         if ($bits(nmu_request) != 20) $fatal(1, "nmu_request_t width");
         if ($bits(nmu_response) != 10) $fatal(1, "nmu_response_t width");
-        if ($bits(nmu_sam_aw) != 138) $fatal(1, "nmu_sam_aw_t width");
-        if ($bits(nmu_sam_aw_result) != 109) $fatal(1, "nmu_sam_aw_result_t width");
+        if ($bits(nmu_sam_aw_result) != 167) $fatal(1, "nmu_sam_aw_result_t width");
         if ($bits(nmu_sam_ar_result) != 91) $fatal(1, "nmu_sam_ar_result_t width");
-        if ($bits(nmu_aw_request) != 118) $fatal(1, "nmu_aw_request_t width");
+        if ($bits(nmu_aw_request) != 176) $fatal(1, "nmu_aw_request_t width");
         if ($bits(nmu_ar_request) != 100) $fatal(1, "nmu_ar_request_t width");
         if ($bits(nmu_b_response) != 15) $fatal(1, "nmu_b_response_t width");
         if ($bits(nmu_r_response) != 528) $fatal(1, "nmu_r_response_t width");
@@ -78,14 +76,13 @@ module tb_ni_type_contract;
         if ($bits(nmu_r_entry) != 523) $fatal(1, "nmu_r_rob_entry_t width");
         if ($bits(nmu_read_context) != 69) $fatal(1, "nmu_read_context_t width");
         if ($bits(response_entry) != 94) $fatal(1, "response_entry_t width");
-        if ($bits(nsu_aw_request) != 174) $fatal(1, "nsu_aw_request_t width");
+        if ($bits(nsu_aw_request) != 232) $fatal(1, "nsu_aw_request_t width");
         if ($bits(nsu_ar_request) != 174) $fatal(1, "nsu_ar_request_t width");
         if ($bits(nsu_b_response) != 99) $fatal(1, "nsu_b_response_t width");
         if ($bits(nsu_r_response) != 612) $fatal(1, "nsu_r_response_t width");
 
         // The four leaf-boundary payloads elaborate independently of their
         // valid/ready wires; handshake is never embedded in a packed record.
-        nmu_sam_aw = '0;
         nmu_sam_aw_result = '0;
         nmu_sam_ar_result = '0;
         nmu_aw_request = '0;
