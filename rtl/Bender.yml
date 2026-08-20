@@ -9,14 +9,12 @@ dependencies:
 
 sources:
   - common/axi_if.sv
-  - common/nmu_req_rsp_ctrl_if.sv
   - common/ni_child_types_pkg.sv
   - common/ni_sam.sv
   - common/stream_register.sv
   - common/axi_async_fifo.sv
-  - nmu/nmu_sam.sv
-  - nmu/nmu_request_path.sv
-  - nmu/nmu_response_path.sv
-  - nmu/nmu.sv
-  - nmu/nmu_request_fifo.sv
-  - nmu/nmu_req_rsp_ctrl_wrap.sv
+  - sam/nmu_sam.sv
+  - request_path/nmu_request_path.sv
+  - response_path/nmu_response_path.sv
+  - top/nmu.sv
+  - request_fifo/nmu_request_fifo.sv

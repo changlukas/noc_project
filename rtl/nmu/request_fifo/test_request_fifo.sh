@@ -2,7 +2,7 @@
 set -euo pipefail
 
 task_mode=${1:-test}
-task_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+task_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 task_manifest="$task_root/rtl/Bender.yml"
 task_revision=9ca8a7655f741e7dd5736669a20a301325194c28
 task_tmp=$(mktemp -d "${TMPDIR:-/tmp}/nmu-request-fifo-XXXXXX")
@@ -28,9 +28,9 @@ task_sources=(
     "$task_common_cells/src/sync.sv"
     "$task_common_cells/src/cdc_fifo_gray.sv"
     "$task_root/rtl/common/axi_async_fifo.sv"
-    "$task_root/rtl/nmu/nmu_request_fifo.sv"
-    "$task_root/rtl/nmu/tests/tb_nmu_request_fifo.sv"
-    "$task_root/rtl/nmu/tests/tb_nmu_request_fifo_guards.sv"
+    "$task_root/rtl/nmu/request_fifo/nmu_request_fifo.sv"
+    "$task_root/rtl/nmu/request_fifo/tb_nmu_request_fifo.sv"
+    "$task_root/rtl/nmu/request_fifo/tb_nmu_request_fifo_guards.sv"
 )
 
 task_verilator=(

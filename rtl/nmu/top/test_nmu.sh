@@ -2,7 +2,7 @@
 set -euo pipefail
 ulimit -c 0
 
-task_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+task_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 task_tmp=$(mktemp -d "${TMPDIR:-/tmp}/noc-nmu-shell-XXXXXX")
 trap 'rm -rf "$task_tmp"' EXIT
 
@@ -11,8 +11,8 @@ task_sources=(
     "$task_root/specgen/generated/sv/ni_signals_pkg.sv"
     "$task_root/specgen/generated/sv/ni_flit_pkg.sv"
     "$task_root/rtl/common/axi_if.sv"
-    "$task_root/rtl/nmu/nmu.sv"
-    "$task_root/rtl/nmu/tests/tb_nmu_elaborate.sv"
+    "$task_root/rtl/nmu/top/nmu.sv"
+    "$task_root/rtl/nmu/top/tb_nmu_elaborate.sv"
 )
 
 task_verilator=(

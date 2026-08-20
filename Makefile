@@ -18,7 +18,7 @@ CMODEL_BUILD     = $(BUILD_ROOT)/cmodel
 SIM_VERILATOR := sim/verilator
 SIM_VCS       := sim/vcs
 
-.PHONY: help build build-cmodel build-yamlcpp build-verilator test rtl-sam-lint rtl-sam-test rtl-id-remap-test rtl-nmu-paths-test rtl-nmu-ctrl-test \
+.PHONY: help build build-cmodel build-yamlcpp build-verilator test rtl-sam-lint rtl-sam-test rtl-id-remap-test rtl-nmu-paths-test \
         pytest check docker-build docker-shell docker-test docker-pytest docker-sim-setup docker-sim-smoke docker-sim-tier2 \
         clean clean-cmodel clean-verilator clean-vcs clean-generated
 
@@ -40,7 +40,7 @@ help:
 	@echo "  make test             run c_model ctest suite"
 	@echo "  make rtl-sam-test     lint and behavior-test the generated SAM wrapper"
 	@echo "  make rtl-id-remap-test test AXI-to-fixed-NoC-ID remap boundary"
-	@echo "  make rtl-nmu-paths-test independently elaborate NMU request/response path shells"
+	@echo "  make rtl-nmu-paths-test independently elaborate NMU request/response path boundaries"
 	@echo "  make pytest           specgen + sim/tools suites, golden drift gate"
 	@echo "  make check            run c_model, Python, and focused RTL gates"
 	@echo ""
@@ -158,13 +158,10 @@ rtl-nmu-paths-test:
 	@$(PYTHON3) scripts/test_nmu_paths.py
 
 rtl-nmu-lint:
-	@bash rtl/nmu/test.sh lint
+	@bash rtl/nmu/request_fifo/test_request_fifo.sh lint
 
 rtl-nmu-test:
-	@bash rtl/nmu/test.sh test
-
-rtl-nmu-ctrl-test:
-	@bash rtl/nmu/test_req_rsp_ctrl.sh
+	@bash rtl/nmu/request_fifo/test_request_fifo.sh test
 
 PYTHON3 ?= python3
 

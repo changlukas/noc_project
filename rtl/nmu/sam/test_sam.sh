@@ -2,7 +2,7 @@
 set -euo pipefail
 ulimit -c 0
 
-task_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+task_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 task_manifest="$task_root/rtl/Bender.yml"
 task_revision=63b7c50d43e462b59506f69d341ff1e40202866d
 task_tmp=$(mktemp -d "${TMPDIR:-/tmp}/noc-nmu-sam-XXXXXX")
@@ -39,8 +39,8 @@ task_sources=(
     "$task_common_cells/src/cc_spill_register.sv"
     "$task_root/rtl/common/ni_sam.sv"
     "$task_root/rtl/common/stream_register.sv"
-    "$task_root/rtl/nmu/nmu_sam.sv"
-    "$task_root/rtl/nmu/tests/tb_nmu_sam.sv"
+    "$task_root/rtl/nmu/sam/nmu_sam.sv"
+    "$task_root/rtl/nmu/sam/tb_nmu_sam.sv"
 )
 
 task_verilator=(
@@ -69,7 +69,7 @@ case "${1:-test}" in
             task_obj_dir="$task_tmp/obj_dir_vectors_$task_topology"
             "${task_verilator[@]}" --top-module tb_nmu_sam_vectors --binary \
                 --Mdir "$task_obj_dir" -o nmu_sam_vectors_tb "${task_sources[@]}" \
-                "$task_root/rtl/nmu/tests/tb_nmu_sam_vectors.sv"
+                "$task_root/rtl/nmu/sam/tb_nmu_sam_vectors.sv"
             "$task_obj_dir/nmu_sam_vectors_tb"
         done
 
@@ -94,7 +94,7 @@ case "${1:-test}" in
                 --top-module tb_nmu_sam_guards \
                 -GINVALID_CASE="$task_case" \
                 --binary --Mdir "$task_obj_dir" -o nmu_sam_guards_tb \
-                "${task_sources[@]}" "$task_root/rtl/nmu/tests/tb_nmu_sam_guards.sv"
+                "${task_sources[@]}" "$task_root/rtl/nmu/sam/tb_nmu_sam_guards.sv"
             if "$task_obj_dir/nmu_sam_guards_tb" >"$task_log" 2>&1; then
                 echo "nmu_sam parameter guard $task_case did not fail" >&2
                 exit 1

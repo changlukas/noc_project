@@ -35,14 +35,14 @@ or NoC-to-AXI dataflow order and pass the NMU hybrid zero-hop loopback. Repeat f
 starts only after both NI loopback gates pass.
 Status: In Progress
 
-### Issue #76: NMU request/response path shells
+### Issue #76: NMU request/response path boundaries
 
 #### Stage 1: Boundary contract and compile harness
-Goal: Freeze the typed AW/AR/W-to-REQ/DAT and RSP/DAT-to-B/R shell boundaries from the approved NMU/NSU diagrams and RTL contract.
+Goal: Freeze the typed AW/AR/W-to-REQ/DAT and RSP/DAT-to-B/R boundaries from the approved NMU/NSU diagrams and RTL contract.
 Success Criteria: A focused harness independently elaborates both path modules with generated AXI/flit records and all ready/credit directions.
 Status: Complete
 
-#### Stage 2: Shell implementation
+#### Stage 2: Boundary implementation
 Goal: Add the two production path modules with no packetization, ordering, buffering, or state.
 Success Criteria: Every port names its producer and consumer in the module contract; ports use only the canonical generated record types and existing DAT credit convention.
 Status: Complete
@@ -69,16 +69,16 @@ Goal: Run focused C++/SV/specgen checks, clean generated/build artifacts, and co
 Success Criteria: Allocation/reuse, exhaustion/backpressure, response restoration, legal/illegal parameter checks, drift gate, and clean target pass.
 Status: Complete
 
-### Issue #75: NMU top-level shell
+### Issue #75: NMU top-level boundary
 
 #### Stage 1: Interface contract and focused DV
 Goal: Confirm the frozen NMU production faces against the generated packages, wrapper, and specifications, then add a canonical elaboration check.
 Success Criteria: The check instantiates all AXI and NoC ports and proves the canonical generated widths.
 Status: Complete
 
-#### Stage 2: Shell implementation
-Goal: Add the interface-only `nmu` production shell with its legal-configuration guards.
-Success Criteria: The shell has no functional datapath, queue, or child instantiation.
+#### Stage 2: Boundary implementation
+Goal: Add the interface-only `nmu` production boundary with its legal-configuration guards.
+Success Criteria: The boundary has no functional datapath, queue, or child instantiation.
 Status: Complete
 
 #### Stage 3: Verification and cleanup
