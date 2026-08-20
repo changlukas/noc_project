@@ -346,7 +346,7 @@ reset behavior, proposed replacement, DV evidence, and license impact must first
 | Package/module | Inputs -> outputs | Exclusive responsibility |
 |---|---|---|
 | `nmu/nmu_axi_cdc` | AXI slave records across ACLK <-> noc_clk | Exactly five AXI-channel CDC instances; no SAM, ordering, or packet state |
-| `nmu/nmu_sam` | accepted AW/AR -> destination, port, class, collective metadata | Instantiates the shared `ni_sam` for AW and AR, performs burst-footprint and collective validation/translation; AW and AR timing cuts use `stream_register` |
+| `nmu/sam/nmu_sam` | accepted AW/AR -> destination, port, class, collective metadata | Instantiates the shared `ni_sam` for AW and AR, performs burst-footprint and collective validation/translation; AW and AR timing cuts use `stream_register` |
 | `nmu/nmu_rob` | decoded AW/AR and returning B/R metadata -> ordered request/response streams | Per-ID order lists, B/R slot pools, `READ_ROB_ENABLED` behavior, ordering tags, collective admission |
 | `nmu/nmu_packetize` | ordered AXI request records -> complete REQ or DAT flit records | Field mapping and AW-to-W metadata inheritance; no VC allocation or NoC queue |
 | `nmu/nmu_channel_assign` | packetized requests plus Router credits -> TX REQ/TX DAT | REQ and DAT Write class FIFOs, worm lock through WLAST, mode-eligible DAT VC choice and sender credit counters |

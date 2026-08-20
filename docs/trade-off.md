@@ -566,14 +566,3 @@ leaking into generic request-path, CDC, FIFO, and testbench boundaries. The cost
 and CDC-width increase is required because AWUSER must remain associated with AW through the
 request path; dropping or carrying it in a parallel untyped sideband would make the channel
 contract easier to misuse.
-
-## NMU request-response control boundary
-
-The request and response paths communicate through four independent ready/valid lanes:
-AW admission, AR admission, B retirement, and R retirement. Admission carries AXI ID, burst
-length, SAM-derived destination ID/port, and AXI class. The ordering unit returns ordering
-request/tag metadata; retirement returns AXI ID, ordering metadata, and last.
-
-This keeps AXI payload and NoC flit interfaces separate, preserves AW/AR and B/R parallelism,
-and adds no storage or arbitration to the boundary. The cost is a wider control interface and
-the requirement that the later ResponseBuffer implement four independent handshake paths.
