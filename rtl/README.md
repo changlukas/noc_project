@@ -190,7 +190,8 @@ Generator tests use semantic assertions rather than committed golden RTL:
 
 `ni_signals_pkg` is the sole AXI payload-type source. Its channel records contain data only;
 `valid` and `ready` remain independent child ports. Packed field order below is LSB to MSB. The
-widths are the generated fixed-default widths already used by `axi_req_t` and `axi_rsp_t`:
+widths are the generated default widths used by `axi_req_t` and `axi_rsp_t`; AXI ID fields use
+`AXI_ID_WIDTH_DFLT`, while NoC-carried ID fields remain `NOC_ID_WIDTH_DFLT`:
 
 | Type | Width | Packed fields, LSB to MSB |
 |---|---:|---|
@@ -205,7 +206,9 @@ The 58-bit NMU `AWUSER` remains a sideband of the wrapper-facing AW channel and 
 50 bits are consumed by collective translation. No other AXI USER pin crosses the production
 top, so adding it to every channel record would widen CDC and queue storage without carrying
 information. The existing `axi_req_t` and `axi_rsp_t` aggregates remain the wrapper-facing types;
-children use the per-channel records above.
+children use the per-channel records above. Production RTL tops use the parameterized
+`axi_if` interface, so `AXI_ID_WIDTH`, `AXI_ADDR_WIDTH`, and `AXI_DATA_WIDTH` are
+elaboration-time port widths rather than fixed package typedef widths.
 
 `ni_flit_pkg` is the sole physical-flit type source. Each container is a packed struct with
 `header` in bits `[47:0]` and its network's widest payload immediately above it:

@@ -52,6 +52,23 @@ Goal: Run focused C++/SV/specgen checks, clean generated/build artifacts, and co
 Success Criteria: Allocation/reuse, exhaustion/backpressure, response restoration, legal/illegal parameter checks, drift gate, and clean target pass.
 Status: Complete
 
+### Issue #75: NMU top-level shell
+
+#### Stage 1: Interface contract and focused DV
+Goal: Confirm the frozen NMU production faces against the generated packages, wrapper, and specifications, then add a canonical elaboration check.
+Success Criteria: The check instantiates all AXI and NoC ports and proves the canonical generated widths.
+Status: Complete
+
+#### Stage 2: Shell implementation
+Goal: Add the interface-only `nmu` production shell with its legal-configuration guards.
+Success Criteria: The shell has no functional datapath, queue, or child instantiation.
+Status: Complete
+
+#### Stage 3: Verification and cleanup
+Goal: Run the focused compile check from a clean tree and remove generated artifacts.
+Success Criteria: Canonical elaboration passes and `make clean` leaves no build or generated files.
+Status: Complete
+
 ### Issue #21: NMU SAM decode and timing cuts
 
 #### Stage 1: Contract and focused DV
