@@ -23,12 +23,14 @@
 //
 // Egress mux (NMU input 0 / NSU input 1 -> router): router::WormholeArbiter,
 // the existing translated floo_wormhole_arbiter port (ni/wormhole_arbiter.hpp)
-// -- NOT a new arbiter. No ChannelPairing: each input is already a
-// fully-formed, worm-locked stream (NMU's own dat_wormhole_arbiter_ already
-// pairs DataAw with its DataW, exactly the chimney's SelAw/SelW-muxed
-// WideAw/W stream; NSU's DataR is single-flit, needs no pairing) -- this is
-// structurally identical to nsu.hpp's own RSP-egress wormhole_arbiter_ (2
-// inputs, no pairing, each already a complete stream). ONE shared credit pool
+// -- NOT a new arbiter. No ChannelPairing: NMU's own dat_wormhole_arbiter_
+// already pairs DataAw with its DataW (the chimney's SelAw/SelW-muxed
+// WideAw/W stream) and NSU's DataR is single-flit. The NMU input is NOT one
+// worm-locked stream, though: nmu::VcAllocator's cross-VC round-robin drain
+// legally interleaves worms ACROSS VCs (each VC's stream stays contiguous),
+// which is exactly why the arbiter's locking is per VC -- a stream-level
+// lock here once let one worm's tail release another VC's mid-flight worm
+// and admit NSU's DataR into its beat stream (2026-08-21). ONE shared credit pool
 // downstream of the arbiter (DatMergeDownstream, term_ below), sized to the
 // DAT router's real LOCAL input depth (NOC_ROUTER_VC_DEPTH) -- replaces NMU's
 // and NSU's previous independent full-depth pools (the inconsistency the
@@ -130,16 +132,12 @@ class DatMergeWrap {
     void init(uint8_t dat_num_vc) {
         dat_num_vc_ = dat_num_vc;
         term_.enable_credit(dat_num_vc, static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH));
-        // Per-input pending depth pools credit across all dat_num_vc virtual
-        // channels: the WormholeArbiter pending stage has no VC dimension
-        // (ponytail: the real per-VC gate is term_, downstream; sizing this
-        // stage per-VC too would need a VC-aware arbiter variant nothing else
-        // in this codebase has). Sized to the larger of NMU's/NSU's own
-        // per-VC arbiter-stage depth (times dat_num_vc) so neither side's
-        // unchanged per-VC sender credit can ever outrun this stage's
-        // capacity -- see the push_flit asserts in tick().
+        // WormholeArbiter pending is per (input, VC); this depth is the
+        // per-(input, VC) queue depth. Sized to the larger of NMU's/NSU's own
+        // per-VC arbiter-stage depth so neither side's unchanged per-VC
+        // sender credit can ever outrun this stage's capacity -- see the
+        // push_flit asserts in tick().
         const std::size_t per_input_depth =
-            static_cast<std::size_t>(dat_num_vc) *
             std::max<std::size_t>(static_cast<std::size_t>(::ni::NMU_ARBITER_FIFO_DEPTH),
                                   static_cast<std::size_t>(::ni::NSU_ARBITER_FIFO_DEPTH));
         wormhole_ = std::make_unique<router::WormholeArbiter<detail::DatMergeDownstream>>(
@@ -177,25 +175,19 @@ class DatMergeWrap {
             if (in_.tx_dat_crdvalid[vc]) term_.receive_credit(vc);
         }
 
-        // Snapshot each input's about-to-drain flit (for per-VC credit-return
-        // attribution -- the arbiter itself tracks no VC dimension) and
-        // occupancy (to detect which input, if any, actually drained).
-        const auto peek0 = wormhole_->peek(0);
-        const auto peek1 = wormhole_->peek(1);
-        const std::size_t before0 = wormhole_->pending_size(0);
-        const std::size_t before1 = wormhole_->pending_size(1);
-
-        // Step 2: advance the arbiter (at most one input drains into term_
-        // this tick -- WormholeArbiter::tick() makes a single grant decision).
-        wormhole_->tick();
+        // Step 2: advance the arbiter (at most one grant per tick); the
+        // returned (input, flit) attributes the per-VC credit-return pulse.
+        const auto drained = wormhole_->tick();
 
         out_ = DatMergeOutputs{};
 
-        if (peek0 && wormhole_->pending_size(0) < before0) {
-            out_.nmu_tx_dat_crdvalid[static_cast<uint8_t>(peek0->get_header_field("vc_id"))] = true;
-        }
-        if (peek1 && wormhole_->pending_size(1) < before1) {
-            out_.nsu_tx_dat_crdvalid[static_cast<uint8_t>(peek1->get_header_field("vc_id"))] = true;
+        if (drained.has_value()) {
+            const auto vc = static_cast<uint8_t>(drained->second.get_header_field("vc_id"));
+            if (drained->first == 0) {
+                out_.nmu_tx_dat_crdvalid[vc] = true;
+            } else {
+                out_.nsu_tx_dat_crdvalid[vc] = true;
+            }
         }
 
         // Step 3: drain the shared downstream pool toward the router.
