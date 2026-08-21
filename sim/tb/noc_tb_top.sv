@@ -330,7 +330,9 @@ module noc_tb_top #(
     for (genvar i = 0; i < NUM_ENDPOINTS; i++) begin : g_endpoint
         user_node_endpoint #(
             .NODE_ID(i),
-            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
+            // #57 split the endpoint's id width into AXI (external, its own
+            // ni_params default) and NOC (this tb's ID_WIDTH knob).
+            .NOC_ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
             .TILE_TARGETS(TILE_TARGETS), .TILE_BASE_ADDR(TILE_BASE_ADDR[i]),
             .TILE_SIZE(TILE_SIZE[i]), .NOC_EGRESS_BASE(NOC_EGRESS_BASE),
             .MEM_STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),
