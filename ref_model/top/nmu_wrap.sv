@@ -167,7 +167,6 @@ module nmu_wrap #(
     bit                    tx_req_valid_q;
     bit [REQ_FLIT_WIDTH-1:0] tx_req_flit_q;
     logic                  tx_req_model_ready;
-    logic                  tx_req_spill_ready;
     bit                    rx_rsp_ready_q;
     bit                    tx_dat_valid_q;
     bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q;
@@ -281,8 +280,16 @@ module nmu_wrap #(
                 rdata_q                 <= t_rdata;
                 rresp_q                 <= t_rresp;
                 rlast_q                 <= t_rlast;
-                tx_req_valid_q          <= t_tx_req_valid;
-                tx_req_flit_q           <= t_tx_req_flit;
+                // REQ egress hold register: the strobe loads it, the wire
+                // handshake frees it; a strobe may land on the freeing edge
+                // (load wins, the old flit was consumed at that edge). See
+                // router_wrap.sv's identical staging.
+                if (t_tx_req_valid) begin
+                    tx_req_valid_q <= 1'b1;
+                    tx_req_flit_q  <= t_tx_req_flit;
+                end else if (tx_req_ready_i) begin
+                    tx_req_valid_q <= 1'b0;
+                end
                 rx_rsp_ready_q          <= t_rx_rsp_ready;
                 tx_dat_valid_q          <= t_tx_dat_valid;
                 tx_dat_flit_q           <= t_tx_dat_flit;
@@ -310,30 +317,27 @@ module nmu_wrap #(
     assign axi_rsp_o.rresp   = rresp_q;
     assign axi_rsp_o.rlast   = rlast_q;
 
-    // The C++ model emits a one-cycle REQ strobe after sampling ready.  The
-    // existing DPI output register is one cycle ahead of the spill register,
-    // so stop another model pop while that register carries an unaccepted
-    // pulse.  The spill register then owns the RTL-facing held-valid contract.
-    assign tx_req_model_ready = tx_req_spill_ready && !tx_req_valid_q;
+    // The C++ model emits a one-cycle REQ strobe after sampling ready; the
+    // hold register above owns the RTL-facing held-valid contract, and the
+    // model may pop when it is empty or its flit's handshake completes this
+    // cycle (full rate, single stage).
+    assign tx_req_model_ready = !tx_req_valid_q || tx_req_ready_i;
+    assign tx_req_valid_o = tx_req_valid_q;
+    assign tx_req_flit_o  = tx_req_flit_q;
 
-    spill_register #(
-        .T(logic [REQ_FLIT_WIDTH-1:0]),
-        .Bypass(1'b0)
-    ) i_tx_req_spill_register (
-        .clk_i,
-        .rst_ni,
-        .valid_i(tx_req_valid_q),
-        .ready_o(tx_req_spill_ready),
-        .data_i(tx_req_flit_q),
-        .valid_o(tx_req_valid_o),
-        .ready_i(tx_req_ready_i),
-        .data_o(tx_req_flit_o)
-    );
-
-    assert property (@(posedge clk_i) disable iff (!rst_ni)
-        tx_req_valid_o && !tx_req_ready_i
-        |=> tx_req_valid_o && $stable(tx_req_flit_o))
-        else $error("nmu_wrap: REQ changed before valid/ready handshake");
+    // Egress-hold checker, explicit sampled-history form (SVA $stable in a
+    // |=> consequent false-fires under Verilator on the first backpressured
+    // cycle — see router_wrap.sv).
+    logic chk_req_v_q, chk_req_r_q;
+    logic [REQ_FLIT_WIDTH-1:0] chk_req_flit_q;
+    always_ff @(posedge clk_i) begin
+        chk_req_v_q    <= rst_ni && tx_req_valid_o;
+        chk_req_r_q    <= tx_req_ready_i;
+        chk_req_flit_q <= tx_req_flit_o;
+        if (rst_ni && chk_req_v_q && !chk_req_r_q &&
+            (!tx_req_valid_o || tx_req_flit_o !== chk_req_flit_q))
+            $error("nmu_wrap: REQ changed before valid/ready handshake");
+    end
 
     assign rx_rsp_ready_o    = rx_rsp_ready_q;
     assign tx_dat_valid_o    = tx_dat_valid_q;

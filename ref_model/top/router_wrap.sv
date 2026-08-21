@@ -158,12 +158,10 @@ module router_wrap #(
     bit [LINK_PORTS-1:0]     tx_req_valid_q;
     logic [REQ_FLIT_WIDTH-1:0] tx_req_flit_q [LINK_PORTS];
     logic [LINK_PORTS-1:0]     tx_req_model_ready;
-    logic [LINK_PORTS-1:0]     tx_req_spill_ready;
     bit [LINK_PORTS-1:0]     rx_req_ready_q;
     bit [LINK_PORTS-1:0]     tx_rsp_valid_q;
     logic [RSP_FLIT_WIDTH-1:0] tx_rsp_flit_q [LINK_PORTS];
     logic [LINK_PORTS-1:0]     tx_rsp_model_ready;
-    logic [LINK_PORTS-1:0]     tx_rsp_spill_ready;
     bit [LINK_PORTS-1:0]     rx_rsp_ready_q;
     bit [LINK_PORTS-1:0]     tx_dat_valid_q;
     logic [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q [LINK_PORTS];
@@ -234,18 +232,34 @@ module router_wrap #(
                 cmodel_router_req_get_outputs(ctx_i, t_tx_req_valid, t_tx_req_flit, t_rx_req_ready);
                 cmodel_router_rsp_get_outputs(ctx_i, t_tx_rsp_valid, t_tx_rsp_flit, t_rx_rsp_ready);
                 cmodel_router_dat_get_outputs(ctx_i, t_tx_dat_valid, t_tx_dat_flit, t_rx_dat_crdvalid);
-                tx_req_valid_q <= t_tx_req_valid;
                 rx_req_ready_q <= t_rx_req_ready;
-                tx_rsp_valid_q <= t_tx_rsp_valid;
                 rx_rsp_ready_q <= t_rx_rsp_ready;
                 tx_dat_valid_q <= t_tx_dat_valid;
+                // REQ/RSP egress: the model strobe lands in a single HOLD
+                // register that keeps valid/flit until the wire handshake
+                // completes. A strobe may land on the same edge the previous
+                // flit's handshake frees the register (load wins; the old flit
+                // was consumed at this edge), which is what tx_*_model_ready's
+                // empty-or-draining condition guarantees. DAT stays a plain
+                // registered strobe (credit-gated, never backpressured).
+                //
                 // Unpacked arrays: bit temp -> logic reg element-wise. 5.048
                 // enforces IEEE 1800-2023 6.22.2 element-type equivalence on
                 // whole unpacked-array assigns; per-port packed 2->4 state
                 // stays legal.
                 for (int p = 0; p < LINK_PORTS; p++) begin
-                    tx_req_flit_q[p]     <= t_tx_req_flit[p];
-                    tx_rsp_flit_q[p]     <= t_tx_rsp_flit[p];
+                    if (t_tx_req_valid[p]) begin
+                        tx_req_valid_q[p] <= 1'b1;
+                        tx_req_flit_q[p]  <= t_tx_req_flit[p];
+                    end else if (tx_req_ready[p]) begin
+                        tx_req_valid_q[p] <= 1'b0;
+                    end
+                    if (t_tx_rsp_valid[p]) begin
+                        tx_rsp_valid_q[p] <= 1'b1;
+                        tx_rsp_flit_q[p]  <= t_tx_rsp_flit[p];
+                    end else if (tx_rsp_ready[p]) begin
+                        tx_rsp_valid_q[p] <= 1'b0;
+                    end
                     tx_dat_flit_q[p]     <= t_tx_dat_flit[p];
                     rx_dat_crdvalid_q[p] <= t_rx_dat_crdvalid[p];
                 end
@@ -261,55 +275,43 @@ module router_wrap #(
 
     assign rx_rsp_ready    = rx_rsp_ready_q;
 
-    for (genvar p = 0; p < LINK_PORTS; p++) begin : g_model_egress_spill
-        logic [REQ_FLIT_WIDTH-1:0] tx_req_flit_monitor;
-        logic [RSP_FLIT_WIDTH-1:0] tx_rsp_flit_monitor;
+    for (genvar p = 0; p < LINK_PORTS; p++) begin : g_model_egress_hold
+        // Each C++ router output is a one-cycle strobe; the hold register in
+        // the always_ff above owns the RTL-facing held-valid contract. The
+        // model may pop when the register is empty OR its flit's handshake
+        // completes this cycle (the free and the new load coincide on the
+        // next edge), which keeps the link at full rate with a single stage.
+        assign tx_req_model_ready[p] = !tx_req_valid_q[p] || tx_req_ready[p];
+        assign tx_rsp_model_ready[p] = !tx_rsp_valid_q[p] || tx_rsp_ready[p];
+        assign tx_req_valid[p] = tx_req_valid_q[p];
+        assign tx_req_flit[p]  = tx_req_flit_q[p];
+        assign tx_rsp_valid[p] = tx_rsp_valid_q[p];
+        assign tx_rsp_flit[p]  = tx_rsp_flit_q[p];
 
-        // Each C++ router output is a one-cycle strobe.  Stop another pop while
-        // its DPI staging register is pending, then let the approved primitive
-        // hold valid and payload through arbitrary RTL-side backpressure.
-        assign tx_req_model_ready[p] = tx_req_spill_ready[p] && !tx_req_valid_q[p];
-        assign tx_rsp_model_ready[p] = tx_rsp_spill_ready[p] && !tx_rsp_valid_q[p];
-        assign tx_req_flit_monitor = tx_req_flit[p];
-        assign tx_rsp_flit_monitor = tx_rsp_flit[p];
-
-        spill_register #(
-            .T(logic [REQ_FLIT_WIDTH-1:0]),
-            .Bypass(1'b0)
-        ) i_tx_req_spill_register (
-            .clk_i,
-            .rst_ni,
-            .valid_i(tx_req_valid_q[p]),
-            .ready_o(tx_req_spill_ready[p]),
-            .data_i(tx_req_flit_q[p]),
-            .valid_o(tx_req_valid[p]),
-            .ready_i(tx_req_ready[p]),
-            .data_o(tx_req_flit[p])
-        );
-
-        spill_register #(
-            .T(logic [RSP_FLIT_WIDTH-1:0]),
-            .Bypass(1'b0)
-        ) i_tx_rsp_spill_register (
-            .clk_i,
-            .rst_ni,
-            .valid_i(tx_rsp_valid_q[p]),
-            .ready_o(tx_rsp_spill_ready[p]),
-            .data_i(tx_rsp_flit_q[p]),
-            .valid_o(tx_rsp_valid[p]),
-            .ready_i(tx_rsp_ready[p]),
-            .data_o(tx_rsp_flit[p])
-        );
-
-        assert property (@(posedge clk_i) disable iff (!rst_ni)
-            tx_req_valid[p] && !tx_req_ready[p]
-            |=> tx_req_valid[p] && $stable(tx_req_flit_monitor))
-            else $error("router_wrap: REQ port %0d changed before handshake", p);
-
-        assert property (@(posedge clk_i) disable iff (!rst_ni)
-            tx_rsp_valid[p] && !tx_rsp_ready[p]
-            |=> tx_rsp_valid[p] && $stable(tx_rsp_flit_monitor))
-            else $error("router_wrap: RSP port %0d changed before handshake", p);
+        // Egress-hold checkers, written as explicit sampled-history registers
+        // rather than SVA $stable: under Verilator the $stable in a |=>
+        // consequent compares against a stale/initial $past sample, so the
+        // property false-fires on a port's FIRST backpressured cycle even
+        // while the wire provably holds (clocked trace vs $past=0, 2026-08-21
+        // hotspot mode-1 repro). The registers below sample at the same
+        // preponed edge an SVA would, on both Verilator and VCS.
+        logic chk_req_v_q, chk_req_r_q, chk_rsp_v_q, chk_rsp_r_q;
+        logic [REQ_FLIT_WIDTH-1:0] chk_req_flit_q;
+        logic [RSP_FLIT_WIDTH-1:0] chk_rsp_flit_q;
+        always_ff @(posedge clk_i) begin
+            chk_req_v_q    <= rst_ni && tx_req_valid[p];
+            chk_req_r_q    <= tx_req_ready[p];
+            chk_req_flit_q <= tx_req_flit[p];
+            chk_rsp_v_q    <= rst_ni && tx_rsp_valid[p];
+            chk_rsp_r_q    <= tx_rsp_ready[p];
+            chk_rsp_flit_q <= tx_rsp_flit[p];
+            if (rst_ni && chk_req_v_q && !chk_req_r_q &&
+                (!tx_req_valid[p] || tx_req_flit[p] !== chk_req_flit_q))
+                $error("router_wrap: REQ port %0d changed before handshake", p);
+            if (rst_ni && chk_rsp_v_q && !chk_rsp_r_q &&
+                (!tx_rsp_valid[p] || tx_rsp_flit[p] !== chk_rsp_flit_q))
+                $error("router_wrap: RSP port %0d changed before handshake", p);
+        end
     end
 
     assign tx_dat_valid    = tx_dat_valid_q;
