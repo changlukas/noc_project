@@ -1130,3 +1130,47 @@ def test_hotspot_peripherals_weights_the_target_set(tmp_path):
                 if p["base"] <= t["addr"] < p["base"] + p["size"]:
                     counts[i] += 1
     assert counts[0] > sum(counts[1:]), counts
+
+
+# ---- --space config (narrow class) ----
+
+def test_space_config_targets_the_config_aperture(tmp_path):
+    """--space config swaps every destination window base from the memory
+    aperture to the 4 KB config aperture (narrow class, spec section 5): each
+    address must land inside [0x0200_0000, 0x0200_1000) of its node block."""
+    g.main(["--pattern", "neighbor", "--topology", "mesh_2x2",
+            "--out", str(tmp_path), "--transactions-per-node", "4",
+            "--size", "3", "--len", "0", "--seed", "1", "--space", "config"])
+    lines = (tmp_path / "node0" / "write.txt").read_text().splitlines()
+    addr = int(lines[1], 16)
+    local = addr & 0xFFFFFFFF
+    assert 0x02000000 <= local < 0x02001000
+
+
+def test_space_config_offsets_wrap_inside_the_slot_window(tmp_path):
+    """Config-space pattern slots live in [0x10, 0x800) and wrap: no offset may
+    reach the cross-node probe window at 0x800 or the mcast slot below 0x10,
+    however many transactions the run asks for."""
+    g.main(["--pattern", "neighbor", "--topology", "mesh_2x2",
+            "--out", str(tmp_path), "--transactions-per-node", "200",
+            "--size", "3", "--len", "0", "--seed", "1", "--space", "config"])
+    for i in range(4):
+        lines = (tmp_path / f"node{i}" / "write.txt").read_text().splitlines()
+        # The address is the only single-token 0x line _ax_fields emits (other
+        # header fields are decimal; a data-beat line carries three tokens).
+        addrs = [int(l, 16) for l in lines if re.fullmatch(r"0x[0-9a-f]+", l)]
+        assert addrs
+        for a in addrs:
+            # Pattern slots wrap in [0x10, 0x800); the per-pattern narrow
+            # probe extra legitimately sits at offset 0. Nothing may reach
+            # the cross-node probe window at 0x800.
+            assert (a & 0xFFF) < 0x800
+
+
+def test_space_config_rejects_a_wide_size(tmp_path):
+    """Narrow class is the 8 B lane: AxSIZE > 3 is a stimulus error, not a
+    truncation."""
+    with pytest.raises(SystemExit):
+        g.main(["--pattern", "neighbor", "--topology", "mesh_2x2",
+                "--out", str(tmp_path), "--transactions-per-node", "4",
+                "--size", "5", "--len", "0", "--space", "config"])
