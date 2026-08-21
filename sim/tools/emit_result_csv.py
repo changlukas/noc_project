@@ -24,7 +24,8 @@ _MON = re.compile(
     re.I,
 )
 _CONFIG = re.compile(
-    r"\[Config\]\s+max_unique_ids=(\d+)\s+max_outstanding=(\d+)\s+dat_num_vc=(\d+)")
+    r"\[Config\]\s+max_unique_ids=(\d+)\s+max_outstanding=(\d+)\s+dat_num_vc=(\d+)"
+    r"(?:\s+router_vc_depth=(\d+))?")
 
 
 def parse_monitors(log_text):
@@ -60,6 +61,7 @@ def parse_config(log_text, cli_max_unique_ids, cli_max_outstanding):
         cli_max_unique_ids if cli_max_unique_ids is not None else m.group(1),
         cli_max_outstanding if cli_max_outstanding is not None else m.group(2),
         int(m.group(3)),
+        int(m.group(4)) if m.group(4) else None,
     )
 
 
@@ -75,16 +77,23 @@ def main():
     ap.add_argument("--seed", required=True)
     ap.add_argument("--max-unique-ids", default=None)
     ap.add_argument("--max-outstanding", default=None)
+    # The next three do not appear in the tb [Config] line; unset means the run
+    # used the generator / ni_params_pkg default, which is what gets recorded.
+    ap.add_argument("--max-txns-per-id", default="32")
+    ap.add_argument("--ids-per-initiator", default="1")
+    ap.add_argument("--burst-len", default="0")
+    ap.add_argument("--space", default="memory")
     a = ap.parse_args()
 
     log_text = pathlib.Path(a.log).read_text()
     bw, latency = parse_monitors(log_text)
-    max_unique_ids, max_outstanding, dat_num_vc = parse_config(
+    max_unique_ids, max_outstanding, dat_num_vc, router_vc_depth = parse_config(
         log_text, a.max_unique_ids, a.max_outstanding
     )
     row = {
         "topology": a.topology,
         "vc": dat_num_vc,
+        "router_vc_depth": router_vc_depth,
         "pattern": a.pattern,
         "injection_mode": a.injection_mode,
         "injection_rate": a.injection_rate,
@@ -92,6 +101,10 @@ def main():
         "seed": a.seed,
         "max_unique_ids": max_unique_ids,
         "max_outstanding": max_outstanding,
+        "max_txns_per_id": a.max_txns_per_id,
+        "ids_per_initiator": a.ids_per_initiator,
+        "burst_len": a.burst_len,
+        "space": a.space,
         "accepted_bits_per_cycle": f"{bw:.1f}",
         "mean_latency": f"{latency:.1f}",
     }

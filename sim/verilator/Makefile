@@ -300,6 +300,14 @@ IDS_PER_INITIATOR ?=
 # At --size 5 (32 B/beat), 63 gives 64 beats = 2048 B, inside the 4 KB boundary.
 BURST_LEN       ?= 0
 
+# Destination address space for generated stimulus (gen_test_patterns --space).
+# memory = data class (DAT network, AxSIZE 5). config = narrow class (REQ/RSP
+# network, AxSIZE 3 = the 8 B lane); config-space offsets wrap inside the 4 KB
+# aperture, so it is for measurement modes only -- scoreboard-armed runs
+# miscompare.
+SPACE           ?= memory
+STIM_SIZE       ?= $(if $(filter config,$(SPACE)),3,5)
+
 # Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId, floo_rob.sv:12). No ?=
 # default; see B_ROB_DEPTH note above.
 
@@ -310,7 +318,7 @@ _CONTINUOUS    := $(filter 1,$(INJECTION_MODE))
 _CHECKED       := $(filter 2,$(INJECTION_MODE))
 # Pattern tag: multicast runs are per-shape, so the shape joins the stim dir /
 # output tag (row and submesh runs must not share stimulus or logs).
-_PATTERN_TAG   := $(PATTERN)$(if $(filter multicast,$(PATTERN)),_$(MCAST_SHAPE))
+_PATTERN_TAG   := $(PATTERN)$(if $(filter multicast,$(PATTERN)),_$(MCAST_SHAPE))$(if $(filter config,$(SPACE)),_narrow)
 # DMA=1 replaces the pattern stimulus with iDMA job files, so its stimulus and
 # its run tag key on the job geometry rather than on PATTERN / INJECTION_COUNT,
 # neither of which a DMA run reads.
@@ -354,7 +362,8 @@ gen:
 	@mkdir -p $(STIM_ROOT)
 	$(if $(filter 1,$(DMA)),,$(PYTHON3) $(GEN_PATTERNS) --topology $(CONFIG) \
 	    --out $(STIM_ROOT) --pattern $(PATTERN) \
-	    --transactions-per-node $(INJECTION_COUNT) --size 5 --len $(BURST_LEN) \
+	    --transactions-per-node $(INJECTION_COUNT) --size $(STIM_SIZE) --len $(BURST_LEN) \
+	    $(if $(filter config,$(SPACE)),--space config) \
 	    --seed $(SEED) $(_HOTSPOT_ARGS) $(_MCAST_ARGS) \
 	    $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)))
 	$(if $(filter 1,$(DMA)),$(PYTHON3) $(GEN_DMA_JOBS) --topology $(CONFIG) \
@@ -425,7 +434,10 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 	        --injection-mode $(INJECTION_MODE) --injection-rate $(INJECTION_RATE) \
 	        --injection-count $(INJECTION_COUNT) --seed $(SEED) \
 	        $(if $(MAX_UNIQUE_IDS),--max-unique-ids $(MAX_UNIQUE_IDS)) \
-	        $(if $(MAX_OUTSTANDING),--max-outstanding $(MAX_OUTSTANDING)); \
+	        $(if $(MAX_OUTSTANDING),--max-outstanding $(MAX_OUTSTANDING)) \
+	        $(if $(MAX_TXNS_PER_ID),--max-txns-per-id $(MAX_TXNS_PER_ID)) \
+	        $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)) \
+	        --burst-len $(BURST_LEN) --space $(SPACE); \
 	    echo "CONTINUOUS PASS: $(SIM_TAG)"; \
 	elif [ $$rc -ne 0 ] || ! grep -q 'PASS: all' output/$(SIM_TAG)/run.log; then \
 	    echo "DIRECTED FAIL: run did not reach non-vacuous PASS (rc=$$rc)"; exit 1; \

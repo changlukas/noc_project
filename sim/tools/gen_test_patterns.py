@@ -161,7 +161,7 @@ def _ax_fields(axid, addr, axi_len, axi_size, include_atop, user=0):
 def emit_file_master_node(out_dir, src_idx, dst_bases, n_nodes,
                           base_local, region_bytes, axi_size, axi_len, data_width,
                           id_rng, ids_per_initiator=1, num_axi_ids=256,
-                          extra=None):
+                          extra=None, wrap_window=None):
     """Write out_dir/{write,read}.txt for one node. One write+read pair per entry of
     dst_bases, src-partitioned address, address-in-data payload. INCR, atop=0,
     full strobe.
@@ -193,8 +193,16 @@ def emit_file_master_node(out_dir, src_idx, dst_bases, n_nodes,
     id_base = (src_idx * ids_per_initiator) % num_axi_ids
     write_lines, read_lines = [], []
     for seq, dst_base in enumerate(dst_bases):
-        local_off = alloc_unique_offset(dst_base, src_idx, seq, base_local,
-                                        n_nodes, region_bytes, reserved=reserved)
+        if wrap_window is not None:
+            # Config-space narrow traffic: the 4 KB aperture cannot hold one
+            # unique slot per (src, seq), so slots wrap inside the window and
+            # addresses repeat (see --space help: measurement modes only).
+            stride = max(_SLOT_STRIDE, reserved)
+            local_off = base_local + \
+                (src_idx * stride + seq * (n_nodes * stride)) % wrap_window
+        else:
+            local_off = alloc_unique_offset(dst_base, src_idx, seq, base_local,
+                                            n_nodes, region_bytes, reserved=reserved)
         addr = dst_base + local_off
         # Uniform over the tile's block, reuse allowed: axi_test.sv:233 draws
         # ax_id over the whole space and axi_rand_master's UNIQUE_IDS defaults
@@ -1060,6 +1068,13 @@ def main(argv=None):
                          "node ids: every tile draws from the peripheral endpoints, "
                          "the many-to-one shape a memory controller sees")
     # Synthetic payload shape
+    ap.add_argument("--space", choices=("memory", "config"), default="memory",
+                    help="Destination address space. memory = data class (DAT "
+                         "network). config = narrow class (REQ/RSP network, "
+                         "AxSIZE <= 3): offsets wrap inside the 4 KB config "
+                         "aperture, so addresses repeat and write-readback "
+                         "uniqueness does NOT hold -- measurement modes only, "
+                         "scoreboard-armed runs will miscompare")
     ap.add_argument("--size", type=int, default=2,
                     help="AxSIZE for synthetic transactions (0..7; default 2 = 4 bytes)")
     ap.add_argument("--len", type=int, default=0, dest="burst_len",
@@ -1106,10 +1121,31 @@ def main(argv=None):
     # readback of the same address agrees, so the run passes having delivered
     # every peripheral transaction to the wrong place.
     smallest_window = min(list(sizes["memory"].values()) + [p["size"] for p in peripherals])
-    if base_local + extent > smallest_window:
+    if a.space == "memory" and base_local + extent > smallest_window:
         ap.error(f"footprint base_local({base_local:#x}) + extent({extent:#x}) = "
                  f"{base_local + extent:#x} overruns the smallest addressable window "
                  f"{smallest_window:#x}; reduce --transactions-per-node, --len, or --size")
+    wrap_window = None
+    if a.space == "config":
+        if a.pattern == "multicast" or a.hotspot_peripherals:
+            ap.error("--space config supports the unicast patterns only "
+                     "(config-space multicast has its own machinery; "
+                     "peripherals own no config tile)")
+        if a.size > 3:
+            ap.error("--space config is the narrow class: AxSIZE <= 3 "
+                     "(8 B lane; S2 design doc sec 1)")
+        missing = [cid for (_i, _x, _y, cid) in nodes if cid not in config_bases]
+        if missing:
+            ap.error(f"--space config: topology {a.topology} declares no config "
+                     f"tile for cid(s) {missing}")
+        # Pattern slots live in [0x10, _CONFIG_PROBE_BASE), between the
+        # multicast slot and the cross-node probe window (layout table above).
+        base_local = 0x10
+        config_stride = max(_SLOT_STRIDE, burst_footprint)
+        wrap_window = ((_CONFIG_PROBE_BASE - base_local) // config_stride) * config_stride
+        if wrap_window == 0:
+            ap.error(f"burst footprint {burst_footprint:#x} does not fit the "
+                     f"config-aperture slot window; reduce --len or --size")
     rng = _random_module.Random(a.seed)
     # Ids draw from their own stream, so changing --ids-per-initiator moves the
     # ids and nothing else. Sharing `rng` would shift every later destination
@@ -1161,16 +1197,17 @@ def main(argv=None):
         # shares its host router's coordinate, so a coordinate no longer names
         # one destination and bases[cid] would send a peripheral's traffic to
         # that router's tile.
+        space_bases = config_bases if a.space == "config" else bases
         if a.pattern in _DETERMINISTIC_PATTERNS:
             dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
-            dst_bases = [bases[cid_of[(dst_x, dst_y)]]] * a.transactions_per_node
+            dst_bases = [space_bases[cid_of[(dst_x, dst_y)]]] * a.transactions_per_node
         elif a.pattern == "uniform_random":
             dst_lin = uniform_random_dsts(idx, n_nodes, a.transactions_per_node,
                                           rng, a.exclude_self)
-            dst_bases = [bases[cid_of[_linear_to_coord(d, x_dim)]] for d in dst_lin]
+            dst_bases = [space_bases[cid_of[_linear_to_coord(d, x_dim)]] for d in dst_lin]
         elif a.pattern == "all_to_all":
             dst_lin = all_to_all_dsts(idx, n_nodes, a.transactions_per_node)
-            dst_bases = [bases[cid_of[_linear_to_coord(d, x_dim)]] for d in dst_lin]
+            dst_bases = [space_bases[cid_of[_linear_to_coord(d, x_dim)]] for d in dst_lin]
         elif a.hotspot_peripherals:  # hotspot, on the boundary ports
             dst_bases = [p["base"] for p in
                          peripheral_hotspot_dsts(idx, peripherals, a.transactions_per_node,
@@ -1180,13 +1217,13 @@ def main(argv=None):
                 ap.error("--hotspot is required for the hotspot pattern")
             dst_lin = hotspot_dsts(idx, n_nodes, a.transactions_per_node, rng,
                                    a.hotspot, a.hotspot_rates, a.exclude_self)
-            dst_bases = [bases[cid_of[_linear_to_coord(d, x_dim)]] for d in dst_lin]
+            dst_bases = [space_bases[cid_of[_linear_to_coord(d, x_dim)]] for d in dst_lin]
         emit_file_master_node(os.path.join(a.out, f"node{idx}"), idx, dst_bases,
                               n_slots, base_local, region_bytes,
                               a.size, a.burst_len, widths["data"],
                               ids_per_initiator=a.ids_per_initiator,
                               num_axi_ids=(1 << widths["id"]), id_rng=id_rng,
-                              extra=extra)
+                              extra=extra, wrap_window=wrap_window)
 
 
 if __name__ == "__main__":

@@ -145,7 +145,6 @@ module nsu_wrap #(
     bit                    tx_rsp_valid_q;
     bit [RSP_FLIT_WIDTH-1:0] tx_rsp_flit_q;
     logic                  tx_rsp_model_ready;
-    logic                  tx_rsp_spill_ready;
     bit                    tx_dat_valid_q;
     bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q;
     bit [DAT_NUM_VC-1:0]     rx_dat_crdvalid_q;
@@ -298,8 +297,16 @@ module nsu_wrap #(
                     t_rready
                 );
                 rx_req_ready_q          <= t_rx_req_ready;
-                tx_rsp_valid_q          <= t_tx_rsp_valid;
-                tx_rsp_flit_q           <= t_tx_rsp_flit;
+                // RSP egress hold register: the strobe loads it, the wire
+                // handshake frees it; a strobe may land on the freeing edge
+                // (load wins, the old flit was consumed at that edge). See
+                // router_wrap.sv's identical staging.
+                if (t_tx_rsp_valid) begin
+                    tx_rsp_valid_q <= 1'b1;
+                    tx_rsp_flit_q  <= t_tx_rsp_flit;
+                end else if (tx_rsp_ready_i) begin
+                    tx_rsp_valid_q <= 1'b0;
+                end
                 tx_dat_valid_q          <= t_tx_dat_valid;
                 tx_dat_flit_q           <= t_tx_dat_flit;
                 rx_dat_crdvalid_q       <= t_rx_dat_crdvalid;
@@ -338,29 +345,27 @@ module nsu_wrap #(
     // -------------------------------------------------------------------------
 
     assign rx_req_ready_o    = rx_req_ready_q;
-    // Match the one-cycle C++ response strobe to the RTL-side held-valid
-    // contract.  Do not allow another model pop while the DPI staging register
-    // still holds a pulse that the spill register has not sampled.
-    assign tx_rsp_model_ready = tx_rsp_spill_ready && !tx_rsp_valid_q;
+    // The C++ model emits a one-cycle RSP strobe after sampling ready; the
+    // hold register above owns the RTL-facing held-valid contract, and the
+    // model may pop when it is empty or its flit's handshake completes this
+    // cycle (full rate, single stage).
+    assign tx_rsp_model_ready = !tx_rsp_valid_q || tx_rsp_ready_i;
+    assign tx_rsp_valid_o = tx_rsp_valid_q;
+    assign tx_rsp_flit_o  = tx_rsp_flit_q;
 
-    spill_register #(
-        .T(logic [RSP_FLIT_WIDTH-1:0]),
-        .Bypass(1'b0)
-    ) i_tx_rsp_spill_register (
-        .clk_i,
-        .rst_ni,
-        .valid_i(tx_rsp_valid_q),
-        .ready_o(tx_rsp_spill_ready),
-        .data_i(tx_rsp_flit_q),
-        .valid_o(tx_rsp_valid_o),
-        .ready_i(tx_rsp_ready_i),
-        .data_o(tx_rsp_flit_o)
-    );
-
-    assert property (@(posedge clk_i) disable iff (!rst_ni)
-        tx_rsp_valid_o && !tx_rsp_ready_i
-        |=> tx_rsp_valid_o && $stable(tx_rsp_flit_o))
-        else $error("nsu_wrap: RSP changed before valid/ready handshake");
+    // Egress-hold checker, explicit sampled-history form (SVA $stable in a
+    // |=> consequent false-fires under Verilator on the first backpressured
+    // cycle — see router_wrap.sv).
+    logic chk_rsp_v_q, chk_rsp_r_q;
+    logic [RSP_FLIT_WIDTH-1:0] chk_rsp_flit_q;
+    always_ff @(posedge clk_i) begin
+        chk_rsp_v_q    <= rst_ni && tx_rsp_valid_o;
+        chk_rsp_r_q    <= tx_rsp_ready_i;
+        chk_rsp_flit_q <= tx_rsp_flit_o;
+        if (rst_ni && chk_rsp_v_q && !chk_rsp_r_q &&
+            (!tx_rsp_valid_o || tx_rsp_flit_o !== chk_rsp_flit_q))
+            $error("nsu_wrap: RSP changed before valid/ready handshake");
+    end
 
     assign tx_dat_valid_o    = tx_dat_valid_q;
     assign tx_dat_flit_o     = tx_dat_flit_q;
