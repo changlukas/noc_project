@@ -348,7 +348,7 @@ not store transaction lifetime state.
 
 All production FIFO depths use power-of-two entry counts and have no architectural maximum.
 Synchronous FIFOs permit depth 1 unless a block-level relation raises the minimum; Router input VC
-FIFOs require at least 2 because `ready_slack < depth`; AXI asynchronous FIFOs require at least 2
+FIFOs require at least 2 because `almost_full_offset < depth`; AXI asynchronous FIFOs require at least 2
 for Gray-pointer CDC. `NOC_ROUTER_OUTPUT_FIFO_DEPTH` is also defaulted to 8. These defaults are
 `[TBD]` sizing points, not PPA optima; implementation signoff must sweep representative legal
 depths before changing them. Pros: pointer/occupancy logic and memory inference stay uniform, and

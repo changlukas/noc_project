@@ -91,13 +91,14 @@ NI has no per-VC FIFO. NI-to-Router DAT injection remains credit-controlled; its
 is this Router's LOCAL input VC FIFO.
 
 REQ and RSP use ready/valid instead. The C++ core computes an almost-full early ready from
-current occupancy, `ready = (occupancy + ready_slack <= depth)`. At the model-facing wire the
+current occupancy, `ready = (occupancy + almost_full_offset <= depth)`. At the model-facing wire the
 verification wrapper applies the standard contract: a transfer occurs only with `valid && ready`,
 and a source holds valid plus flit while stalled. The wrapper converts each accepted wire transfer
-back to the one-cycle ingress pulse expected by the C++ core and captures each one-cycle core
-egress strobe in the approved `spill_register`. The shipped `ready_slack` = 2 remains PROVISIONAL
-and awaits a measured wire-loop calibration (`simple_router.hpp`
-`SimpleRouterConfig::ready_slack`).
+back to the one-cycle ingress pulse expected by the C++ core and holds each one-cycle core
+egress strobe in a single hold register freed by the wire handshake. The shipped
+`almost_full_offset` = 2 is co-sim-calibrated: the worst measured overrun past the deassert
+threshold is one entry, so 2 keeps one entry of margin (`simple_router.hpp`
+`SimpleRouterConfig::almost_full_offset`).
 
 ### 2.2 Flit format
 
@@ -474,7 +475,7 @@ Router model configuration, fixed at `cmodel_router_create` time:
 |---|---|---|---|
 | `NOC_ROUTER_VC_DEPTH` | 8 | power of two, >= 2 | input VC FIFO depth; on DAT it is also the upstream credit seed, on REQ/RSP the depth the almost-full `ready` is computed against |
 | `NOC_ROUTER_OUTPUT_FIFO_DEPTH` | 8 | positive power of two | DAT stage-3 output FIFO depth, not credit-counted. REQ/RSP run with output FIFO depth 0 (stage 2 drives the link directly) |
-| `ready_slack` (REQ/RSP) | 2 | 1..`NOC_ROUTER_VC_DEPTH` - 1 | flits of headroom the almost-full `ready` reserves. PROVISIONAL, awaits a measured wire-loop calibration |
+| `almost_full_offset` (REQ/RSP) | 2 | 1..`NOC_ROUTER_VC_DEPTH` - 1 | entries of headroom the almost-full `ready` reserves. Co-sim-calibrated: worst measured overrun is 1 entry, 2 keeps one entry of margin |
 | `mesh_x_dim`, `mesh_y_dim` | 4, 4 | 2, 4, 8, 16 each | the router array, which the generated tb_top passes from the topology's `x_dim` / `y_dim`. A peripheral shares its host router's coordinate, so it adds none. X and Y are independent for unicast; powers of two keep every encoded coordinate valid. The first RTL target guarantees multicast/collective operation only when `mesh_x_dim == mesh_y_dim`. Minimum 2 per dimension; 1x1 and 1xN meshes are illegal. |
 | `x_coord`, `y_coord` | per node | `x < mesh_x_dim`, `y < mesh_y_dim` | this node's coordinate |
 
