@@ -36,8 +36,9 @@
 // Ready/valid flow control (floo_router.sv:473-475: "At the end point, we
 // cannot make valid dependent on ready ... there must be cuts at the input of
 // the endpoint"): ready is an almost-full early ready computed off current
-// occupancy, ready = (size + SLACK <= depth). SLACK's shipped default is
-// PROVISIONAL — see SimpleRouterConfig::ready_slack.
+// occupancy, ready = (size + ALMOST_FULL_OFFSET <= depth) — the FIFO-IP
+// almost_full_offset convention; calibration record at
+// SimpleRouterConfig::almost_full_offset.
 //
 // Single VC: REQ/RSP are ratified 1-VC networks (S1). floo_vc_arbiter is not
 // translated — degenerates to a passthrough only at
@@ -103,29 +104,26 @@ struct SimpleRouterConfig {
     // OutFifoDepth, floo_router.sv:448-470. 0 is legal (gen_no_out_fifo):
     // stage 2 drives the downstream link directly, no stage 3.
     std::size_t output_fifo_depth = 0;
-    // Almost-full slack (floo_router.sv:473-475, Q1 in
+    // Almost-full offset (FIFO-IP convention; floo_router.sv:473-475, Q1 in
     // .superpowers/sdd/IMPLEMENTATION_PLAN/s3a-stage-design.md §4): ready
-    // deasserts `ready_slack` flits before the FIFO is physically full, to
-    // cover the multi-cycle round trip of a registered ready wire between two
-    // nodes (the design's own register-chain accounting: A out reg(T) -> B
-    // set_inputs(T+1) -> B tick -> B out reg(T+1) -> A set_inputs(T+2) -> A
-    // decides — at least two registrations, so a deasserted ready reaches the
-    // sender 2+ cycles late).
+    // deasserts `almost_full_offset` entries before the FIFO is physically
+    // full, to cover the round trip of a registered ready wire between two
+    // nodes (A out reg(T) -> B set_inputs(T+1) -> B tick -> B out reg(T+1)
+    // -> A set_inputs(T+2) -> A decides — a deasserted ready reaches the
+    // sender 2 cycles late).
     //
-    // PROVISIONAL DEFAULT: 2 is the structural floor proved by that chain,
-    // not a guess. The credit Router's analogous constant (NOC_ROUTER_VC_DEPTH
-    // = 8) was fixed by MEASURING the credit loop in co-sim (returned 5
-    // cycles); the same measurement is owed here — drive a known ready-loop
-    // scenario through two wrapped SimpleRouter nodes in co-sim and count
-    // cycles from a downstream ready deassertion to the upstream node
-    // observing it — and is out of reach without co-sim (this task's tier is
-    // Windows ctest only). Calibration item: T5 (wrap) or T7 (tail),
-    // whichever lands the two-node co-sim harness first.
+    // CALIBRATED 2026-08-21 in co-sim: worst input-FIFO occupancy across the
+    // REQ/RSP-backpressure scenarios (hotspot mode 1 single-beat and 33-beat,
+    // narrow-class uniform_random 33-beat) is 7 of depth 8 — exactly ONE
+    // entry of overrun past the deassert threshold. The second in-flight flit
+    // the 2-cycle lag would imply is absorbed by the sender's single-entry
+    // egress hold register (router_wrap.sv), so the structural floor is 1;
+    // the shipped 2 keeps one entry of margin over the measured worst case.
     //
-    // Must be >= 1 (construction asserts this): RTL's own FIFO ready is a
-    // slack=1 baseline, so 0 — zero round-trip margin — is unconditionally
+    // Must be >= 1 (construction asserts this): RTL's own FIFO ready is an
+    // offset=1 baseline, so 0 — zero round-trip margin — is unconditionally
     // wrong, not a legitimate degenerate calibration point.
-    std::size_t ready_slack = 2;
+    std::size_t almost_full_offset = 2;
 };
 
 // Ready/valid half of a SimpleRouter link, receiver side: the sender queries
@@ -181,15 +179,14 @@ class SimpleRouter {
             assert(false && "SimpleRouter: num_vc must be 1 (no VC arbiter translated)");
             std::abort();
         }
-        if (cfg_.ready_slack < 1) {
+        if (cfg_.almost_full_offset < 1) {
             assert(false &&
-                   "SimpleRouter: ready_slack must be >= 1 (0 is unconditionally wrong, "
+                   "SimpleRouter: almost_full_offset must be >= 1 (0 is unconditionally wrong, "
                    "not a calibration point — RTL's own FIFO ready baseline is slack=1)");
             std::abort();
         }
         if (cfg_.input_fifo_depth < 2 || !is_power_of_two(cfg_.input_fifo_depth)) {
-            assert(false &&
-                   "SimpleRouter: input_fifo_depth must be a power of two and at least 2");
+            assert(false && "SimpleRouter: input_fifo_depth must be a power of two and at least 2");
             std::abort();
         }
         if (cfg_.output_fifo_depth != 0 && !is_power_of_two(cfg_.output_fifo_depth)) {
@@ -197,8 +194,8 @@ class SimpleRouter {
                    "SimpleRouter: output_fifo_depth must be zero or a positive power of two");
             std::abort();
         }
-        if (cfg_.input_fifo_depth < cfg_.ready_slack + 1) {
-            assert(false && "SimpleRouter: input_fifo_depth must be >= ready_slack + 1");
+        if (cfg_.input_fifo_depth < cfg_.almost_full_offset + 1) {
+            assert(false && "SimpleRouter: input_fifo_depth must be >= almost_full_offset + 1");
             std::abort();
         }
         if (!(cfg_.x < cfg_.mesh_x_dim && cfg_.y < cfg_.mesh_y_dim)) {
@@ -231,7 +228,7 @@ class SimpleRouter {
     // Test introspection
     bool ready(std::size_t port, uint8_t vc) const {
         assert(port < ROUTER_PORT_COUNT && vc < cfg_.num_vc);
-        return input_fifo_[port][vc].size() + cfg_.ready_slack <= cfg_.input_fifo_depth;
+        return input_fifo_[port][vc].size() + cfg_.almost_full_offset <= cfg_.input_fifo_depth;
     }
     std::size_t input_fifo_size(std::size_t port, uint8_t vc) const {
         return input_fifo_[port][vc].size();

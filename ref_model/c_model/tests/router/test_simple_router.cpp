@@ -80,12 +80,12 @@ TEST(SimpleRouterConstructionDeath, BadParametersAbort) {
     bad_vc.num_vc = 2;
     EXPECT_DEATH(SimpleRouter r(bad_vc), "num_vc");
     SimpleRouterConfig zero_slack = center_cfg();
-    zero_slack.ready_slack = 0;
-    EXPECT_DEATH(SimpleRouter r(zero_slack), "ready_slack");
+    zero_slack.almost_full_offset = 0;
+    EXPECT_DEATH(SimpleRouter r(zero_slack), "almost_full_offset");
     SimpleRouterConfig bad_slack = center_cfg();
     bad_slack.input_fifo_depth = 2;
-    bad_slack.ready_slack = 2;  // needs depth >= slack + 1 == 3
-    EXPECT_DEATH(SimpleRouter r(bad_slack), "ready_slack");
+    bad_slack.almost_full_offset = 2;  // needs depth >= offset + 1 == 3
+    EXPECT_DEATH(SimpleRouter r(bad_slack), "almost_full_offset");
     SimpleRouterConfig non_power_of_two_input_depth = center_cfg();
     non_power_of_two_input_depth.input_fifo_depth = 3;
     EXPECT_DEATH(SimpleRouter r(non_power_of_two_input_depth), "power of two");
@@ -109,7 +109,7 @@ TEST(SimpleRouterDatapathDeath, OverflowIgnoringReadyAborts) {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     SimpleRouterConfig cfg = center_cfg();
     cfg.input_fifo_depth = 2;
-    cfg.ready_slack = 1;  // legal minimum (ctor asserts ready_slack >= 1)
+    cfg.almost_full_offset = 1;  // legal minimum (ctor asserts almost_full_offset >= 1)
     SimpleRouter r(cfg);
     const auto W = static_cast<std::size_t>(RouterPort::WEST);
     // No downstream attached: nothing ever drains the FIFO. Fill to depth
@@ -188,7 +188,7 @@ TEST_P(SimpleRouterBackpressure, ReadyDeassertsAtAlmostFullNoOverflow) {
     auto [depth, slack] = GetParam();
     SimpleRouterConfig cfg = center_cfg();
     cfg.input_fifo_depth = depth;
-    cfg.ready_slack = slack;
+    cfg.almost_full_offset = slack;
     SimpleRouter r(cfg);
     const auto W = static_cast<std::size_t>(RouterPort::WEST);
     // No downstream attached: occupancy only grows, isolating the admission
