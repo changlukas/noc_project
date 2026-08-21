@@ -306,8 +306,8 @@ nsu:
   META_BUFFER_MAX_UNIQUE_IDS:
     type: int
     units: count
-    description: "Distinct AXI IDs the NSU presents downstream (1 collapses; 8 passes through)."
-    default: 1
+    description: "Distinct AXI IDs the NSU presents downstream (1 collapses; 8 passes through). Default passthrough: the upstream ID reaches the slave unchanged."
+    default: 8
     allowed: [1, 8]
     sv_symbol: NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT
     cpp_symbol: NSU_META_BUFFER_MAX_UNIQUE_IDS

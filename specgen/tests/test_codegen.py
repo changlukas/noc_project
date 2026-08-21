@@ -282,7 +282,7 @@ def test_nmu_nsu_domains_load():
     assert c["nmu"]["ROB_B_DEPTH"]["default"] == 128
     assert c["nmu"]["QUEUE_DEPTH"]["default"] == 16
     assert c["nmu"]["QUEUE_DEPTH"]["cpp_symbol"] == "NMU_QUEUE_DEPTH"
-    assert c["nsu"]["META_BUFFER_MAX_UNIQUE_IDS"]["default"] == 1
+    assert c["nsu"]["META_BUFFER_MAX_UNIQUE_IDS"]["default"] == 8
     assert c["nsu"]["QUEUE_DEPTH"]["sv_symbol"] == "NSU_QUEUE_DEPTH_DFLT"
 
 
