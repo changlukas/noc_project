@@ -53,7 +53,7 @@ with a bypass path handles cross-destination reordering at the endpoint.
 | piece | mechanism |
 |---|---|
 | routing | XY dimension-order, one fixed path per source-destination pair |
-| fixed VC id, request | `nmu::VcAllocator` reuses the ID's recorded VC when an `ordering_req = 0` flit repeats its `(dst_id, id)`. A blocked fixed VC waits instead of rerouting |
+| fixed VC id, request | `nmu::VcAllocator` maps AW to `(dst_id ^ awid) % num_vc`, stateless, and W follows its AW. A blocked fixed VC waits instead of rerouting |
 | fixed VC id, response | `nsu::VcAllocator` maps R to `(dst_id ^ rid) % num_vc`, stateless. Full or no-credit refuses, never spills |
 | endpoint reorder | `nmu::Rob` re-sorts only same-ID responses interleaved across destinations. Ordering toward the master lives in the NMU because only the NMU knows its own issue order |
 | identity echo | `nsu::MetaBuffer` holds `{src_id, upstream_id, ordering_req, ordering_tag}` per response; `nsu::Packetize` stamps them onto B/R. Neither reorders, and the fabric never reads either field |
@@ -94,8 +94,8 @@ SRAM is needed.
   injection is the fabric's deadlock gate.
 - The same-ordering-domain bypass stays sound only while same-`(dst, port, class, id)` responses
   cannot split across VCs. The fixed VC id provides that. A round-robin spread
-  of the streak breaks it, which is why each streak stays on one VC per
-  network.
+  of a same-`(dst, id)` stream breaks it, which is why the hash keeps that
+  stream on one VC per network.
 - No safe design pairs a fabric that may reorder same-destination responses
   with an endpoint that performs no reordering. Dropping the fixed VC id grows
   the RoB back to the endpoint-reorder-buffer scheme's size.

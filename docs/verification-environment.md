@@ -272,7 +272,8 @@ Upstream references:
   instantiated per (output, VC), ported), `floo_vc_arbiter.sv` (`LockIn=0` per-cycle
   VC mux over those locks, ported),
   `floo_vc_assignment.sv` (per-hop turn-model VC assignment, deprecated
-  upstream, not ported), `floo_pkg.sv` (parameter names `BRoBSize`,
+  upstream, ported: preferred-VC map plus FVADA fallback in the router VA stage,
+  bypassed on `fixed_vc = 1`), `floo_pkg.sv` (parameter names `BRoBSize`,
   `RRoBSize`, `MaxTxnsPerId`, `MaxTxns`), `axi_bw_monitor.sv` (DV bandwidth
   monitor, imported with one flagged modification).
 - ID-space narrowing for a small-`NumIds` RoB: `axi_id_remap.sv`

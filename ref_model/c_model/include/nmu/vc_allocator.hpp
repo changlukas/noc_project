@@ -13,8 +13,9 @@
 // function with zero state, the same rule the NSU response path applies to R.
 // A same-(dst, id) write stream therefore always rides one VC, which is what
 // the router's per-(output, VC) wormhole lock needs to keep it in issue order
-// (AXI4 A5.3 same-ID write ordering): a stateful streak rule let the stream
-// take a fresh VC after an intervening destination and be overtaken there.
+// (AXI4 A5.3 same-ID write ordering): a rule keyed on a recorded destination
+// let the stream take a fresh VC after an intervening destination and be
+// overtaken there.
 // A mapped VC that is full/no-credit refuses (`return std::nullopt`) rather
 // than spilling to another VC -- spilling a fixed-VC stream would reorder it.
 // AR carries no such mapping: the production wraps pin the REQ face it rides
@@ -116,7 +117,7 @@ inline std::optional<uint8_t> VcAllocator::select_vc_for_axi_ch(uint8_t axi_ch, 
     if (num_vc_ == 1) return uint8_t{0};
 
     if (is_aw(axi_ch)) {
-        // Fixed VC id (same-destination bypass): deterministic pure function of
+        // Fixed VC id (write VC hash): deterministic pure function of
         // (dst_id, awid), zero state. Full/no-credit -> refuse, never spill
         // (spilling a fixed-VC stream to another VC would reorder it).
         uint8_t vc = static_cast<uint8_t>((dst_id ^ id) % num_vc_);
