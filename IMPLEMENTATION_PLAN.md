@@ -26,7 +26,7 @@
 ## Stage 1: Router lock per (output, VC)
 Goal: `router::Router` holds `num_vc` wormhole locks per output and round-robins across VCs every cycle.
 Success Criteria: new `RouterWormhole` tests pass, all router and fork tests pass, directed co-sim result recorded.
-Status: Not Started
+Status: Complete
 
 ### Task 1.1: Lock state per (output, VC)
 
@@ -346,7 +346,7 @@ TEST(NmuVcAllocator, SameDstAndIdAlwaysTakeTheSameVc) {
 ## Stage 2: NSU per-VC DAT ingress and W reassembly
 Goal: `nsu::Depacketize` holds one bounded flit queue per DAT VC, reassembles each VC's AW+W worm independently, and emits credit on consumption.
 Success Criteria: new `NsuDepacketize` tests pass, all NSU and integration tests pass.
-Status: Not Started
+Status: In Progress
 
 ### Task 2.1: Per-VC queues replace the data-class S1 registers
 
