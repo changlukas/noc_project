@@ -4,20 +4,24 @@
 // into, enqueues into a per-VC pending queue, and drains to the wrapped
 // downstream via tick() using credit-gated round-robin.
 //
-// Candidate set is every VC in [0, num_vc): scanned round-robin from
+// Candidate set for AR is every VC in [0, num_vc): scanned round-robin from
 // rr_start_; first VC with pending space AND downstream credit wins (else
 // backpressure). Only the DAT face runs num_vc > 1; REQ/RSP are single-VC.
 //
-// Fixed VC id (same-destination bypass): an ordering_req=0 AW flit whose (dst_id, awid) matches
-// the id's previous AW reuses that VC instead of round-robining --
-// deterministic VC allocation that fixes a same-(dst,id) bypass streak to one
-// VC so it cannot be reordered in-fabric. With no fixed VC yet (new id, or dst
-// changed) it falls back to round-robin and records the new (dst, VC) for next
-// time. ordering_req=1 flits are RoB-owned and order-free, so they always
-// round-robin, never fixed. AR carries no streak state: the production wraps
-// pin the REQ face it rides to num_vc == 1, and an AR reaching a multi-VC face
-// (ctest fixtures do this) round-robins. Every flit of a fixed-VC stream also
-// leaves with header fixed_vc=1 so downstream routers keep the NI's vc_id.
+// Fixed VC id (same-destination bypass): ANY AW (regardless of ordering_req)
+// maps to (dst_id ^ awid) % num_vc -- deterministic VC allocation, a pure
+// function with zero state, the same rule the NSU response path applies to R.
+// A same-(dst, id) write stream therefore always rides one VC, which is what
+// the router's per-(output, VC) wormhole lock needs to keep it in issue order
+// (AXI4 A5.3 same-ID write ordering): a stateful streak rule let the stream
+// take a fresh VC after an intervening destination and be overtaken there.
+// A mapped VC that is full/no-credit refuses (`return std::nullopt`) rather
+// than spilling to another VC -- spilling a fixed-VC stream would reorder it.
+// AR carries no such mapping: the production wraps pin the REQ face it rides
+// to num_vc == 1, and an AR reaching a multi-VC face (ctest fixtures do this)
+// round-robins. An ordering_req=0 AW and its W beats leave with header
+// fixed_vc=1 so downstream routers keep the NI's vc_id; ordering_req=1 is
+// RoB-owned and order-free, AR rides a single-VC face, both leave it clear.
 //
 // W-follows-AW invariant: this arbiter MUST be downstream
 // of a WormholeArbiter that serializes AW and all its W beats before
@@ -32,7 +36,6 @@
 //   FlooNoC floo_wormhole_arbiter.sv (output-port wormhole lock)
 //   FlooNoC floo_vc_arbiter.sv (VC arbiter without wormhole lock)
 //   gem5 Garnet OutputUnit::has_credit / OutVcState::m_credit_count
-#include "axi/types.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "router/req_out.hpp"
@@ -68,8 +71,7 @@ class VcAllocator : public router::NocReqOut {
     bool has_current_aw() const noexcept { return current_aw_vc_.has_value(); }
 
   private:
-    std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
-                                                uint8_t ordering_req, uint8_t id);
+    std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id, uint8_t id);
 
     // Channel-kind classification is class-independent: narrow and data class
     // AW/AR/W route through the same VC-selection logic (steering both
@@ -93,15 +95,10 @@ class VcAllocator : public router::NocReqOut {
     uint8_t rr_start_ = 0;  // round-robin scan start (selection)
     std::optional<uint8_t> current_aw_vc_;
     uint8_t current_aw_fixed_vc_ = 0;  // in-flight burst's fixed_vc, W beats copy it
-
-    // Fixed VC id (same-destination bypass): last (dst_id, VC) a given AXI id took on an
-    // ordering_req=0 AW. nullopt dst = id never seen.
-    std::array<std::optional<uint8_t>, axi::NOC_ID_SPACE> last_aw_dst_{};
-    std::array<uint8_t, axi::NOC_ID_SPACE> last_aw_vc_{};
 };
 
 inline std::optional<uint8_t> VcAllocator::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
-                                                                uint8_t ordering_req, uint8_t id) {
+                                                                uint8_t id) {
     // W invariant fires regardless of NUM_VC: this arbiter must be
     // downstream of a WormholeArbiter that serializes AW+W; W must always follow AW.
     if (is_w(axi_ch)) {
@@ -118,22 +115,17 @@ inline std::optional<uint8_t> VcAllocator::select_vc_for_axi_ch(uint8_t axi_ch, 
 
     if (num_vc_ == 1) return uint8_t{0};
 
-    if (!is_aw(axi_ch) && !is_ar(axi_ch)) return std::nullopt;
-
-    // Fixed VC id (same-destination bypass): ordering_req=0 AW whose dst_id matches this id's
-    // last AW dst_id reuses that VC. No fallback to round-robin on block --
-    // rerouting a fixed-VC streak mid-flight is exactly the reorder the fixed
-    // VC exists to prevent.
-    if (ordering_req == 0 && is_aw(axi_ch) && last_aw_dst_[id].has_value() &&
-        *last_aw_dst_[id] == dst_id) {
-        uint8_t last_vc = last_aw_vc_[id];
-        if (pending_[last_vc].size() < pending_depth_ && downstream_.credit_avail(last_vc)) {
-            return last_vc;
-        }
+    if (is_aw(axi_ch)) {
+        // Fixed VC id (same-destination bypass): deterministic pure function of
+        // (dst_id, awid), zero state. Full/no-credit -> refuse, never spill
+        // (spilling a fixed-VC stream to another VC would reorder it).
+        uint8_t vc = static_cast<uint8_t>((dst_id ^ id) % num_vc_);
+        if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) return vc;
         return std::nullopt;
     }
+    if (!is_ar(axi_ch)) return std::nullopt;
 
-    for (std::size_t k = 0; k < num_vc_; ++k) {  // round-robin from rr_start_, first available
+    for (std::size_t k = 0; k < num_vc_; ++k) {  // AR: round-robin from rr_start_
         uint8_t vc = static_cast<uint8_t>((rr_start_ + k) % num_vc_);
         if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) {
             rr_start_ =
@@ -157,17 +149,16 @@ inline bool VcAllocator::push_flit(const Flit& flit) {
                                                 : flit.get_payload_field("AR", "arid"));
     }
 
-    auto vc_opt = select_vc_for_axi_ch(axi_ch, dst_id, ordering_req, id);
+    auto vc_opt = select_vc_for_axi_ch(axi_ch, dst_id, id);
     if (!vc_opt.has_value()) return false;
     uint8_t vc_id = *vc_opt;
     if (pending_[vc_id].size() >= pending_depth_) return false;
 
     // fixed_vc: the flit holds this vc_id end to end, routers must not
     // reallocate it (spec docs/noc-target-spec.md header table). An
-    // ordering_req=0 AW streak is kept in order by same-VC delivery alone, so
-    // EVERY packet of the streak carries the bit -- including the first, which
-    // only records the (dst, VC) pair. ordering_req=1 is RoB-owned and
-    // order-free, AR rides a single-VC face: both leave the bit clear. W copies
+    // ordering_req=0 AW stream is kept in order by same-VC delivery alone, so
+    // EVERY packet of the stream carries the bit. ordering_req=1 is RoB-owned
+    // and order-free, AR rides a single-VC face: both leave the bit clear. W copies
     // its owning AW's bit from current_aw_fixed_vc_ (read before the wlast
     // reset below), never re-derives it from its own header.
     uint8_t fixed_vc = 0;
@@ -197,14 +188,6 @@ inline bool VcAllocator::push_flit(const Flit& flit) {
         if (flit.get_payload_field("NARROW_W", "wlast") != 0) {
             current_aw_vc_.reset();
         }
-    }
-
-    // Fixed VC id (same-destination bypass): record (dst_id, VC) for this id only after all
-    // accept conditions pass (mirrors current_aw_vc_'s atomicity above).
-    // ordering_req=1 flits are RoB-owned/order-free -- do not record a fixed VC.
-    if (ordering_req == 0 && is_aw(axi_ch)) {
-        last_aw_dst_[id] = dst_id;
-        last_aw_vc_[id] = vc_id;
     }
 
     Flit stamped = flit;
