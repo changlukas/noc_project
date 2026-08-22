@@ -328,21 +328,29 @@ TEST(RouterWormhole, PacketsDoNotInterleavePerOutputVc) {
     EXPECT_EQ(count_b, 3);
 }
 
-// Fix: the per-output wormhole lock keeps two same-output packets on different VCs contiguous
-// instead of interleaving.
-TEST(RouterWormhole, PacketsOnDifferentVcsDoNotInterleavePerOutput) {
+// Two pinned 3-flit worms from different inputs, different VCs, same output:
+// both hold a lock at once and the link carries their flits interleaved.
+// Each VC's own stream stays contiguous.
+TEST(RouterWormhole, WormsOnDifferentVcsInterleavePerOutput) {
     RouterConfig cfg = center_cfg();
     cfg.num_vc = 2;
     Router r(cfg);
     FlitSink east;
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
     r.set_downstream(E, east);
-    const uint8_t dst = make_dst(3, 1);  // routes EAST from center (x=1)
-    Packet a{static_cast<std::size_t>(RouterPort::WEST), /*src_id=*/0x10};
-    Packet b{static_cast<std::size_t>(RouterPort::SOUTH), /*src_id=*/0x20};
+    const uint8_t dst = make_dst(3, 1);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    const auto S = static_cast<std::size_t>(RouterPort::SOUTH);
+    int next_a = 0, next_b = 0;
     for (int t = 0; t < 24; ++t) {
-        feed_packet(r, a, dst, /*vc=*/0);
-        if (t >= 1) feed_packet(r, b, dst, /*vc=*/1);
+        if (next_a < 3) {
+            r.input(W).push_flit(make_pinned_flit(dst, 0, next_a == 2 ? 1 : 0, 0x10));
+            ++next_a;
+        }
+        if (next_b < 3) {
+            r.input(S).push_flit(make_pinned_flit(dst, 1, next_b == 2 ? 1 : 0, 0x20));
+            ++next_b;
+        }
         const std::size_t before = east.received.size();
         r.tick();
         for (std::size_t i = before; i < east.received.size(); ++i)
@@ -351,11 +359,115 @@ TEST(RouterWormhole, PacketsOnDifferentVcsDoNotInterleavePerOutput) {
     ASSERT_EQ(east.received.size(), 6u);
     int runs = 1;
     for (std::size_t i = 1; i < east.received.size(); ++i) {
-        const uint8_t s = static_cast<uint8_t>(east.received[i].get_header_field("src_id"));
-        const uint8_t prev = static_cast<uint8_t>(east.received[i - 1].get_header_field("src_id"));
-        if (s != prev) ++runs;
+        if (east.received[i].get_header_field("src_id") !=
+            east.received[i - 1].get_header_field("src_id"))
+            ++runs;
     }
-    EXPECT_EQ(runs, 2) << "cross-VC packet flits interleaved on EAST output";
+    EXPECT_GT(runs, 2) << "worms on different VCs serialized on EAST";
+    std::vector<uint64_t> tails0, tails1;
+    for (const auto& f : east.received) {
+        const auto vc = f.get_header_field("vc_id");
+        EXPECT_EQ(f.get_header_field("src_id"), vc == 0 ? 0x10u : 0x20u);
+        (vc == 0 ? tails0 : tails1).push_back(f.get_header_field("flit_tail"));
+    }
+    EXPECT_EQ(tails0, (std::vector<uint64_t>{0, 0, 1}));
+    EXPECT_EQ(tails1, (std::vector<uint64_t>{0, 0, 1}));
+}
+
+// An unclosed worm on vc0 holds only vc0's lock: a complete worm on vc1 is
+// delivered in full.
+TEST(RouterWormhole, OpenWormOnVc0DoesNotBlockVc1) {
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    const auto S = static_cast<std::size_t>(RouterPort::SOUTH);
+    r.input(W).push_flit(make_pinned_flit(dst, 0, /*flit_tail=*/0, 0x10));  // head, never closed
+    int next_b = 0;
+    for (int t = 0; t < 24; ++t) {
+        if (next_b < 3) {
+            r.input(S).push_flit(make_pinned_flit(dst, 1, next_b == 2 ? 1 : 0, 0x20));
+            ++next_b;
+        }
+        const std::size_t before = east.received.size();
+        r.tick();
+        for (std::size_t i = before; i < east.received.size(); ++i)
+            r.receive_credit(E, static_cast<uint8_t>(east.received[i].get_header_field("vc_id")));
+    }
+    ASSERT_EQ(east.received.size(), 4u);
+    EXPECT_EQ(r.wormhole_locked_input(E, 0), std::optional<std::size_t>(W));
+    EXPECT_FALSE(r.wormhole_locked_input(E, 1).has_value());
+}
+
+// A locked VC with no credit idles only itself (floo_vc_arbiter LockIn=0
+// re-arbitrates every cycle among the VCs that can send).
+TEST(RouterWormhole, CreditStarvedVcDoesNotIdleTheOutput) {
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    const auto S = static_cast<std::size_t>(RouterPort::SOUTH);
+    // vc0: an open worm fed one body flit per tick; its credit is never returned,
+    // so after NOC_ROUTER_VC_DEPTH grants vc0 is starved while still locked.
+    int next_b = 0;
+    for (int t = 0; t < 40; ++t) {
+        if (r.input_fifo_size(W, 0) == 0) r.input(W).push_flit(make_pinned_flit(dst, 0, 0, 0x10));
+        if (t >= 10 && next_b < 3) {
+            r.input(S).push_flit(make_pinned_flit(dst, 1, next_b == 2 ? 1 : 0, 0x20));
+            ++next_b;
+        }
+        const std::size_t before = east.received.size();
+        r.tick();
+        for (std::size_t i = before; i < east.received.size(); ++i) {
+            const auto vc = static_cast<uint8_t>(east.received[i].get_header_field("vc_id"));
+            if (vc == 1) r.receive_credit(E, vc);
+        }
+    }
+    int vc0 = 0, vc1 = 0;
+    for (const auto& f : east.received) (f.get_header_field("vc_id") == 0 ? vc0 : vc1)++;
+    EXPECT_EQ(vc0, static_cast<int>(NOC_ROUTER_VC_DEPTH));
+    EXPECT_EQ(vc1, 3);
+    EXPECT_EQ(r.wormhole_locked_input(E, 0), std::optional<std::size_t>(W));
+}
+
+// A credit-blocked worm's tail must wait for its own VC's credit. A tail is
+// the one flit vc_assignment lets overflow to another VC; granting it from
+// another VC's slot would leave the worm's lock set forever.
+TEST(RouterWormhole, CreditBlockedTailDoesNotOverflowToAnotherVc) {
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    r.set_downstream(E, east);
+    // (2,3) routes EAST here and NORTH at the next hop, so the worm's preferred
+    // output VC is 0 (floo_vc_assignment.sv:91) and vc1 is the FVADA overflow.
+    const uint8_t dst = make_dst(2, 3);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    // fixed_vc=0 worm: head + NOC_ROUTER_VC_DEPTH-1 bodies use up vc0's credit,
+    // then the tail arrives with credit_[E][0] == 0 and credit left on vc1.
+    const int bodies = static_cast<int>(NOC_ROUTER_VC_DEPTH) - 1;
+    int fed = 0;
+    for (int t = 0; t < 40; ++t) {
+        if (r.input_fifo_size(W, 0) == 0 && fed <= bodies + 1) {
+            const uint64_t tail = (fed == bodies + 1) ? 1 : 0;
+            r.input(W).push_flit(make_tagged_flit(dst, 0, tail, 0x10));
+            ++fed;
+        }
+        r.tick();  // no credit ever returned on vc0
+    }
+    EXPECT_EQ(east.received.size(), static_cast<std::size_t>(NOC_ROUTER_VC_DEPTH));  // tail stuck
+    EXPECT_TRUE(r.wormhole_locked_input(E, 0).has_value());
+    EXPECT_FALSE(r.wormhole_locked_input(E, 1).has_value());
+    for (const auto& f : east.received) EXPECT_EQ(f.get_header_field("vc_id"), 0u);
 }
 
 TEST(RouterWormhole, SingleFlitPacketLocksAndReleasesSameCycle) {
@@ -500,29 +612,6 @@ TEST(RouterWormhole, LockedOutputIsLocalAndOtherOutputProceeds) {
     }
     EXPECT_EQ(east.received.size(), 3u);
     EXPECT_EQ(north.received.size(), 3u);  // other output not blocked by EAST's lock
-}
-
-TEST(RouterWormhole, OpenPacketHoldsOutputAndBlocksOtherVc) {
-    RouterConfig cfg = center_cfg();
-    cfg.num_vc = 2;
-    Router r(cfg);
-    FlitSink east;
-    const auto E = static_cast<std::size_t>(RouterPort::EAST);
-    r.set_downstream(E, east);
-    const uint8_t dst = make_dst(3, 1);
-    Packet head_only{static_cast<std::size_t>(RouterPort::WEST), 0x10};
-    Packet full{static_cast<std::size_t>(RouterPort::SOUTH), 0x20};
-    feed_packet(r, head_only, dst, /*vc=*/0);  // one call = head, flit_tail=0, never closed
-    for (int t = 0; t < 24; ++t) {
-        feed_packet(r, full, dst, /*vc=*/1);  // a complete 3-flit packet on vc1
-        const std::size_t before = east.received.size();
-        r.tick();
-        for (std::size_t i = before; i < east.received.size(); ++i)
-            r.receive_credit(E, static_cast<uint8_t>(east.received[i].get_header_field("vc_id")));
-    }
-    ASSERT_EQ(east.received.size(), 1u);  // only the open packet's head
-    EXPECT_EQ(static_cast<uint8_t>(east.received[0].get_header_field("src_id")), 0x10);
-    // The vc1 packet is blocked behind the unclosed vc0 lock (no leak across VCs).
 }
 
 // --- Per-VC independence --------------------------------------------------
