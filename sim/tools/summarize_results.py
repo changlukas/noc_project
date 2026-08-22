@@ -132,18 +132,28 @@ def group_label(key):
 
 
 def param_bullets(key):
-    """The parameter set as two bullets: the AXI-side stimulus and NI
-    settings, and what the NoC is built with. `-` = not applicable, `?` =
+    """The parameter set as nested bullets: the AXI-side stimulus and NI
+    settings, then what the NoC is built with. `-` = not applicable, `?` =
     unrecorded (aborted run)."""
     (topology, vc, depth, outstanding, txns_per_id, ids, burst, mode, rate,
      count, mst_stall) = key
     beats = f"AxLEN {burst} ({int(burst) + 1} beats)" if burst.isdigit() else f"AxLEN {burst}"
     profile = {"0": "ideal", "1": "random"}.get(mst_stall, mst_stall)
-    axi = (f"- AXI: {mode} injection, rate {rate}, {count} transactions per node; "
-           f"{beats}; {ids} AXI ID(s) per initiator; NSU outstanding {outstanding}; "
-           f"NMU transactions per ID {txns_per_id}; master backpressure {profile}")
-    noc = f"- NoC: {topology}; DAT VCs {vc}; router input VC FIFO depth {depth} (credit window)"
-    return axi + chr(10) + noc + chr(10)
+    lines = [
+        "Parameters:",
+        "- AXI",
+        f"  - injection: {mode}, rate {rate}, {count} transactions per node",
+        f"  - burst: {beats}",
+        f"  - AXI IDs per initiator: {ids}",
+        f"  - NSU outstanding: {outstanding}",
+        f"  - NMU transactions per ID: {txns_per_id}",
+        f"  - master backpressure: {profile}",
+        "- NoC",
+        f"  - topology: {topology}",
+        f"  - DAT VCs: {vc}",
+        f"  - router input VC FIFO depth: {depth} (credit window)",
+    ]
+    return chr(10).join(lines) + chr(10)
 
 
 def main():
@@ -157,10 +167,10 @@ def main():
 
     print("# Continuous-mode parameter sweep\n")
     print("BW: accepted bandwidth, B/cycle, summed over all node monitors. "
-          "Latency: sample-weighted mean, AX handshake to last response beat. "
-          "One seed per cell. PASS (completed): protocol checks, model "
-          "invariants and watchdog clean; scoreboard armed in directed and "
-          "checked modes only.")
+          "Latency: sample-weighted mean from AX handshake to last response "
+          "beat. One seed per cell. PASS (completed) means protocol checks, "
+          "model invariants and watchdog stayed clean. The scoreboard is armed "
+          "in directed and checked modes only.")
     print()
     for i, (label, key) in enumerate(labeled, 1):
         patterns = groups[key]
