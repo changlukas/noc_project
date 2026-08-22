@@ -200,7 +200,9 @@ def main():
             delta = f"{nlat - dlat:+.1f}" if dlat is not None and \
                 nlat is not None else "-"
             fmt = lambda v: f"{v:.1f}" if v is not None else "-"
-            row = [pattern, status, str(len(runs)), fmt(dbw), fmt(dlat)]
+            # seeds counts the data runs, the same set BW and data latency
+            # average over; narrow probes ride the same cell.
+            row = [pattern, status, str(len(data)), fmt(dbw), fmt(dlat)]
             if has_narrow:
                 row += [fmt(nlat), delta]
             if has_util:

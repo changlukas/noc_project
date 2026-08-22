@@ -43,3 +43,22 @@ def test_narrow_runs_add_the_latency_compare_columns(tmp_path, capsys,
     # (test_default_and_diff_labels' output has no such header).
     assert "narrow lat (cyc)" in out
     assert "-10.0" in out
+
+
+def test_seeds_column_counts_data_runs_only(tmp_path, capsys, monkeypatch):
+    _write_csv(tmp_path / "continuous_mesh_2x2_neighbor_r0.9_s1", "neighbor", 1,
+               bw="100.0")
+    _write_csv(tmp_path / "continuous_mesh_2x2_neighbor_r0.9_s2", "neighbor", 2,
+               bw="200.0")
+    _write_csv(tmp_path / "continuous_mesh_2x2_neighbor_narrow_r0.9_s1",
+               "neighbor", 1, space="config")
+    monkeypatch.setattr(sys, "argv", ["summarize_results", str(tmp_path)])
+    s.main()
+    row = [ln for ln in capsys.readouterr().out.splitlines()
+           if ln.startswith("| neighbor")][0]
+    cells = [c.strip() for c in row.strip("|").split("|")]
+    # BW averages the two data runs, so the seeds cell must count those two
+    # and not the narrow probe sharing the cell. The column is B/cyc, the csv
+    # is bits/cyc: mean(100, 200) / 8 = 18.75.
+    assert cells[2] == "2"
+    assert cells[3] == "18.8"
