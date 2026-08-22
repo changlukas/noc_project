@@ -131,6 +131,21 @@ def group_label(key):
     return ", ".join(diffs) if diffs else "default"
 
 
+def param_bullets(key):
+    """The parameter set as two bullets: the AXI-side stimulus and NI
+    settings, and what the NoC is built with. `-` = not applicable, `?` =
+    unrecorded (aborted run)."""
+    (topology, vc, depth, outstanding, txns_per_id, ids, burst, mode, rate,
+     count, mst_stall) = key
+    beats = f"AxLEN {burst} ({int(burst) + 1} beats)" if burst.isdigit() else f"AxLEN {burst}"
+    profile = {"0": "ideal", "1": "random"}.get(mst_stall, mst_stall)
+    axi = (f"- AXI: {mode} injection, rate {rate}, {count} transactions per node; "
+           f"{beats}; {ids} AXI ID(s) per initiator; NSU outstanding {outstanding}; "
+           f"NMU transactions per ID {txns_per_id}; master backpressure {profile}")
+    noc = f"- NoC: {topology}; DAT VCs {vc}; router input VC FIFO depth {depth} (credit window)"
+    return axi + chr(10) + noc + chr(10)
+
+
 def main():
     out_root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else
                             "sim/verilator/output")
@@ -141,20 +156,16 @@ def main():
                         lk[0] != "default", lk[0]))
 
     print("# Continuous-mode parameter sweep\n")
-    print("BW = accepted bandwidth in bytes per cycle, summed over every node monitor. "
-          "Latency = sample-weighted mean over read and write transactions. "
-          "One seed per cell. PASS (completed) means protocol checks, model "
-          "invariants and the watchdog stayed clean; the write-readback "
-          "scoreboard is armed only in directed and checked modes.\n\n"
-          "data = memory space, AxSIZE 5 (32 B/beat), DAT network. "
-          "narrow = config space, AxSIZE 3 (the 8 B lane), REQ/RSP network. "
-          "Same pattern, parameters and seed policy per row; bits/cycle is "
-          "not comparable across classes (lane widths differ by design), "
-          "latency is.\n")
+    print("BW: accepted bandwidth, B/cycle, summed over all node monitors. "
+          "Latency: sample-weighted mean, AX handshake to last response beat. "
+          "One seed per cell. PASS (completed): protocol checks, model "
+          "invariants and watchdog clean; scoreboard armed in directed and "
+          "checked modes only.")
+    print()
     for i, (label, key) in enumerate(labeled, 1):
         patterns = groups[key]
         print(f"## Set {i}: {label}\n")
-        emit_table(_PARAM_COLS, [key])
+        print(param_bullets(key))
         rows = []
         has_narrow = any(r["space"] == "config"
                          for runs in patterns.values() for r in runs)
