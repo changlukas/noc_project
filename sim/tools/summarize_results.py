@@ -185,17 +185,17 @@ def main():
                 utils = [r["dat_util"] for r in data if r.get("dat_util")]
                 if utils:
                     # mean of per-run means; extremes across runs
-                    row += [f"{sum(u[0] for u in utils) / len(utils):.3f}",
-                            f"{max(u[1] for u in utils):.3f}",
-                            f"{min(u[2] for u in utils):.3f}"]
+                    row += [f"{100 * sum(u[0] for u in utils) / len(utils):.1f}%",
+                            f"{100 * max(u[1] for u in utils):.1f}%",
+                            f"{100 * min(u[2] for u in utils):.1f}%"]
                 else:
                     row += ["-", "-", "-"]
             rows.append(row)
-        header = ["pattern", "status", "data bits/cyc", "data lat (cyc)"]
+        header = ["pattern", "status", "BW (bits/cyc)", "data lat (cyc)"]
         if has_narrow:
             header += ["narrow lat (cyc)", "narrow-data (cyc)"]
         if has_util:
-            header += ["DAT util mean", "max", "min"]
+            header += ["DAT util mean (%)", "max (%)", "min (%)"]
         emit_table(header, rows)
 
 
