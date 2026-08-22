@@ -107,6 +107,7 @@ module ni_wrap #(
     logic [DAT_NUM_VC-1:0]     nsu_tx_dat_crdvalid;
     logic                      nsu_rx_dat_valid;
     logic [DAT_FLIT_WIDTH-1:0] nsu_rx_dat_flit;
+    logic [DAT_NUM_VC-1:0]     nsu_rx_dat_crdvalid;
 
     nmu_wrap #(
         .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
@@ -143,7 +144,10 @@ module ni_wrap #(
         .tx_dat_valid_o(nsu_tx_dat_valid), .tx_dat_flit_o(nsu_tx_dat_flit),
         .tx_dat_crdvalid_i(nsu_tx_dat_crdvalid),
         .rx_dat_valid_i(nsu_rx_dat_valid), .rx_dat_flit_i(nsu_rx_dat_flit),
-        .rx_dat_crdvalid_o(),  // see u_nmu's rx_dat_crdvalid_o comment
+        // NSU's ingress DAT queues ARE bounded (one per VC), so its consume
+        // pulse is the merge's credit-return to the router for NSU-bound flits
+        // (dat_merge_wrap.hpp class comment).
+        .rx_dat_crdvalid_o(nsu_rx_dat_crdvalid),
         .axi_req_o(slave_axi_req_o), .axi_rsp_i(slave_axi_rsp_i)
     );
 
@@ -157,6 +161,7 @@ module ni_wrap #(
         .nsu_tx_dat_valid_i(nsu_tx_dat_valid), .nsu_tx_dat_flit_i(nsu_tx_dat_flit),
         .nsu_tx_dat_crdvalid_o(nsu_tx_dat_crdvalid),
         .nsu_rx_dat_valid_o(nsu_rx_dat_valid), .nsu_rx_dat_flit_o(nsu_rx_dat_flit),
+        .nsu_rx_dat_crdvalid_i(nsu_rx_dat_crdvalid),
         .tx_dat_valid_o(tx_dat_valid_o), .tx_dat_flit_o(tx_dat_flit_o),
         .tx_dat_crdvalid_i(tx_dat_crdvalid_i),
         .rx_dat_valid_i(rx_dat_valid_i), .rx_dat_flit_i(rx_dat_flit_i),

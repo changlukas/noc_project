@@ -360,7 +360,8 @@ extern "C" unsigned long long cmodel_dat_merge_create(const char* name, int dat_
 extern "C" void cmodel_dat_merge_set_inputs(unsigned long long ctx, svBit nmu_tx_dat_valid,
                                             svBitVecVal* nmu_tx_dat_flit, svBit nsu_tx_dat_valid,
                                             svBitVecVal* nsu_tx_dat_flit,
-                                            svBitVecVal* tx_dat_crdvalid, svBit rx_dat_valid,
+                                            svBitVecVal* tx_dat_crdvalid,
+                                            svBitVecVal* nsu_rx_dat_crdvalid, svBit rx_dat_valid,
                                             svBitVecVal* rx_dat_flit) {
     DPI_BOUNDARY_BEGIN(cmodel_dat_merge_set_inputs) {
         REQUIRE_HANDLE(ctx, WrapType::DatMerge, "cmodel_dat_merge_set_inputs");
@@ -371,6 +372,7 @@ extern "C" void cmodel_dat_merge_set_inputs(unsigned long long ctx, svBit nmu_tx
         in.nsu_tx_dat_valid = static_cast<bool>(nsu_tx_dat_valid);
         in.nsu_tx_dat_flit = DatFlitMarshal::unpack(nsu_tx_dat_flit);
         in.tx_dat_crdvalid = unpack_vc_credit<VcCreditVec>(tx_dat_crdvalid, m->num_vc());
+        in.nsu_rx_dat_crdvalid = unpack_vc_credit<VcCreditVec>(nsu_rx_dat_crdvalid, m->num_vc());
         in.rx_dat_valid = static_cast<bool>(rx_dat_valid);
         in.rx_dat_flit = DatFlitMarshal::unpack(rx_dat_flit);
         m->set_inputs(in);

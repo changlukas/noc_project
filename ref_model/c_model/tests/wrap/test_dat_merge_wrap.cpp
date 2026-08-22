@@ -157,6 +157,65 @@ TEST(DatMergeWrap, IngressDemuxesByAxiCh) {
     EXPECT_FALSE(out.nmu_rx_dat_valid) << "DataAw must not also reach NMU";
 }
 
+// NSU-bound ingress (DataAw/DataW) returns credit when the NSU reports it
+// consumed the flit. NMU-bound (DataR) returns at demux, as before.
+TEST(DatMergeWrap, NsuBoundIngressCreditFollowsTheNsu) {
+    DatMergeWrap m;
+    m.init(/*dat_num_vc=*/2);
+    DatMergeInputs in{};
+    in.rx_dat_valid = true;
+    in.rx_dat_flit = flit_to_bytes(make_data_w(/*vc=*/1));
+    m.set_inputs(in);
+    m.tick();
+    DatMergeOutputs out{};
+    m.get_outputs(out);
+    EXPECT_TRUE(out.nsu_rx_dat_valid);
+    EXPECT_FALSE(out.rx_dat_crdvalid[1]);
+    in = DatMergeInputs{};
+    in.nsu_rx_dat_crdvalid[1] = true;
+    m.set_inputs(in);
+    m.tick();
+    m.get_outputs(out);
+    EXPECT_TRUE(out.rx_dat_crdvalid[1]);
+}
+
+TEST(DatMergeWrap, NmuBoundIngressCreditIsImmediate) {
+    DatMergeWrap m;
+    m.init(2);
+    DatMergeInputs in{};
+    in.rx_dat_valid = true;
+    in.rx_dat_flit = flit_to_bytes(make_data_r(/*rid=*/0, /*vc=*/0));
+    m.set_inputs(in);
+    m.tick();
+    DatMergeOutputs out{};
+    m.get_outputs(out);
+    EXPECT_TRUE(out.nmu_rx_dat_valid);
+    EXPECT_TRUE(out.rx_dat_crdvalid[0]);
+}
+
+// Same VC, same tick, one NMU-bound demux and one NSU pulse: two credits
+// owed, one wire bit per tick, so the second is emitted next tick, not lost.
+TEST(DatMergeWrap, SameVcCreditsFromBothSidesAreNotCollapsed) {
+    DatMergeWrap m;
+    m.init(2);
+    DatMergeInputs in{};
+    in.rx_dat_valid = true;
+    in.rx_dat_flit = flit_to_bytes(make_data_r(0, 0));
+    in.nsu_rx_dat_crdvalid[0] = true;
+    m.set_inputs(in);
+    m.tick();
+    DatMergeOutputs out{};
+    m.get_outputs(out);
+    EXPECT_TRUE(out.rx_dat_crdvalid[0]);
+    m.set_inputs(DatMergeInputs{});
+    m.tick();
+    m.get_outputs(out);
+    EXPECT_TRUE(out.rx_dat_crdvalid[0]);
+    m.tick();
+    m.get_outputs(out);
+    EXPECT_FALSE(out.rx_dat_crdvalid[0]);
+}
+
 // S3a T6: the two tests above prove the merge's OWN wormhole lock is
 // contention-safe using hand-crafted mock flits pushed directly into the
 // arbiter -- they say nothing about whether Packetize's real steering

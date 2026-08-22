@@ -43,18 +43,26 @@
 //
 // Ingress demux (router -> NMU/NSU): unbuffered, same-cycle pass-through --
 // axi_ch selects the destination (DataR -> NMU, DataAw/DataW -> NSU) --
-// mirroring the chimney's RX unpack (:1433-1440). NMU's/NSU's own ingress
-// queues are themselves unbounded and always accept (see nmu_wrap.hpp/
-// nsu_wrap.hpp), so no buffering is needed at the demux itself; the merge
-// returns one credit pulse to the router immediately on accept, same as the
-// pre-merge direct NI-edge ingress did.
+// mirroring the chimney's RX unpack (:1433-1440). Credit-return to the router
+// is split by destination, because the two sides have different ingress
+// capacity. NMU's DataR ingress queue is unbounded and always accepts (see
+// nmu_wrap.hpp), so its credit returns immediately at demux. NSU's DataAw/
+// DataW ingress is one BOUNDED queue per DAT VC (depth NOC_ROUTER_VC_DEPTH,
+// nsu_standalone.hpp), so its credit is the NSU's own consume pulse
+// (nsu_wrap rx_dat_crdvalid_o, DatMergeInputs::nsu_rx_dat_crdvalid) forwarded
+// on -- returning it at demux instead would leave that queue with no
+// backpressure and overflow it under load. Both sources feed one
+// router::LinkCreditOut per VC, so two pulses owed on the same VC in the same
+// tick queue up and go out on consecutive ticks rather than collapsing into
+// one wire bit.
 #pragma once
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "wrap/router_wrap_io.hpp"  // VcCreditVec
 #include "ni/wormhole_arbiter.hpp"
 #include "router/req_out.hpp"
-#include "ni_flit_constants.h"  // ni::AXI_CH_DataR
-#include "ni_params.h"          // NOC_ROUTER_VC_DEPTH, {NMU,NSU}_ARBITER_FIFO_DEPTH
+#include "router/router_adapters.hpp"  // router::LinkCreditOut
+#include "ni_flit_constants.h"         // ni::AXI_CH_DataR
+#include "ni_params.h"                 // NOC_ROUTER_VC_DEPTH, {NMU,NSU}_ARBITER_FIFO_DEPTH
 #include <algorithm>
 #include <deque>
 #include <memory>
@@ -104,6 +112,9 @@ struct DatMergeInputs {
     FlitBytes nsu_tx_dat_flit;
     // From the router: credit-return for our egress sends (replenishes term_).
     VcCreditVec tx_dat_crdvalid;
+    // From NSU: credit pulses for DataAw/DataW flits it consumed from its
+    // per-VC ingress queues (nsu_wrap rx_dat_crdvalid_o).
+    VcCreditVec nsu_rx_dat_crdvalid;
     // From the router: its ejected LOCAL flit (to demux toward NMU/NSU).
     bool rx_dat_valid;
     FlitBytes rx_dat_flit;
@@ -143,6 +154,7 @@ class DatMergeWrap {
         wormhole_ = std::make_unique<router::WormholeArbiter<detail::DatMergeDownstream>>(
             term_, /*num_inputs=*/2, /*pairings=*/std::vector<router::ChannelPairing>{},
             per_input_depth);
+        rx_credit_ = std::make_unique<router::LinkCreditOut>(dat_num_vc);
         in_ = DatMergeInputs{};
         out_ = DatMergeOutputs{};
     }
@@ -197,17 +209,23 @@ class DatMergeWrap {
         }
 
         // Ingress demux (router -> NMU/NSU), unbuffered same-cycle
-        // pass-through with immediate credit-return -- see class comment.
+        // pass-through; credit-return is split by destination -- immediate for
+        // NMU-bound DataR, the NSU's own consume pulse for NSU-bound DataAw/
+        // DataW -- see class comment.
         if (in_.rx_dat_valid) {
             const Flit f = flit_from_bytes(in_.rx_dat_flit);
             if (f.get_header_field("axi_ch") == ni::AXI_CH_DataR) {
                 out_.nmu_rx_dat_valid = true;
                 out_.nmu_rx_dat_flit = in_.rx_dat_flit;
+                rx_credit_->receive_credit(static_cast<uint8_t>(f.get_header_field("vc_id")));
             } else {
                 out_.nsu_rx_dat_valid = true;
                 out_.nsu_rx_dat_flit = in_.rx_dat_flit;
             }
-            out_.rx_dat_crdvalid[static_cast<uint8_t>(f.get_header_field("vc_id"))] = true;
+        }
+        for (uint8_t vc = 0; vc < dat_num_vc_; ++vc) {
+            if (in_.nsu_rx_dat_crdvalid[vc]) rx_credit_->receive_credit(vc);
+            out_.rx_dat_crdvalid[vc] = rx_credit_->take(vc);
         }
     }
 
@@ -220,6 +238,10 @@ class DatMergeWrap {
     uint8_t dat_num_vc_ = ::ni::NOC_DAT_NUM_VC;
     detail::DatMergeDownstream term_;
     std::unique_ptr<router::WormholeArbiter<detail::DatMergeDownstream>> wormhole_;
+    // Credit owed to the router for its LOCAL output: NMU-bound flits at demux
+    // (NMU's R ingress is unbounded), NSU-bound flits when the NSU consumes
+    // them. One wire bit per VC per tick, so owed pulses queue here.
+    std::unique_ptr<router::LinkCreditOut> rx_credit_;
     DatMergeInputs in_{};
     DatMergeOutputs out_{};
 };

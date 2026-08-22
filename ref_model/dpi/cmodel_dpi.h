@@ -113,15 +113,19 @@ void cmodel_router_dat_get_outputs(unsigned long long ctx, svBitVecVal* tx_dat_v
 // (outputs) is our merged send toward the router.
 // Ingress (router LOCAL tx -> NMU DataR / NSU DataAw+W): rx_dat_valid/flit is
 // the router's ejected flit; nmu_rx_dat_*/nsu_rx_dat_* (outputs) is the
-// axi_ch-demuxed delivery; rx_dat_crdvalid (output) is our credit-return to
-// the router; nmu_tx_dat_crdvalid/nsu_tx_dat_crdvalid (outputs) are our
-// credit-return to each producer for what we drained from their pending
-// stage.
+// axi_ch-demuxed delivery; nsu_rx_dat_crdvalid is the NSU's consume pulse for
+// the NSU-bound flits we delivered (per-VC, one word, bit=vc), which we
+// forward on as the router's credit for those; rx_dat_crdvalid (output) is
+// our credit-return to the router (that forwarded NSU pulse plus an immediate
+// pulse for each NMU-bound flit); nmu_tx_dat_crdvalid/nsu_tx_dat_crdvalid
+// (outputs) are our credit-return to each producer for what we drained from
+// their pending stage.
 unsigned long long cmodel_dat_merge_create(const char* name, int dat_num_vc);
 void cmodel_dat_merge_set_inputs(unsigned long long ctx, svBit nmu_tx_dat_valid,
                                  svBitVecVal* nmu_tx_dat_flit, svBit nsu_tx_dat_valid,
                                  svBitVecVal* nsu_tx_dat_flit, svBitVecVal* tx_dat_crdvalid,
-                                 svBit rx_dat_valid, svBitVecVal* rx_dat_flit);
+                                 svBitVecVal* nsu_rx_dat_crdvalid, svBit rx_dat_valid,
+                                 svBitVecVal* rx_dat_flit);
 void cmodel_dat_merge_tick(unsigned long long ctx);
 void cmodel_dat_merge_get_outputs(unsigned long long ctx, svBitVecVal* nmu_tx_dat_crdvalid,
                                   svBit* nmu_rx_dat_valid, svBitVecVal* nmu_rx_dat_flit,
