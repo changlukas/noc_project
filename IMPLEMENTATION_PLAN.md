@@ -769,4 +769,55 @@ leaves vc1 as the FVADA overflow the tail must not steal.
 
 ## Stage 3 findings
 
-(none yet)
+All five Task 3.2 gates pass. `DAT_NUM_VC` is back at its default 2 and both the
+tree and the Verilator build were rebuilt at that default after the vc8 run.
+
+`make build-verilator`, first attempt, on `obj_dir_mesh_4x4_directed`:
+
+```
+Vtb_top___024root__0.cpp: In function 'void Vtb_top___024root___eval_triggers_vec__ico(Vtb_top___024root*)':
+Vtb_top___024root__0.cpp:9612:1: internal compiler error: Segmentation fault
+ 9612 | }
+      | ^
+make[2]: *** [/usr/local/share/verilator/include/verilated.mk:283: Vtb_top___024root__0.o] Error 1
+```
+
+Host toolchain fault (gcc-15 ICE on the generated eval-trigger function), not a
+model or DPI error. The identical command succeeded unchanged on the retry, and
+every gate below ran on that binary.
+
+Directed, `make sim CONFIG=mesh_4x4 PATTERN=uniform_random INJECTION_MODE=0 BURST_LEN=32`:
+
+```
+DIRECTED PASS: directed_mesh_4x4_uniform_random_s345116005 scoreboard clean, non-vacuous
+```
+
+Directed, `make sim CONFIG=mesh_4x4 PATTERN=bit_complement INJECTION_MODE=0 BURST_LEN=32`:
+
+```
+DIRECTED PASS: directed_mesh_4x4_bit_complement_s1325631 scoreboard clean, non-vacuous
+```
+
+Continuous at `DAT_NUM_VC` 2, `make sim-gen` then `make sim CONFIG=mesh_4x4
+PATTERN=uniform_random INJECTION_MODE=1 INJECTION_RATE=0.9 BURST_LEN=32`:
+
+```
+wrote output/continuous_mesh_4x4_uniform_random_r0.9_s157404607/result.csv: 3243.8 bits/cyc, latency 1266.2
+CONTINUOUS PASS: continuous_mesh_4x4_uniform_random_r0.9_s157404607
+```
+
+Continuous at `DAT_NUM_VC` 8, same command after regenerating and rebuilding:
+
+```
+wrote output/continuous_mesh_4x4_uniform_random_r0.9_s744766070/result.csv: 3535.8 bits/cyc, latency 1190.7
+CONTINUOUS PASS: continuous_mesh_4x4_uniform_random_r0.9_s744766070
+```
+
+Both continuous runs completed, no watchdog dump, no NSU ingress-queue overflow
+assert, and `[mst_bp] node12..15: R backpressure held 0 cycles` on each. The pass
+line the runner prints is `CONTINUOUS PASS: <tag>`, not the brief's `PASS
+(completed)`. The vc8 set moves 3535.8 bits/cyc against vc2's 3243.8 at the same
+rate, which is the first measured evidence the VC count is reaching the fabric
+end to end; the Stage 4 sweep is what turns that into a real number (different
+seeds, single sample each here).
+
