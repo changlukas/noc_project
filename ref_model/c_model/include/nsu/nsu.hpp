@@ -99,6 +99,11 @@ class Nsu {
     // dat_vc_allocator().push_flit(...) to exercise the arbiter in isolation.
     VcAllocator& dat_vc_allocator() noexcept { return dat_vc_allocator_; }
 
+    // DAT ingress credit return: one pulse per data flit Depacketize consumed
+    // out of its per-VC queue, so the slot the sender's credit tracks is
+    // returned when it is actually free.
+    bool take_dat_credit(uint8_t vc) { return depacketize_.take_dat_credit(vc); }
+
     void tick();
 
     std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
@@ -183,7 +188,8 @@ inline Nsu::Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), dat_vc_allocator_,
                  meta_buffer_, cfg_.src_id, cfg_.port_id),
       depacketize_(upstream_req_, meta_buffer_, cfg_.port_params.meta_buffer_max_unique_ids,
-                   upstream_dat_req_, cfg_.src_id, cfg_.space_coords, cfg_.port_id),
+                   upstream_dat_req_, cfg_.src_id, cfg_.space_coords, cfg_.port_id,
+                   static_cast<uint8_t>(cfg_.dat_num_vc)),
       axi_master_port_(depacketize_, packetize_, cfg_.port_params) {}
 
 inline void Nsu::tick() {
