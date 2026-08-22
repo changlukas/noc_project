@@ -720,7 +720,7 @@ DPI: add `svBitVecVal* nsu_rx_dat_crdvalid` before `rx_dat_valid` in `cmodel_dpi
 ## Stage 4: Docs and measurement
 Goal: specs describe the new lock and ingress; the report shows what VC count buys.
 Success Criteria: every listed doc line updated, `sweep_summary.md` regenerated with vc2 and vc8 sets, 3 seeds each.
-Status: In Progress
+Status: Complete
 
 ### Task 4.1: Specs
 
@@ -821,4 +821,23 @@ line the runner prints is `CONTINUOUS PASS: <tag>`, not the brief's `PASS
 rate, which is the first measured evidence the VC count is reaching the fabric
 end to end; the Stage 4 sweep is what turns that into a real number (different
 seeds, single sample each here).
+
+Stage 4 runs: all 24 continuous cells (4 patterns x 3 seeds x vc2 and vc8), the
+9 sweep points and both Scenario 2 probes reached `CONTINUOUS PASS`. No
+watchdog, no assert, no failed cell.
+
+The gcc-15 ICE above recurred on every `make build-verilator` of
+`obj_dir_mesh_4x4_continuous` and did not clear on retry. Root cause isolated by
+flag bisection on one generated file: the ICE needs the Verilator precompiled
+header and `-g` together. Dropping either compiles clean, with or without
+ccache, at any `-j`, and with an unlimited stack.
+
+```
+Vtb_top.cpp:175:1: internal compiler error: Segmentation fault
+```
+
+Every Stage 4 binary was therefore built with
+`VERILATOR_EXTRA_FLAGS="-CFLAGS -g0"`, the Makefile's own flag-injection hook,
+which appends `-g0` after the fixed `-g` and only suppresses debug info. No
+repository file was changed for it.
 

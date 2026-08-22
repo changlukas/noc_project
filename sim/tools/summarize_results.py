@@ -168,7 +168,8 @@ def main():
     print("# Continuous-mode parameter sweep\n")
     print("BW: accepted bandwidth, B/cycle, summed over all node monitors. "
           "Latency: sample-weighted mean from AX handshake to last response "
-          "beat. One seed per cell. PASS (completed) means protocol checks, "
+          "beat. A cell is the mean over its seeds, counted in the seeds "
+          "column. PASS (completed) means protocol checks, "
           "model invariants and watchdog stayed clean. The scoreboard is armed "
           "in directed and checked modes only.")
     print()
@@ -199,7 +200,7 @@ def main():
             delta = f"{nlat - dlat:+.1f}" if dlat is not None and \
                 nlat is not None else "-"
             fmt = lambda v: f"{v:.1f}" if v is not None else "-"
-            row = [pattern, status, fmt(dbw), fmt(dlat)]
+            row = [pattern, status, str(len(runs)), fmt(dbw), fmt(dlat)]
             if has_narrow:
                 row += [fmt(nlat), delta]
             if has_util:
@@ -212,7 +213,7 @@ def main():
                 else:
                     row += ["-", "-", "-"]
             rows.append(row)
-        header = ["pattern", "status", "BW (B/cyc)", "data lat (cyc)"]
+        header = ["pattern", "status", "seeds", "BW (B/cyc)", "data lat (cyc)"]
         if has_narrow:
             header += ["narrow lat (cyc)", "narrow-data (cyc)"]
         if has_util:
