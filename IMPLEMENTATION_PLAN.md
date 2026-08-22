@@ -585,7 +585,7 @@ bool take_dat_credit(uint8_t vc) {
 ## Stage 3: DatMergeWrap forwards NSU credit
 Goal: the router's LOCAL DAT credit for NSU-bound flits is returned when the NSU consumes them, not at demux.
 Success Criteria: merge tests pass, full ctest green, directed and continuous co-sim pass at vc2 and vc8.
-Status: In Progress
+Status: Complete
 
 ### Task 3.1: Merge credit path
 
@@ -720,7 +720,7 @@ DPI: add `svBitVecVal* nsu_rx_dat_crdvalid` before `rx_dat_valid` in `cmodel_dpi
 ## Stage 4: Docs and measurement
 Goal: specs describe the new lock and ingress; the report shows what VC count buys.
 Success Criteria: every listed doc line updated, `sweep_summary.md` regenerated with vc2 and vc8 sets, 3 seeds each.
-Status: Not Started
+Status: In Progress
 
 ### Task 4.1: Specs
 
