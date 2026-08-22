@@ -33,8 +33,8 @@
 // identical to a single-VC pipeline.
 //
 // References:
-//   FlooNoC floo_wormhole_arbiter.sv (output-port wormhole lock)
-//   FlooNoC floo_vc_arbiter.sv (VC arbiter without wormhole lock)
+//   FlooNoC floo_wormhole_arbiter.sv (wormhole lock, instantiated per (output, VC))
+//   FlooNoC floo_vc_arbiter.sv (LockIn=0 per-cycle VC mux over those locks)
 //   gem5 Garnet OutputUnit::has_credit / OutVcState::m_credit_count
 #include "flit.hpp"
 #include "ni_flit_constants.h"

@@ -272,7 +272,7 @@ departing header. The credit pulse to the upstream carries the INPUT-side VC (th
 FIFO slot freed), which after VA can differ from the VC consumed downstream. With
 `NUM_VC = 1` the assignment is the identity.
 
-The three pointers advance on different events (`router.hpp:653-663`):
+The three pointers advance on different events (`router.hpp:653-666`):
 
 | Pointer | New value | Advances on |
 |---|---|---|
@@ -788,16 +788,21 @@ Verified by ctest `RouterWormhole.LockedEmptyVcIdlesButDoesNotLoseLock` and
 `RouterWormhole.CreditStarvedVcDoesNotIdleTheOutput`. Failure: a grant to a non-locked
 candidate on a locked slot, or an output idling while another VC of it could send.
 
-SPEC 12 (arbitration order). Unlocked outputs select by VC-major, input-minor
-round-robin with the tie-break of section 2.5, and both pointers advance only on a
-tail grant. Verified by ctest `RouterWormhole.RrAdvancesPerPacket` and
+SPEC 12 (arbitration order). An output scans its own VCs from `vc_rr_[out]` and takes the
+first that can send. Within an unlocked VC slot it selects input-VC-major, input-minor from
+`in_vc_rr_[out]` and `rr_[out]`, with the tie-break of section 2.5. `vc_rr_[out]` advances
+on every grant, while `rr_[out]` and `in_vc_rr_[out]` advance only on a tail grant.
+Verified by ctest `RouterWormhole.RrAdvancesPerPacket` and
 `RouterVcArbitration.FlitLevelRrAcrossVcs`. Failure: grant sequence deviates from the
 scan-order prediction.
 
-SPEC 13 (VC independence at an output). A zero-credit VC is skipped before its
-inputs are examined and never blocks another VC at an unlocked output. Verified by
-ctest `RouterVcArbitration.BlockedVcDoesNotStallOthers`. Failure: traffic on a
-credited VC stalls while another VC is credit-blocked and the output is unlocked.
+SPEC 13 (VC independence at an output). A zero-credit VC never blocks another VC of the
+same output. A locked slot with no credit is skipped before any input is examined
+(`router.hpp:503`). An unlocked slot does examine inputs, and credit is checked per
+candidate inside VC assignment (`router.hpp:612-615`), so a candidate landing on the
+zero-credit VC is skipped and the scan moves on. Verified by ctest
+`RouterVcArbitration.BlockedVcDoesNotStallOthers`. Failure: traffic on a credited VC
+stalls while another VC of the same output is credit-blocked.
 
 SPEC 14 (output FIFO). Stage 2 admits no flit to an output whose FIFO holds
 `NOC_ROUTER_OUTPUT_FIFO_DEPTH` (default 8, positive power of two) flits, and a FIFO that drains
