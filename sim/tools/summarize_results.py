@@ -91,7 +91,7 @@ def collect(out_root):
             groups[key][row["pattern"]].append({
                 "status": "PASS (completed, no data check)",
                 "space": row.get("space", "memory"),
-                "bw": float(row["accepted_bits_per_cycle"]),
+                "bw": float(row["accepted_bits_per_cycle"]) / 8,  # bytes/cycle
                 "latency": float(row["mean_latency"]),
                 "dat_util": dat_util,
             })
@@ -141,7 +141,7 @@ def main():
                         lk[0] != "default", lk[0]))
 
     print("# Continuous-mode parameter sweep\n")
-    print("BW = accepted bits/cycle summed over every node monitor. "
+    print("BW = accepted bandwidth in bytes per cycle, summed over every node monitor. "
           "Latency = sample-weighted mean over read and write transactions. "
           "One seed per cell. PASS (completed) means protocol checks, model "
           "invariants and the watchdog stayed clean; the write-readback "
@@ -191,7 +191,7 @@ def main():
                 else:
                     row += ["-", "-", "-"]
             rows.append(row)
-        header = ["pattern", "status", "BW (bits/cyc)", "data lat (cyc)"]
+        header = ["pattern", "status", "BW (B/cyc)", "data lat (cyc)"]
         if has_narrow:
             header += ["narrow lat (cyc)", "narrow-data (cyc)"]
         if has_util:
