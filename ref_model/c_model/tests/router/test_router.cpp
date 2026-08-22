@@ -328,6 +328,61 @@ TEST(RouterWormhole, PacketsDoNotInterleavePerOutputVc) {
     EXPECT_EQ(count_b, 3);
 }
 
+// nmu::VcAllocator hashes every AW of one (dst_id, awid) onto one VC, so the
+// same-ID write ordering argument reduces to this: two consecutive pinned worms
+// on one VC keep issue order at a shared output while another VC's worms
+// contend for it. Worm 2's head must not precede worm 1's tail, and neither
+// worm's flits may be split by the other's (the noise VC may interleave, that
+// is WormsOnDifferentVcsInterleavePerOutput's property).
+TEST(RouterWormhole, SameVcWormsKeepIssueOrderUnderCrossVcContention) {
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    const auto S = static_cast<std::size_t>(RouterPort::SOUTH);
+    // The two worms share src_id 0x10 (one write stream); ordering_tag carries
+    // the worm number, a header field no fabric stage reads.
+    constexpr int kWormFlits = 3, kStreamFlits = 2 * kWormFlits;
+    std::vector<uint64_t> stream_tags, stream_tails;
+    int vc1_delivered = 0, fed = 0, noise = 0;
+    for (int t = 0; t < 200 && stream_tags.size() < static_cast<std::size_t>(kStreamFlits); ++t) {
+        if (fed < kStreamFlits && r.input_fifo_size(W, 0) == 0) {
+            auto f =
+                make_pinned_flit(dst, /*vc=*/0, (fed % kWormFlits == kWormFlits - 1) ? 1 : 0, 0x10);
+            f.set_header_field("ordering_tag", fed / kWormFlits + 1);
+            r.input(W).push_flit(f);
+            ++fed;
+        }
+        if (r.input_fifo_size(S, 1) == 0) {  // continuous 3-flit worms on vc1
+            r.input(S).push_flit(make_pinned_flit(
+                dst, /*vc=*/1, (noise % kWormFlits == kWormFlits - 1) ? 1 : 0, 0x20));
+            ++noise;
+        }
+        const std::size_t before = east.received.size();
+        r.tick();
+        for (std::size_t i = before; i < east.received.size(); ++i) {
+            const auto& f = east.received[i];
+            const auto vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
+            if (vc == 0) {
+                stream_tags.push_back(f.get_header_field("ordering_tag"));
+                stream_tails.push_back(f.get_header_field("flit_tail"));
+            } else {
+                ++vc1_delivered;
+            }
+            r.receive_credit(E, vc);
+        }
+    }
+    EXPECT_GT(vc1_delivered, 0) << "no cross-VC contention generated";
+    ASSERT_EQ(stream_tags.size(), static_cast<std::size_t>(kStreamFlits));
+    EXPECT_EQ(stream_tags, (std::vector<uint64_t>{1, 1, 1, 2, 2, 2}))
+        << "worm 2 flits reached the link before worm 1 finished";
+    EXPECT_EQ(stream_tails, (std::vector<uint64_t>{0, 0, 1, 0, 0, 1}));
+}
+
 // Two pinned 3-flit worms from different inputs, different VCs, same output:
 // both hold a lock at once and the link carries their flits interleaved.
 // Each VC's own stream stays contiguous.
