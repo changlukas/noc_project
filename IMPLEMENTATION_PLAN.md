@@ -747,7 +747,23 @@ Status: Not Started
 
 ## Stage 1 findings
 
-(none yet)
+Task 1.3 gate, `make sim CONFIG=mesh_4x4 PATTERN=uniform_random INJECTION_MODE=0 BURST_LEN=32`
+after the per-(output, VC) lock, at `DAT_NUM_VC` 2:
+
+```
+DIRECTED PASS: directed_mesh_4x4_uniform_random_s314104646 scoreboard clean, non-vacuous
+```
+
+No NSU `pop_w` assert, no wedge. The predicted risk (two NMUs' W worms
+interleaving on one link past a single-stream NSU) did not fire at this seed and
+pattern. The gate is re-run in Stage 3.
+
+Deviation from the Task 1.2 brief, `CreditBlockedTailDoesNotOverflowToAnotherVc`:
+the brief's `dst = make_dst(3, 1)` routes EAST here and EAST again at the next
+hop, so its preferred output VC is 1 (floo_vc_assignment.sv:93), not the 0 every
+assertion in that test names. `make_dst(2, 3)` routes EAST here and NORTH next,
+preferred VC 0 (:91), which keeps every assertion in the brief verbatim and
+leaves vc1 as the FVADA overflow the tail must not steal.
 
 ## Stage 3 findings
 
