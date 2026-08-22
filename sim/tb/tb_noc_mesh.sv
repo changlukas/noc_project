@@ -12,7 +12,14 @@
 //
 // The module is named tb_top so --top-module needs no per-configuration value.
 
-module tb_top;
+module tb_top #(
+    // Master-face backpressure profile: 1 = "random" (the file master
+    // sometimes cannot keep up, so R backs up through the tile crossbar into
+    // the NMU -- the stress that makes the RoB fill), the directed run class.
+    // The continuous run class (sim/verilator/Makefile RUN_CLASS) builds with
+    // 0 = "ideal": a measurement run must not be throttled by its own consumer.
+    parameter bit MST_STALL_RANDOM_OUTPUT = 1'b1
+);
 
     import topology_pkg::*;
 
@@ -23,11 +30,6 @@ module tb_top;
     localparam bit          MEM_STALL_RANDOM_OUTPUT = 1'b0;
     localparam int unsigned MEM_FIXED_DELAY_INPUT   = 0;
     localparam int unsigned MEM_FIXED_DELAY_OUTPUT  = 0;
-    // Master-face backpressure profile "random": the file master sometimes
-    // cannot keep up, so R backs up through the tile crossbar into the NMU,
-    // which is what makes the RoB fill and the DAT dependency question
-    // reachable at all.
-    localparam bit          MST_STALL_RANDOM_OUTPUT = 1'b1;
     localparam int unsigned MST_FIXED_DELAY_OUTPUT  = 0;
 
     noc_tb_top #(

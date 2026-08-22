@@ -255,9 +255,9 @@ module noc_tb_top #(
         // dat_num_vc is printed rather than derived by the reader: it comes from
         // specgen/source/constants.yaml and no longer appears in the config name,
         // so the log is the only place it is bound to the run that used it.
-        $display("[Config] max_unique_ids=%0d max_outstanding=%0d dat_num_vc=%0d router_vc_depth=%0d",
+        $display("[Config] max_unique_ids=%0d max_outstanding=%0d dat_num_vc=%0d router_vc_depth=%0d mst_stall_random=%0d",
                  max_unique_ids, max_outstanding, DAT_NUM_VC,
-                 ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT);
+                 ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT, MST_STALL_RANDOM_OUTPUT);
         void'($value$plusargs("b_rob_depth=%d", b_rob_depth));
         void'($value$plusargs("r_rob_depth=%d", r_rob_depth));
         void'($value$plusargs("max_txns_per_id=%d", max_txns_per_id));

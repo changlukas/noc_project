@@ -169,7 +169,7 @@ split).
 | mode | shape | checking |
 |---|---|---|
 | `0` (default) | two-phase: writes drain, then reads | scoreboard armed |
-| `1` | continuous: reads and writes interleave, both paced per cycle by `INJECTION_RATE` (0.0 to 1.0) | scoreboard disarmed (write-before-read fails); bandwidth monitor gates, `result.csv` emitted |
+| `1` | continuous: reads and writes interleave, both paced per cycle by `INJECTION_RATE` (0.0 to 1.0). Builds the `continuous` run class, whose master-face backpressure profile is ideal so the consumer never throttles the measurement (modes 0 and 2 keep the random profile) | scoreboard disarmed (write-before-read fails); bandwidth monitor gates, `result.csv` emitted |
 | `2` | checked-continuous: writes paced as mode 1, each read issues after its paired write's B response | scoreboard armed |
 
 Mode 1 measures bandwidth and latency without data checking. Mode 2
