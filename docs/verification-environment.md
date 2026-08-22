@@ -268,8 +268,9 @@ Upstream references:
   (RoB type selection), `floo_simple_rob.sv` (ring-pointer allocator,
   documented alternative, not chosen), `floo_meta_buffer.sv` (meta buffer,
   downstream-ID collapse), `floo_axi_chimney.sv` (single-flit B / RoB-side R
-  split, `MaxTxns` on the slave face), `floo_wormhole_arbiter.sv` (per-output
-  wormhole lock), `floo_vc_arbiter.sv` (VC arbitration without the lock),
+  split, `MaxTxns` on the slave face), `floo_wormhole_arbiter.sv` (wormhole lock,
+  instantiated per (output, VC), ported), `floo_vc_arbiter.sv` (`LockIn=0` per-cycle
+  VC mux over those locks, ported),
   `floo_vc_assignment.sv` (per-hop turn-model VC assignment, deprecated
   upstream, not ported), `floo_pkg.sv` (parameter names `BRoBSize`,
   `RRoBSize`, `MaxTxnsPerId`, `MaxTxns`), `axi_bw_monitor.sv` (DV bandwidth

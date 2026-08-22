@@ -573,8 +573,11 @@ inline void Router::tick() {
                         // worm's TAIL (vc_assignment lets a tail overflow to
                         // another VC, see vc_assignment above) would be granted
                         // by an unlocked VC slot, leaving its own lock set
-                        // forever. Collectives keep the F2/OUR RULE guards
-                        // below instead: their branches join at the head.
+                        // forever. A unicast worm routes to exactly one output,
+                        // so the only lock this scan can find is at that output
+                        // and the guard bites where the worm is stuck.
+                        // Collectives keep the F2/OUR RULE guards below
+                        // instead: their branches join at the head.
                         if (q.front().get_header_field("collective_op") ==
                                 ni::COLLECTIVE_OP_UNICAST &&
                             locked_branch_set(in, ivc) != 0) {

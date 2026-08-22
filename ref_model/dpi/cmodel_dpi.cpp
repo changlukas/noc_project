@@ -865,12 +865,13 @@ void dump_one_credit_router(const std::string& name, const char* net,
         }
         for (uint8_t vc = 0; vc < nvc; ++vc) {
             if (auto lock = r.wormhole_locked_input(p, vc)) {
+                // locked_output_vc always equals the slot's own vc, so it is
+                // not printed.
                 std::printf(
-                    "[FABRIC-DUMP] %s.%s wormhole[%s][vc%u] locked_input=%s locked_input_vc=%u "
-                    "locked_output_vc=%u\n",
+                    "[FABRIC-DUMP] %s.%s wormhole[%s][vc%u] locked_input=%s "
+                    "locked_input_vc=%u\n",
                     name.c_str(), net, kPortName[p], vc, kPortName[*lock],
-                    static_cast<unsigned>(r.wormhole_locked_input_vc(p, vc).value_or(255)),
-                    static_cast<unsigned>(r.wormhole_locked_output_vc(p, vc).value_or(255)));
+                    static_cast<unsigned>(r.wormhole_locked_input_vc(p, vc).value_or(255)));
             }
         }
     }

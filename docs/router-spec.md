@@ -166,7 +166,7 @@ one verification-only wire cycle, for 3 cycles per hop at the wrapper pins.
 | Stage | Storage | Action per cycle |
 |---|---|---|
 | 1. Input | per-port 1-deep input register, then per-(port, VC) FIFO, depth `NOC_ROUTER_VC_DEPTH` = 8 | file the registered flit into the FIFO selected by header `vc_id` |
-| 2. Grant | per-output wormhole lock + RR state + credit counters | per output: pick one (input, VC) candidate, assign the output-side VC `out_vc` (VA, section 2.5), pop its FIFO front, decrement `credit_[out][out_vc]`, restamp header `vc_id = out_vc`, push into the output FIFO, schedule one credit pulse (input-side VC) to the upstream of that input |
+| 2. Grant | per-(output, VC) wormhole lock + RR state + credit counters | per output: scan the output VCs in `vc_rr_[out]` order and take the first that can send, picking one (input, VC) candidate for it, assign the output-side VC `out_vc` (VA for a fresh head, the locked VC for a continuation, section 2.5), pop its FIFO front, decrement `credit_[out][out_vc]`, restamp header `vc_id = out_vc`, push into the output FIFO, schedule one credit pulse (input-side VC) to the upstream of that input |
 | 3. Link | per-output FIFO, depth `NOC_ROUTER_OUTPUT_FIFO_DEPTH` = 8 | drive at most one flit from each output FIFO onto the link |
 
 In target RTL, stage 2 checks per-VC credit for N/E/S/W outputs. For LOCAL output it checks output
@@ -200,31 +200,55 @@ ticks plus the verification-only spill register. The core halves are verified by
 `RouterDatapath.ZeroLoadLatencyIsThreeTicks` and
 `SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`.
 
-### 2.5 Arbitration: two-level round-robin per output
+### 2.5 Arbitration: output-VC scan, then two-level round-robin per output VC
 
-When an output is not wormhole-locked, stage 2 selects a candidate with two nested
-round-robin scans (`router.hpp:239-254`):
+Stage 2 grants at most one flit per output per cycle. The output scans its own VCs in
+order `vc_rr_[out], vc_rr_[out]+1, ...` modulo `NUM_VC` and takes the first VC that can
+send (`router.hpp:491-620`):
 
-1. **Outer, VC-major**: input VCs are scanned in order `vc_rr_[out], vc_rr_[out]+1, ...`
-   modulo `NUM_VC`. There is no credit pre-filter on the input VC: credit eligibility
-   depends on the VC-assignment result (below), not on the VC the flit arrived on.
-2. **Inner, input-minor**: for the chosen VC, inputs are scanned in order
-   `rr, rr+1, ...` modulo 5 (per-output pointer `ws.rr`). The first input whose FIFO
-   front flit routes to this output AND passes VC assignment wins; a candidate whose
-   assignment fails (no eligible output VC with credit) is skipped and the scan
-   continues (work-conserving).
+| VC slot | What it offers | Gate |
+|---|---|---|
+| locked | the front flit of its locked (input, input VC) FIFO | that FIFO non-empty and `credit_[out][v] > 0` |
+| unlocked | the first head flit routed here that VC assignment lands on this VC | VC assignment succeeds, which is where credit is checked |
 
-IMPORTANT (tie-break): when several (input, VC) pairs simultaneously want the same
-output, the unique winner is the first match in scan order: lowest VC offset from
-`vc_rr_[out]` first, then lowest input offset from `ws.rr`. Worked example, output
-EAST, `NUM_VC = 2`, `vc_rr_[EAST] = 1`, `ws.rr = 3` (SOUTH). Candidates: front of
-(WEST, VC0) and front of (SOUTH, VC1), both routing EAST with assignable credit.
+A VC that offers nothing is skipped and the scan continues, so a locked VC with an empty
+FIFO or no credit idles only itself and the output still grants from its other VCs. Every
+VC is re-arbitrated each cycle: the lock holds the VC, not the output.
 
-- VC scan starts at VC1. Input scan starts at SOUTH. (SOUTH, VC1) routes EAST ->
-  **winner (SOUTH, VC1)**. (WEST, VC0) is never examined this cycle.
-- Counter-case: if (SOUTH, VC1)'s assignment fails (no eligible output VC with
-  credit), the scan continues; with no other VC1 candidate, VC0 is scanned and
-  (WEST, VC0) wins if its own assignment passes.
+Within an unlocked VC slot the candidate comes from two nested round-robin scans
+(`router.hpp:565-617`):
+
+1. **Outer, input-VC-major**: input VCs are scanned in order `in_vc_rr_[out],
+   in_vc_rr_[out]+1, ...` modulo `NUM_VC`. There is no credit pre-filter on the input VC:
+   credit eligibility depends on the VC-assignment result (below), not on the VC the flit
+   arrived on.
+2. **Inner, input-minor**: for the chosen input VC, inputs are scanned in order
+   `rr_[out], rr_[out]+1, ...` modulo 5. The first input whose FIFO front flit routes to
+   this output AND whose VC assignment lands on the slot being filled wins. A candidate
+   whose assignment fails (no eligible output VC with credit) or lands on another VC is
+   skipped and the scan continues (work-conserving).
+
+A unicast (input, input VC) stream that already holds a lock is served only through that
+lock, never by an unlocked slot (`router.hpp:577-583`). Without that guard a credit-blocked
+worm's tail, the one flit VC assignment may overflow to another VC, would depart on the
+unlocked slot and leave the worm's own lock set forever. A unicast worm's lock is always at
+the output its flits route to, so the guard bites at that output.
+
+IMPORTANT (tie-break): when several (input, VC) pairs simultaneously want the same output,
+the unique winner is the first match in scan order: lowest output-VC offset from
+`vc_rr_[out]` first, then lowest input-VC offset from `in_vc_rr_[out]`, then lowest input
+offset from `rr_[out]`. Worked example, output EAST, `NUM_VC = 2`, both EAST VC slots
+unlocked, `vc_rr_[EAST] = 1`, `in_vc_rr_[EAST] = 1`, `rr_[EAST] = 3` (SOUTH). Candidates:
+front of (WEST, VC0) and front of (SOUTH, VC1), both routing EAST, both `fixed_vc = 1` with
+header `vc_id` equal to their input VC, so assignment is the identity.
+
+- Output-VC scan starts at slot VC1. Input-VC scan starts at input VC1, input scan at
+  SOUTH. (SOUTH, VC1) routes EAST and assigns to VC1 -> **winner (SOUTH, VC1)**.
+  (WEST, VC0) is never examined this cycle.
+- Counter-case, same state but `vc_rr_[EAST] = 0`: slot VC0 is scanned first, and only
+  (WEST, VC0) assigns to it. (SOUTH, VC1) is examined first and skipped for landing on
+  another VC -> **winner (WEST, VC0)**, even though both input-side pointers favour
+  (SOUTH, VC1). The output VC slot filters before either of them.
 
 After the scan picks a candidate, stage 2 assigns the OUTPUT-side VC `out_vc`
 (VC assignment, ported from the deprecated FlooNoC `vc_router_util` suite):
@@ -248,38 +272,55 @@ departing header. The credit pulse to the upstream carries the INPUT-side VC (th
 FIFO slot freed), which after VA can differ from the VC consumed downstream. With
 `NUM_VC = 1` the assignment is the identity.
 
-Both pointers advance only when a tail flit (`flit_tail = 1'b1`) is granted:
-`ws.rr = winner_input + 1`, `vc_rr_[out] = winner_vc + 1` (packet-granularity
-round-robin, `router.hpp:273-274`). In the example above, if the (SOUTH, VC1) flit is a
-tail, the next unlocked scan starts at VC0 and input WEST. For streams of single-flit
-packets this degenerates to flit-level round-robin. There is no priority or QoS input:
-the flit header carries no QoS field.
+The three pointers advance on different events (`router.hpp:653-663`):
 
-### 2.6 Wormhole lock rules (per output, across VCs)
+| Pointer | New value | Advances on |
+|---|---|---|
+| `vc_rr_[out]`, output VC | `out_vc + 1` | every grant |
+| `rr_[out]`, input | `winner_input + 1` | a tail grant (`flit_tail = 1'b1`) |
+| `in_vc_rr_[out]`, input VC | `winner_input_vc + 1` | a tail grant |
 
-Each output holds one lock record `(locked_input, locked_input_vc, locked_output_vc)`:
-the input FIFO the worm drains from, and the VA-assigned output VC every flit of the
-worm departs on.
+Moving the output-VC pointer on every grant is what makes the VCs of one output share the
+link: a worm holding VC0 gives up the link for one cycle whenever another VC has a flit to
+send. The two input-side pointers move at packet granularity, so a worm keeps its place in
+the input rotation until its tail. In the example above, if the (SOUTH, VC1) flit is a
+tail, the next scan of EAST starts at output VC0, input VC0 and input WEST. For streams of
+single-flit packets all three degenerate to flit-level round-robin. There is no priority or
+QoS input: the flit header carries no QoS field.
 
-1. Granting a flit with `flit_tail = 1'b0` locks the output to that (input, input VC)
-   pair and records the assigned `out_vc` as `locked_output_vc`.
-2. While locked, only the locked `(locked_input, locked_input_vc)` FIFO is served at
-   this output; every continuation departs on `locked_output_vc` and requires
-   `credit_[out][locked_output_vc] > 0`. If the FIFO is empty or that credit is 0, the
-   output idles this cycle and keeps the lock. Other inputs and other VCs wait, even
-   with credit available. For a `fixed_vc = 0` worm the model asserts that
-   `locked_output_vc` equals the continuation's recomputed preferred VC (a pinned
-   `fixed_vc = 1` worm's NI-chosen VC legitimately differs).
-3. Granting a flit with `flit_tail = 1'b1` releases the lock and advances both RR pointers.
+### 2.6 Wormhole lock rules (per output VC)
+
+Each (output, output VC) holds its own lock record `(locked_input, locked_input_vc,
+locked_output_vc)`: the input FIFO the worm drains from, and the VA-assigned output VC
+every flit of the worm departs on. `locked_output_vc` always equals the slot's own VC
+index, because the lock lives in the slot the head was assigned to.
+
+1. Granting a flit with `flit_tail = 1'b0` locks the (output, `out_vc`) slot to that
+   (input, input VC) pair.
+2. While a slot is locked, only the locked `(locked_input, locked_input_vc)` FIFO is served
+   through it. Every continuation departs on `locked_output_vc` and requires
+   `credit_[out][locked_output_vc] > 0`. If the FIFO is empty or that credit is 0, the slot
+   offers nothing this cycle and keeps the lock, and the output's scan falls through to its
+   other VCs. Other inputs and other input VCs wait on this slot, even with credit
+   available. For a `fixed_vc = 0` worm the model asserts that `locked_output_vc` equals
+   the continuation's recomputed preferred VC (a pinned `fixed_vc = 1` worm's NI-chosen VC
+   legitimately differs).
+3. Granting a flit with `flit_tail = 1'b1` releases that slot's lock and advances the two
+   input-side RR pointers.
 4. A single-flit packet (`flit_tail = 1'b1` on its head) locks and releases within the one
-   grant: the output is never observed locked between cycles.
+   grant: the slot is never observed locked between cycles.
+5. A unicast stream that holds a lock is never granted through an unlocked slot of the same
+   output (section 2.5), so its tail cannot overflow off the worm's VC.
 
-Example: a 3-flit packet (H `flit_tail=0`, B `flit_tail=0`, T `flit_tail=1`) from (LOCAL, VC0) to
-EAST. Cycle k grants H and locks EAST to (LOCAL, VC0). Cycle k+1 grants B, lock held.
-Cycle k+2 grants T, lock released, `ws.rr` and `vc_rr_[EAST]` advance. A competing
-packet at (WEST, VC1) routing EAST waits cycles k..k+2 even though VC1 has credit.
+Example: a 3-flit packet (H `flit_tail=0`, B `flit_tail=0`, T `flit_tail=1`) from
+(LOCAL, VC0) to EAST, assigned output VC0, with `vc_rr_[EAST] = 0` at cycle k. Cycle k
+grants H and locks (EAST, VC0) to (LOCAL, VC0), and `vc_rr_[EAST]` moves to 1. A competing
+single-flit packet at (WEST, VC1) routing EAST (`fixed_vc = 1`, header `vc_id` = 1) is
+granted at cycle k+1 through the unlocked VC1 slot, ahead of B. B follows at k+2 and T at
+k+3, with the (EAST, VC0) lock held throughout and released by T. A competing packet that
+assigns to output VC0 instead waits cycles k..k+3.
 
-The lock never spans different outputs: locking is a per-output property, so a packet
+The lock never spans different outputs: locking is a per-(output, VC) property, so a packet
 to EAST and a packet to NORTH from two inputs proceed in parallel.
 
 ### 2.7 Credit flow control rules (DAT only)
@@ -435,7 +476,7 @@ Four properties of the merge diverge from a reference, all deliberate:
 |---|---|---|
 | R1 | Two multicasts whose spanning trees overlap are never in flight together | Software (`docs/noc-target-spec.md`, Scope). Not fabric-enforced. The fork state `{expected_mask, done_mask}` per (input, VC) is exposed read-only, so a violation triages as a `done_mask != expected_mask` frozen across ticks with locks held, instead of a bare timeout |
 | R2 | At most one outstanding collective per (NMU, AXI id) | NMU `Rob::push_aw` admission (`docs/nmu-spec.md` Section 2.8) |
-| R3 | No dedicated multicast VC, no `fixed_vc` special case | Nothing to enforce. The wormhole lock is per output across VCs, so a VC restriction buys nothing |
+| R3 | No dedicated multicast VC, no `fixed_vc` special case | Nothing to enforce. A fork branch takes the lock of the (output, VC) its head was assigned to, exactly as a unicast worm does, and `locked_branch_set` scans every VC slot of every output |
 
 R1 exists because the ported discipline deadlocks when two multicast trees contend for two
 routers' outputs in opposite orders: each holds an output the other needs, neither worm
@@ -731,17 +772,21 @@ SPEC 9 (never send without credit). The block never asserts a flit valid toward 
 every live directed edge: `valid && credit[vc_id] == 0` raises
 `$error("[%s] credit underflow on VC%0d ...")`. Failure: that assertion fires.
 
-SPEC 10 (wormhole non-interleave). Flits of two packets never interleave on one
-output: from a granted head (`flit_tail=0`) to its tail (`flit_tail=1`), the output serves only
-the locked (input, VC). Verified by ctest
-`RouterWormhole.PacketsDoNotInterleavePerOutputVc` and
-`RouterWormhole.OpenPacketHoldsOutputAndBlocksOtherVc`. Failure: any foreign flit
-between a head and its tail on one output.
+SPEC 10 (wormhole non-interleave per output VC). Flits of two packets never interleave on
+one (output, VC): from a granted head (`flit_tail=0`) to its tail (`flit_tail=1`), that VC
+slot serves only the locked (input, VC). Packets on different VCs of one output do
+interleave flit by flit, which is what the per-VC lock is for. Verified by ctest
+`RouterWormhole.PacketsDoNotInterleavePerOutputVc`,
+`RouterWormhole.WormsOnDifferentVcsInterleavePerOutput` and
+`RouterWormhole.OpenWormOnVc0DoesNotBlockVc1`. Failure: any foreign flit between a head and
+its tail on one (output, VC).
 
-SPEC 11 (lock persistence). A locked output whose locked (input, VC) is empty or
-credit-blocked idles that cycle and keeps the lock. It never grants another candidate.
-Verified by ctest `RouterWormhole.LockedEmptyVcIdlesButDoesNotLoseLock`. Failure: a
-grant to a non-locked candidate while locked.
+SPEC 11 (lock persistence per output VC). A locked VC slot whose locked (input, VC) is
+empty or credit-blocked idles that slot and keeps the lock, while the same output keeps
+granting from its other VCs. It never grants another candidate through the locked slot.
+Verified by ctest `RouterWormhole.LockedEmptyVcIdlesButDoesNotLoseLock` and
+`RouterWormhole.CreditStarvedVcDoesNotIdleTheOutput`. Failure: a grant to a non-locked
+candidate on a locked slot, or an output idling while another VC of it could send.
 
 SPEC 12 (arbitration order). Unlocked outputs select by VC-major, input-minor
 round-robin with the tie-break of section 2.5, and both pointers advance only on a
@@ -869,12 +914,13 @@ One Router (per network), 3-stage pipeline, 5 in / 5 out ports:
                     stage 1              stage 2                stage 3
  flit ---> [input_reg_ 1-deep] --vc_id--> [FIFO vc0, depth 8] \
                                           [FIFO vc1, depth 8] -+--> per-output q:
-                                              ...              |    wormhole lock
+                                              ...              |    lock per (q, vc)
                                           [FIFO vcN-1]        -+    (locked_input,
                                                                |     locked_input_vc,
                                                                |     locked_output_vc)
-                                       route_compute(dst_id)   |    VC RR vc_rr_[q]
-                                       at each FIFO head ------+    input RR ws.rr
+                                       route_compute(dst_id)   |    out-VC RR vc_rr_[q]
+                                       at each FIFO head ------+    input RR rr_[q]
+                                                               |    in-VC RR in_vc_rr_[q]
                                                                |    credit_[q][vc]
                                                                |    (seed 8, -- at
                                                                |     grant)
@@ -917,7 +963,7 @@ cycle (posedge idx)         |  0 |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |
 ----------------------------+----+----+----+----+----+----+----+----+----+
 A rx_dat_valid[LOCAL]       |  1 |  1 |  1 |  0 |  0 |  0 |  0 |  0 |  0 |  3 flits,
 A rx_dat_flit[LOCAL]        | F0 | F1 | F2 |  0 |  0 |  0 |  0 |  0 |  0 |  0-gap (R8)
-A wormhole_[EAST] lock      |  - |  L |  L |  - |  - |  - |  - |  - |  - |  head locks,
+A wormhole_[EAST][0] lock   |  - |  L |  L |  - |  - |  - |  - |  - |  - |  head locks,
 A credit_[EAST][0]          |  8 |  8 |  7 |  6 |  5 |  5 |  5 |  6 |  7 |  tail frees
 A tx_dat_valid[EAST]        |  0 |  0 |  0 |  1 |  1 |  1 |  0 |  0 |  0 |  no
 A tx_dat_flit[EAST]         |  0 |  0 |  0 | F0 | F1 | F2 |  0 |  0 |  0 |  interleave
@@ -927,7 +973,7 @@ B tx_dat_valid[LOCAL]       |  0 |  0 |  0 |  0 |  0 |  0 |  1 |  1 |  1 |  4,5,
 B tx_dat_flit[LOCAL]        |  0 |  0 |  0 |  0 |  0 |  0 | F0 | F1 | F2 |  wire 6,7,8
 ```
 
-Annotations: lock row `L` = EAST locked to (LOCAL, VC0), set by the F0 grant at
+Annotations: lock row `L` = (EAST, VC0) locked to (LOCAL, VC0), set by the F0 grant at
 cycle 1, released by the F2 tail grant at cycle 3. `credit_[EAST][0]` bottoms at 5
 with three flits outstanding and is back to the seed 8 after cycle 8 (conservation,
 SPEC 8). Head latency 6 = 2 hops x 3 cycles. Each credit wire pulse is exactly 1 cycle

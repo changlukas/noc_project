@@ -771,6 +771,7 @@ leaves vc1 as the FVADA overflow the tail must not steal.
 
 All five Task 3.2 gates pass. `DAT_NUM_VC` is back at its default 2 and both the
 tree and the Verilator build were rebuilt at that default after the vc8 run.
+`codegen.py --check` exit 0 after restoring `DAT_NUM_VC` to 2.
 
 `make build-verilator`, first attempt, on `obj_dir_mesh_4x4_directed`:
 

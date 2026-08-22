@@ -25,7 +25,8 @@ Ch 7). Global order, a single total order seen by all nodes, is out of scope.
 The precise requirement is that a flow must not split across VCs. The stronger
 reading, one VC identifier end to end, over-constrains. A packet's own flits
 cannot reorder: the head allocates the VC, body and tail inherit it, and the
-wormhole lock keeps them contiguous (on-chip-networks Ch 5). Order between
+wormhole lock of that (output, VC) keeps them contiguous on their own VC
+(on-chip-networks Ch 5). Order between
 packets of one flow survives whenever the VC assignment is deterministic and
 refuses on a full queue instead of spilling to another VC. Per-hop VC changes
 stay legal as long as all packets of the flow change the same way at each hop.
@@ -161,14 +162,18 @@ SAM classification, the NMU uses independent REQ and DAT Write pipelines, channe
 `noc_clk` class FIFOs.
 REQ may emit one Narrow write flit while DAT emits one Data write flit in the same cycle; blocking
 one network does not block the other after classification. Each network keeps its own AW-to-WLAST
-wormhole lock.
+wormhole lock, and on DAT that lock is held per (output, VC). The NMU maps an AW to VC
+`(dst_id ^ awid) % DAT_NUM_VC` and its W beats follow that VC, so write bursts landing on
+different VCs cross one router output at the same time.
 
 W has no address or class field, so an AW-order context FIFO records the class and route of every
 accepted AW. Each accepted W beat uses the context at the FIFO head and is steered to that
 burst's REQ or DAT pipeline; the context retires only on WLAST. Parallel NoC drain may therefore
 reorder already-buffered packets across the two physical networks, but it cannot interleave W beats
 or attach a W beat to a later AW. The shared AXI source still accepts at most one AW and one W beat
-per cycle.
+per cycle. In the fabric the same rule holds per VC rather than per link: two DAT bursts on
+different VCs interleave flit by flit on one link, each contiguous within its own VC, and the NSU
+reassembles them in one queue per VC.
 
 This parallelism does not relax an AXI ordering domain. AXI guarantees request order for the same
 channel, ID and destination, while it gives no ordering guarantee across different peripheral

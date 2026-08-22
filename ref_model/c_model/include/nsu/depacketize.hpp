@@ -122,6 +122,7 @@ class Depacketize : public RequestDepacketizer {
     // Wrap accessor: one credit pulse per consumed data flit, at most one per
     // VC per call (mirror of router::LinkCreditOut::take).
     bool take_dat_credit(uint8_t vc) {
+        assert(vc < dat_q_.size() && "nsu::Depacketize::take_dat_credit: VC beyond dat_num_vc");
         if (dat_credit_pending_[vc] == 0) return false;
         --dat_credit_pending_[vc];
         return true;

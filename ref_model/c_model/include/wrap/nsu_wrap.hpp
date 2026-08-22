@@ -70,8 +70,7 @@ class NsuWrap {
     // can rewrite an arriving address to name this node (nsu::Depacketize's
     // rebase_). Empty means "no address map", and the NSU forwards addresses
     // untouched, which is what the pure-C++ fixtures want.
-    void init(uint8_t src_id = 0, uint8_t port_id = 0,
-              uint8_t dat_num_vc = ::ni::NOC_DAT_NUM_VC,
+    void init(uint8_t src_id = 0, uint8_t port_id = 0, uint8_t dat_num_vc = ::ni::NOC_DAT_NUM_VC,
               std::size_t queue_depth = ni::NSU_QUEUE_DEPTH,
               std::size_t max_unique_ids = ni::NSU_META_BUFFER_MAX_UNIQUE_IDS,
               std::size_t max_outstanding = ni::NSU_META_BUFFER_MAX_OUTSTANDING,
@@ -358,13 +357,15 @@ class NsuWrap {
     // Burst-boundary agreement between the two streams. w_pop_budget_ is a beat
     // COUNT, so it silently assumes the AW queue and the W queue are ordered the
     // same way. They are filled independently (nsu/axi_master_port.hpp pop_aw /
-    // pop_w) from one shared S1 stage per channel that both classes pass through
-    // (nsu/depacketize.hpp s1_occupancy), and the classes reach that stage over
-    // two different physical networks -- narrow on REQ, data on DAT. Nothing
-    // holds their relative order. If it slips, this NSU hands its slave a burst
+    // pop_w) from ingress storage that is split per class -- narrow AW/W in
+    // their own S1 registers, data AW/W in one queue per DAT VC
+    // (nsu/depacketize.hpp) -- and the classes reach it over two different
+    // physical networks: narrow on REQ, data on DAT. Nothing holds their
+    // relative order across those sources, and within the data class nothing
+    // holds it across VCs either. If it slips, this NSU hands its slave a burst
     // whose W beats belong to a different AW: wrong data, wrong length, WLAST in
-    // the wrong place. Each handshaken AW pushes the beat count it owes; every
-    // W pop checks the stream still agrees.
+    // the wrong place. Each handshaken AW pushes the beat count it owes, and
+    // every W pop checks the stream still agrees.
     std::deque<uint32_t> w_expect_;  // beats owed, one entry per handshaken AW
     uint32_t w_seen_ = 0;            // beats popped for the burst at the front
 

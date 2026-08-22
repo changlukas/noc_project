@@ -109,7 +109,8 @@ class Nsu {
     std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
         if (path == NiPath::NsuReq) {
             // NsuReq: 2 stages
-            //   S0 = Depacketize S1 stage registers
+            //   S0 = Depacketize ingress: narrow S1 stage registers plus the
+            //        per-VC data queues (see depacketize.hpp s1_occupancy)
             //   S1 = AxiMasterPort per-channel queues (drain side)
             if (stage == 0) return depacketize_.s1_occupancy(axi_ch);
             if (stage == 1) {

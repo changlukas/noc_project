@@ -8,7 +8,7 @@
 // rr_start_; first VC with pending space AND downstream credit wins (else
 // backpressure). Only the DAT face runs num_vc > 1; REQ/RSP are single-VC.
 //
-// Fixed VC id (same-destination bypass): ANY AW (regardless of ordering_req)
+// Fixed VC id (write VC hash): ANY AW (regardless of ordering_req)
 // maps to (dst_id ^ awid) % num_vc -- deterministic VC allocation, a pure
 // function with zero state, the same rule the NSU response path applies to R.
 // A same-(dst, id) write stream therefore always rides one VC, which is what
