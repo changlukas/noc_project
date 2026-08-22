@@ -354,6 +354,7 @@ Status: Not Started
 - Modify: `ref_model/c_model/include/nsu/depacketize.hpp` (ctor `:47-77`, `s1_occupancy` `:89-105`, members `:120-170`, `drain_ingress_` `:271-364`, `tick` `:368-371`, `pop_aw` `:377-409`, `pop_w` `:410-426`)
 - Modify: `ref_model/c_model/include/nsu/nsu.hpp:185-186` (ctor arg), add `take_dat_credit`
 - Test: `ref_model/c_model/tests/nsu/test_nsu_depacketize.cpp`
+- Modify: `ref_model/c_model/tests/wrap/test_ni_router_chain.cpp:298-307` (comment only: the AW/W cross-wire guarantee is now the NMU source-side {AW,W} lock plus NSU per-VC reassembly, not a router per-output lock)
 
 **Interfaces:**
 - Produces: `Depacketize(router::NocReqIn& req_in, MetaBuffer& meta, std::size_t max_unique_ids, router::NocReqIn& dat_req_in = router::null_req_in(), uint8_t src_id = 0, std::array<address_map::SpaceCoords, 2> space_coords = {}, uint8_t port_id = 0, uint8_t dat_num_vc = 1)`. `bool Depacketize::take_dat_credit(uint8_t vc)`. `bool Nsu::take_dat_credit(uint8_t vc)`.
