@@ -346,7 +346,7 @@ TEST(NmuVcAllocator, SameDstAndIdAlwaysTakeTheSameVc) {
 ## Stage 2: NSU per-VC DAT ingress and W reassembly
 Goal: `nsu::Depacketize` holds one bounded flit queue per DAT VC, reassembles each VC's AW+W worm independently, and emits credit on consumption.
 Success Criteria: new `NsuDepacketize` tests pass, all NSU and integration tests pass.
-Status: In Progress
+Status: Complete
 
 ### Task 2.1: Per-VC queues replace the data-class S1 registers
 
@@ -585,7 +585,7 @@ bool take_dat_credit(uint8_t vc) {
 ## Stage 3: DatMergeWrap forwards NSU credit
 Goal: the router's LOCAL DAT credit for NSU-bound flits is returned when the NSU consumes them, not at demux.
 Success Criteria: merge tests pass, full ctest green, directed and continuous co-sim pass at vc2 and vc8.
-Status: Not Started
+Status: In Progress
 
 ### Task 3.1: Merge credit path
 
@@ -730,6 +730,7 @@ Status: Not Started
 - `docs/trade-off.md:28`, `:164-170`.
 - `docs/verification-environment.md:271-272` (`floo_wormhole_arbiter.sv` per (output, VC) and `floo_vc_arbiter.sv` per-cycle VC mux, both ported).
 - `docs/known-limitations.md`: drop any row stating R waits behind W worms at an output or that VC count has no effect.
+- Code comments carried from reviews: `ref_model/c_model/include/wrap/nsu_wrap.hpp:355-370` (AW/W no longer pass a shared S1 stage), `ref_model/c_model/include/nsu/nsu.hpp:98` (S0 = narrow S1 registers plus data VC queues), `ref_model/c_model/include/nmu/vc_allocator.hpp:23` (heading still says bypass), `ref_model/c_model/include/router/router.hpp` tail-steal guard comment (matters at the worm's own output), `ref_model/dpi/cmodel_dpi.cpp` dump drops the redundant `locked_output_vc` column; `depacketize.hpp` `take_dat_credit` gets the `vc < dat_q_.size()` assert the push side has.
 
 - [ ] **Step 1:** Edit each location. Tables over prose. No semicolons or dashes in running text.
 - [ ] **Step 2:** `grep -rn 'per-output wormhole\|per output, across VCs\|across VCs' docs/` returns nothing stale.
