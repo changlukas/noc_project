@@ -23,10 +23,16 @@ PYTHON3 ?= python3
 CONFIG ?= mesh_4x4
 
 # Run class selects the endpoint/checking flavor compiled into the binary:
-#   directed (only) : file_master + scoreboard, INCR two-phase.
-RUN_CLASS ?= directed
-ifeq ($(filter $(RUN_CLASS),directed),)
-$(error RUN_CLASS must be directed (got '$(RUN_CLASS)'))
+#   directed   : file_master + scoreboard; master-face backpressure profile
+#                "random" (tb_noc_mesh.sv MST_STALL_RANDOM_OUTPUT = 1), the
+#                stress that fills the RoB.
+#   continuous : same endpoint with the "ideal" master-face profile -- a
+#                measurement run must not be throttled by its own consumer
+#                (measured: the random profile hid 4x of neighbor bandwidth).
+#                Selected by INJECTION_MODE=1; each class has its own obj_dir.
+RUN_CLASS ?= $(if $(filter 1,$(INJECTION_MODE)),continuous,directed)
+ifeq ($(filter $(RUN_CLASS),directed continuous),)
+$(error RUN_CLASS must be directed or continuous (got '$(RUN_CLASS)'))
 endif
 
 # Build environment config and include dirs are shared with sim/vcs/Makefile
@@ -135,7 +141,8 @@ VERILATOR_FLAGS := \
     --timing \
     --Mdir $(OBJ_DIR) \
     -CFLAGS "-g" \
-    -CFLAGS "-O0"
+    -CFLAGS "-O0" \
+    $(if $(filter continuous,$(RUN_CLASS)),-GMST_STALL_RANDOM_OUTPUT=0)
 
 # Optional strict-mode flag injection for release gates.
 # Override with: make VERILATOR_EXTRA_FLAGS="--Wall --Wpedantic"
@@ -395,7 +402,7 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 	# before a vacuous no-scoreboard run. Deliberately a recipe check, not a
 	# parse-time $(error): OBJ_DIR/TBTOP_EXE are := fixed at parse, so a target-
 	# specific override cannot re-key them; the cost is a wasted wrong-flavor build.
-	@[ "$(RUN_CLASS)" = "directed" ] || { echo "ERROR: a run requires RUN_CLASS=directed (got '$(RUN_CLASS)')"; exit 1; }
+	@[ "$(RUN_CLASS)" = "$(if $(filter 1,$(INJECTION_MODE)),continuous,directed)" ] || { echo "ERROR: INJECTION_MODE=$(INJECTION_MODE) runs on RUN_CLASS=$(if $(filter 1,$(INJECTION_MODE)),continuous,directed) (got '$(RUN_CLASS)')"; exit 1; }
 	@mkdir -p output/$(SIM_TAG)
 	@echo ">>> $@ CONFIG=$(CONFIG) PATTERN=$(PATTERN) SEED=$(SEED)"
 	@echo "running $(SIM_TAG) (mode=$(INJECTION_MODE) rate=$(INJECTION_RATE) count=$(INJECTION_COUNT) pattern=$(PATTERN))"
@@ -461,10 +468,10 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 # step measures what other settings would buy, and reports it as a number.
 SWEEP_RATES ?= 0.05 0.1 0.2 0.3 0.4 0.5 0.7 0.85 1.0
 
-# Set tools/gen_tb_top.py's _MST_BACKPRESSURE to "ideal" before running this,
-# and put it back afterwards. The default is "random", which stalls the master's
-# R and B channels, and a consumer that stalls first is what the curve then
-# measures instead of fabric saturation. Same reason _MEM_LATENCY stays "ideal".
+# INJECTION_MODE=1 selects the continuous run class, whose binary carries the
+# ideal master-face backpressure profile, so the curve measures the fabric and
+# not a consumer that stalls first (tools/gen_tb_top.py's _MST_BACKPRESSURE
+# governs the DMA top only). Same reason _MEM_LATENCY stays "ideal".
 # Generate once, up front: every point in the loop below runs the same
 # configuration, so one generation covers all of them.
 .PHONY: sim-injection-sweep

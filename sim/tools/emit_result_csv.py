@@ -25,7 +25,7 @@ _MON = re.compile(
 )
 _CONFIG = re.compile(
     r"\[Config\]\s+max_unique_ids=(\d+)\s+max_outstanding=(\d+)\s+dat_num_vc=(\d+)"
-    r"(?:\s+router_vc_depth=(\d+))?")
+    r"(?:\s+router_vc_depth=(\d+))?(?:\s+mst_stall_random=(\d+))?")
 
 
 def parse_monitors(log_text):
@@ -62,6 +62,7 @@ def parse_config(log_text, cli_max_unique_ids, cli_max_outstanding):
         cli_max_outstanding if cli_max_outstanding is not None else m.group(2),
         int(m.group(3)),
         int(m.group(4)) if m.group(4) else None,
+        int(m.group(5)) if m.group(5) else None,
     )
 
 
@@ -87,7 +88,7 @@ def main():
 
     log_text = pathlib.Path(a.log).read_text()
     bw, latency = parse_monitors(log_text)
-    max_unique_ids, max_outstanding, dat_num_vc, router_vc_depth = parse_config(
+    max_unique_ids, max_outstanding, dat_num_vc, router_vc_depth, mst_stall_random = parse_config(
         log_text, a.max_unique_ids, a.max_outstanding
     )
     row = {
@@ -105,6 +106,7 @@ def main():
         "ids_per_initiator": a.ids_per_initiator,
         "burst_len": a.burst_len,
         "space": a.space,
+        "mst_stall_random": mst_stall_random,
         "accepted_bits_per_cycle": f"{bw:.1f}",
         "mean_latency": f"{latency:.1f}",
     }

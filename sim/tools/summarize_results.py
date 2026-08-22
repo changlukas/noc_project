@@ -25,11 +25,11 @@ _TAG = re.compile(
     r")(?P<narrow>_narrow)?_(?:r(?P<rate>[\d.]+)_)?s(?P<seed>\d+)$")
 _CONFIG = re.compile(
     r"\[Config\]\s+max_unique_ids=(\d+)\s+max_outstanding=(\d+)\s+dat_num_vc=(\d+)"
-    r"(?:\s+router_vc_depth=(\d+))?")
+    r"(?:\s+router_vc_depth=(\d+))?(?:\s+mst_stall_random=(\d+))?")
 _PASS = re.compile(r"PASS: all (\d+) nodes done, non-vacuous")
 
 _PARAM_COLS = ("topology", "vc", "router_depth", "outstanding", "txns_per_id",
-               "ids/init", "burst_len", "mode", "rate", "txns/node")
+               "ids/init", "burst_len", "mode", "rate", "txns/node", "mst_stall")
 
 
 def emit_table(header, rows):
@@ -73,7 +73,7 @@ def collect(out_root):
                 cfg = _CONFIG.search(log_path.read_text())
                 key = (m.group("config"), cfg.group(3), cfg.group(4) or "?",
                        cfg.group(2), "?", "?", "?", "continuous",
-                       m.group("rate") or "?", "?")
+                       m.group("rate") or "?", "?", cfg.group(5) or "?")
                 groups[key][m.group("pattern")].append({
                     "status": "FAIL",
                     "space": "config" if m.group("narrow") else "memory"})
@@ -86,7 +86,8 @@ def collect(out_root):
                    row.get("router_vc_depth") or "?",
                    row["max_outstanding"], row.get("max_txns_per_id", "32"),
                    row.get("ids_per_initiator", "1"), row.get("burst_len", "0"),
-                   mode, row["injection_rate"], row["injection_count"])
+                   mode, row["injection_rate"], row["injection_count"],
+                   row.get("mst_stall_random") or "-")
             groups[key][row["pattern"]].append({
                 "status": "PASS (completed, no data check)",
                 "space": row.get("space", "memory"),
@@ -103,7 +104,7 @@ def collect(out_root):
             cfg = _CONFIG.search(text)
             key = (m.group("config"), cfg.group(3), cfg.group(4) or "?",
                    cfg.group(2), "-", "-", "-", m.group(1),
-                   m.group("rate") or "-", "-")
+                   m.group("rate") or "-", "-", cfg.group(5) or "-")
             groups[key][m.group("pattern")].append({
                 "status": "PASS (scoreboard)" if _PASS.search(text) else "FAIL",
                 "space": "config" if m.group("narrow") else "memory",
