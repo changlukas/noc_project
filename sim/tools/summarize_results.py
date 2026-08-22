@@ -9,6 +9,7 @@ run is a closed-loop two-phase drain, so it contributes its scoreboard verdict
 and no latency/bandwidth.
 """
 import csv
+import json
 import pathlib
 import re
 import sys
@@ -41,6 +42,21 @@ def emit_table(header, rows):
     print()
 
 
+def dat_link_util(perf_path):
+    """(mean, max, min) DAT inter-router link utilization from the run's
+    perf.json: flit_count / window cycles per link, 1 flit per cycle being the
+    link's capacity. None when the run carries no perf.json."""
+    if not perf_path.exists():
+        return None
+    perf = json.loads(perf_path.read_text())
+    cyc = perf["window"]["end_cyc"] - perf["window"]["start_cyc"]
+    utils = [l["flit_count"] / cyc for l in perf["noc"]["links"]
+             if l["name"].startswith("dat_")]
+    if not utils or cyc <= 0:
+        return None
+    return (sum(utils) / len(utils), max(utils), min(utils))
+
+
 def collect(out_root):
     """{param_tuple: {pattern: [run dict]}}, param_tuple ordered as _PARAM_COLS."""
     groups = defaultdict(lambda: defaultdict(list))
@@ -65,6 +81,7 @@ def collect(out_root):
             row = next(csv.DictReader(csv_path.open()))
             mode = {"0": "directed", "1": "continuous", "2": "checked"}[
                 row["injection_mode"]]
+            dat_util = dat_link_util(run_dir / "perf.json")
             key = (row["topology"], row["vc"],
                    row.get("router_vc_depth") or "?",
                    row["max_outstanding"], row.get("max_txns_per_id", "32"),
@@ -75,6 +92,7 @@ def collect(out_root):
                 "space": row.get("space", "memory"),
                 "bw": float(row["accepted_bits_per_cycle"]),
                 "latency": float(row["mean_latency"]),
+                "dat_util": dat_util,
             })
         else:
             m = _TAG.match(run_dir.name)
@@ -139,6 +157,8 @@ def main():
         rows = []
         has_narrow = any(r["space"] == "config"
                          for runs in patterns.values() for r in runs)
+        has_util = any(r.get("dat_util")
+                       for runs in patterns.values() for r in runs)
         for pattern in sorted(patterns):
             runs = patterns[pattern]
             data = [r for r in runs if r["space"] != "config"]
@@ -160,10 +180,21 @@ def main():
             row = [pattern, status, fmt(dbw), fmt(dlat)]
             if has_narrow:
                 row += [fmt(nlat), delta]
+            if has_util:
+                utils = [r["dat_util"] for r in data if r.get("dat_util")]
+                if utils:
+                    # mean of per-run means; extremes across runs
+                    row += [f"{sum(u[0] for u in utils) / len(utils):.3f}",
+                            f"{max(u[1] for u in utils):.3f}",
+                            f"{min(u[2] for u in utils):.3f}"]
+                else:
+                    row += ["-", "-", "-"]
             rows.append(row)
         header = ["pattern", "status", "data bits/cyc", "data lat (cyc)"]
         if has_narrow:
             header += ["narrow lat (cyc)", "narrow-data (cyc)"]
+        if has_util:
+            header += ["DAT util mean", "max", "min"]
         emit_table(header, rows)
 
 
