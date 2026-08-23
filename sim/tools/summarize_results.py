@@ -256,15 +256,15 @@ def main():
                 else:
                     row += ["-", "-", "-"]
             rows.append(row)
-        groups = [("pattern", 1), ("BW (B/cyc/node)", 3),
-                  ("latency (cyc)", 3 if has_narrow else 1)]
+        col_groups = [("pattern", 1), ("BW (B/cyc/node)", 3),
+                      ("latency (cyc)", 3 if has_narrow else 1)]
         header = ["", "avg", "min", "max", "data"]
         if has_narrow:
             header += ["narrow", "narrow-data"]
         if has_util:
-            groups.append(("DAT link util (%)", 3))
+            col_groups.append(("DAT link util (%)", 3))
             header += ["avg", "min", "max"]
-        emit_table(header, rows, groups)
+        emit_table(header, rows, col_groups)
 
 
 if __name__ == "__main__":
