@@ -1,5 +1,6 @@
 #include "router/router.hpp"
 #include "router/two_node_fabric.hpp"
+#include "common/flit_builders.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <ios>
@@ -48,13 +49,7 @@ struct CreditCounter : ni::cmodel::router::RouterCreditSink {
     void receive_credit(uint8_t vc) override { pulses.push_back(vc); }
 };
 
-ni::cmodel::Flit make_flit(uint8_t dst, uint8_t vc, uint64_t flit_tail) {
-    ni::cmodel::Flit f;
-    f.set_header_field("dst_id", dst);
-    f.set_header_field("vc_id", vc);
-    f.set_header_field("flit_tail", flit_tail);
-    return f;
-}
+using ni::cmodel::testing::make_flit;
 
 // The XY walk itself: dst_port_id 0 throughout, the tile on LOCAL.
 TEST(RouterRouteCompute, XyDimensionOrder) {

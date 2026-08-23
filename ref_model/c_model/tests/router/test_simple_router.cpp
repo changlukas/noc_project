@@ -1,4 +1,5 @@
 #include "router/simple_router.hpp"
+#include "common/flit_builders.hpp"
 #include <gtest/gtest.h>
 #include <optional>
 #include <tuple>
@@ -34,13 +35,7 @@ struct FlitSink : SimpleRouterLink {
     void push_flit(const Flit& f) override { received.push_back(f); }
 };
 
-Flit make_flit(uint8_t dst, uint8_t vc, uint64_t flit_tail) {
-    Flit f;
-    f.set_header_field("dst_id", dst);
-    f.set_header_field("vc_id", vc);
-    f.set_header_field("flit_tail", flit_tail);
-    return f;
-}
+using ni::cmodel::testing::make_flit;
 
 Flit make_tagged_flit(uint8_t dst, uint8_t vc, uint64_t flit_tail, uint8_t src_id) {
     auto f = make_flit(dst, vc, flit_tail);

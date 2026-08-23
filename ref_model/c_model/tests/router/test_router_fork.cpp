@@ -5,6 +5,7 @@
 // the fork set, not the mask math.
 #include "router/route_mask.hpp"
 #include "router/router.hpp"
+#include "common/flit_builders.hpp"
 
 #include <gtest/gtest.h>
 
@@ -69,15 +70,7 @@ Flit make_mc_flit(uint8_t dst, uint8_t src, uint8_t cmask, uint8_t vc, uint64_t 
     return f;
 }
 
-Flit make_unicast_flit(uint8_t dst, uint8_t src, uint8_t vc, uint64_t flit_tail, uint8_t tag) {
-    Flit f;
-    f.set_header_field("dst_id", dst);
-    f.set_header_field("src_id", src);
-    f.set_header_field("vc_id", vc);
-    f.set_header_field("flit_tail", flit_tail);
-    f.set_header_field("ordering_tag", tag);
-    return f;
-}
+using ni::cmodel::testing::make_unicast_flit;
 
 // Build an n-flit worm (head flit_tail=0 .. tail flit_tail=1), tags 0..n-1.
 std::vector<Flit> make_mc_worm(uint8_t dst, uint8_t src, uint8_t cmask, uint8_t vc,
