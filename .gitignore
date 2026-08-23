@@ -18,7 +18,7 @@ ref_model/c_model/build/
 /node_modules/
 
 # sandcastle runner scratch (its runner script is tracked regardless)
-.sandcastle/
+/.sandcastle/*.lock
 
 # Co-sim runtime artifacts (per-instance variants since multi-instance DPI refactor)
 master_wrap_read_dump*.txt
@@ -89,7 +89,7 @@ __pycache__/
 # injection-rate sweep outputs (make sim-injection-sweep) and every other
 # generated plot. The measurement figures already committed here stay tracked.
 sim/tools/injection_sweep.csv
-sim/tools/*.png
+sim/tools/*_sweep*.png
 
 # Knowledge-base binaries and derived index. Text extractions are tracked so the
 # corpus travels with the repository; the source PDFs and the embedding index are
