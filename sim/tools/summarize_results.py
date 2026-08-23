@@ -42,6 +42,29 @@ def emit_table(header, rows):
     print()
 
 
+_NODE_BW = re.compile(
+    r"\[Monitor node(?P<node>\d+)\.master\]\[(?:Read|Write)\].*?BW:\s*"
+    r"(?P<bw>[\d.]+)\s*Bits/cycle")
+
+
+def node_rates(log_path):
+    """Accepted bytes per cycle per node from the run.log monitor lines: read
+    plus write BW of each node's master, in node order. Idle nodes count with
+    0. None when the run carries no run.log."""
+    if not log_path.exists():
+        return None
+    per_node = defaultdict(float)
+    for m in _NODE_BW.finditer(log_path.read_text()):
+        per_node[int(m.group("node"))] += float(m.group("bw")) / 8
+    return [per_node[n] for n in sorted(per_node)] or None
+
+
+def mesh_nodes(topology):
+    """Node count named by a mesh_<x>x<y> topology, None for other names."""
+    m = re.match(r"mesh_(\d+)x(\d+)$", topology)
+    return int(m.group(1)) * int(m.group(2)) if m else None
+
+
 def dat_link_util(perf_path):
     """(mean, max, min) DAT inter-router link utilization from the run's
     perf.json: flit_count / window cycles per link, 1 flit per cycle being the
@@ -91,7 +114,9 @@ def collect(out_root):
             groups[key][row["pattern"]].append({
                 "status": "PASS (completed, no data check)",
                 "space": row.get("space", "memory"),
-                "bw": float(row["accepted_bits_per_cycle"]) / 8,  # bytes/cycle
+                "bw": float(row["accepted_bits_per_cycle"]) / 8,  # bytes/cycle, all nodes
+                "nodes": mesh_nodes(row["topology"]),
+                "bw_node": node_rates(run_dir / "run.log"),
                 "latency": float(row["mean_latency"]),
                 "dat_util": dat_util,
             })
@@ -166,9 +191,12 @@ def main():
                         lk[0] != "default", lk[0]))
 
     print("# Continuous-mode parameter sweep\n")
-    print("BW: accepted bandwidth, B/cycle, summed over all node monitors. "
-          "Latency: sample-weighted mean from AX handshake to last response "
-          "beat. A cell is the mean over its seeds.")
+    print("BW: accepted bandwidth per node, read plus write bytes per cycle "
+          "at the AXI master, avg over every node of the mesh, min and max "
+          "the lightest and the heaviest node (booksim2 accepted rate "
+          "reporting). Port capacity is 64 B/cycle per direction. Latency: "
+          "sample-weighted mean from AX handshake to last response beat. A "
+          "cell is the mean over its seeds.")
     print()
     for i, (label, key) in enumerate(labeled, 1):
         patterns = groups[key]
@@ -195,7 +223,18 @@ def main():
             fmt = lambda v: f"{v:.1f}" if v is not None else "-"
             # BW and data latency average over the data runs; narrow probes
             # ride the same cell.
-            row = [pattern, fmt(dbw), fmt(dlat)]
+            per_node = [r["bw_node"] for r in data if r.get("bw_node")]
+            if per_node:
+                avg = sum(sum(v) / len(v) for v in per_node) / len(per_node)
+                lo = sum(min(v) for v in per_node) / len(per_node)
+                hi = sum(max(v) for v in per_node) / len(per_node)
+            else:
+                # No run.log (ctest fixtures): avg from the csv sum and the
+                # mesh node count, extremes unknown.
+                nodes = [r["nodes"] for r in data if r.get("nodes")]
+                avg = dbw / nodes[0] if dbw is not None and nodes else None
+                lo = hi = None
+            row = [pattern, fmt(avg), fmt(lo), fmt(hi), fmt(dlat)]
             if has_narrow:
                 row += [fmt(nlat), delta]
             if has_util:
@@ -208,7 +247,7 @@ def main():
                 else:
                     row += ["-", "-", "-"]
             rows.append(row)
-        header = ["pattern", "BW (B/cyc)", "data lat (cyc)"]
+        header = ["pattern", "BW avg (B/cyc/node)", "min", "max", "data lat (cyc)"]
         if has_narrow:
             header += ["narrow lat (cyc)", "narrow-data (cyc)"]
         if has_util:

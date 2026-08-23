@@ -58,5 +58,29 @@ def test_bw_averages_data_runs_only(tmp_path, capsys, monkeypatch):
            if ln.startswith("| neighbor")][0]
     cells = [c.strip() for c in row.strip("|").split("|")]
     # BW averages the two data runs and not the narrow probe sharing the
-    # cell. The column is B/cyc, the csv is bits/cyc: mean(100, 200) / 8 = 18.75.
-    assert cells[1] == "18.8"
+    # cell, then divides by the 4 nodes of mesh_2x2: mean(100, 200) / 8 / 4 =
+    # 4.6875. No run.log, so min and max are unknown.
+    assert cells[1] == "4.7"
+    assert cells[2] == "-"
+    assert cells[3] == "-"
+
+
+def test_per_node_min_max_come_from_the_monitor_lines(tmp_path, capsys,
+                                                      monkeypatch):
+    run_dir = tmp_path / "continuous_mesh_2x2_neighbor_r0.9_s1"
+    _write_csv(run_dir, "neighbor", 1, bw="960.0")
+    (run_dir / "run.log").write_text(
+        "[Monitor node0.master][Read] Latency: 1.0 +- 0.0, N: 1, BW: 80.00 Bits/cycle, Util: 1%\n"
+        "[Monitor node0.master][Write] Latency: 1.0 +- 0.0, N: 1, BW: 80.00 Bits/cycle, Util: 1%\n"
+        "[Monitor node1.master][Read] Latency: 1.0 +- 0.0, N: 1, BW: 400.00 Bits/cycle, Util: 1%\n"
+        "[Monitor node1.master][Write] Latency: 1.0 +- 0.0, N: 1, BW: 400.00 Bits/cycle, Util: 1%\n")
+    monkeypatch.setattr(sys, "argv", ["summarize_results", str(tmp_path)])
+    s.main()
+    row = [ln for ln in capsys.readouterr().out.splitlines()
+           if ln.startswith("| neighbor")][0]
+    cells = [c.strip() for c in row.strip("|").split("|")]
+    # node0 = 160 bits = 20 B/cyc, node1 = 800 bits = 100 B/cyc: avg over the
+    # two reporting nodes 60, min 20, max 100.
+    assert cells[1] == "60.0"
+    assert cells[2] == "20.0"
+    assert cells[3] == "100.0"
