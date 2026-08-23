@@ -32,7 +32,16 @@ _PARAM_COLS = ("topology", "vc", "router_depth", "outstanding", "txns_per_id",
                "ids/init", "burst_len", "mode", "rate", "txns/node", "mst_stall")
 
 
-def emit_table(header, rows):
+def emit_table(header, rows, groups=None):
+    """Markdown table. With `groups` = [(title, span), ...] the header row
+    carries the group titles (first cell of each span) and `header` becomes
+    the first body row, the sub-column names under each group."""
+    if groups:
+        top = []
+        for title, span in groups:
+            top += [title] + [""] * (span - 1)
+        rows = [header] + rows
+        header = top
     widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(header)]
     line = lambda cells: "| " + " | ".join(c.ljust(w) for c, w in zip(cells, widths)) + " |"
     print(line(header))
@@ -240,19 +249,22 @@ def main():
             if has_util:
                 utils = [r["dat_util"] for r in data if r.get("dat_util")]
                 if utils:
-                    # mean of per-run means; extremes across runs
-                    row += [f"{100 * sum(u[0] for u in utils) / len(utils):.1f}%",
-                            f"{100 * max(u[1] for u in utils):.1f}%",
-                            f"{100 * min(u[2] for u in utils):.1f}%"]
+                    # avg of per-run avgs; extremes across runs
+                    row += [f"{100 * sum(u[0] for u in utils) / len(utils):.1f}",
+                            f"{100 * min(u[2] for u in utils):.1f}",
+                            f"{100 * max(u[1] for u in utils):.1f}"]
                 else:
                     row += ["-", "-", "-"]
             rows.append(row)
-        header = ["pattern", "BW avg (B/cyc/node)", "min", "max", "data lat (cyc)"]
+        groups = [("pattern", 1), ("BW (B/cyc/node)", 3),
+                  ("latency (cyc)", 3 if has_narrow else 1)]
+        header = ["", "avg", "min", "max", "data"]
         if has_narrow:
-            header += ["narrow lat (cyc)", "narrow-data (cyc)"]
+            header += ["narrow", "narrow-data"]
         if has_util:
-            header += ["DAT util mean (%)", "max (%)", "min (%)"]
-        emit_table(header, rows)
+            groups.append(("DAT link util (%)", 3))
+            header += ["avg", "min", "max"]
+        emit_table(header, rows, groups)
 
 
 if __name__ == "__main__":

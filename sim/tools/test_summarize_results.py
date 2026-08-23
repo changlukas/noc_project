@@ -41,7 +41,7 @@ def test_narrow_runs_add_the_latency_compare_columns(tmp_path, capsys,
     # Same parameter set, both classes: one row with data and narrow columns
     # and their difference. Without any narrow run those columns are omitted
     # (test_default_and_diff_labels' output has no such header).
-    assert "narrow lat (cyc)" in out
+    assert "latency (cyc)" in out and "narrow-data" in out
     assert "-10.0" in out
 
 
