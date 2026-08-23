@@ -14,6 +14,10 @@ CMakeLists.txt text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
 
+# specgen fixtures compared against LF generator output — keep LF so the
+# working copy does not flip between platforms.
+*.golden text eol=lf
+
 # Binary assets — never normalize.
 *.jpg binary
 *.png binary
