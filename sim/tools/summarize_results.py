@@ -74,6 +74,15 @@ def mesh_nodes(topology):
     return int(m.group(1)) * int(m.group(2)) if m else None
 
 
+def completion_cycles(perf_path):
+    """Cycles from reset release until the last node finished, the perf.json
+    window the tb closes at end of simulation. None without perf.json."""
+    if not perf_path.exists():
+        return None
+    w = json.loads(perf_path.read_text())["window"]
+    return w["end_cyc"] - w["start_cyc"]
+
+
 def dat_link_util(perf_path):
     """(mean, max, min) DAT inter-router link utilization from the run's
     perf.json: flit_count / window cycles per link, 1 flit per cycle being the
@@ -128,6 +137,7 @@ def collect(out_root):
                 "bw_node": node_rates(run_dir / "run.log"),
                 "latency": float(row["mean_latency"]),
                 "dat_util": dat_util,
+                "completion": completion_cycles(run_dir / "perf.json"),
             })
         else:
             m = _TAG.match(run_dir.name)
@@ -203,9 +213,9 @@ def main():
     print("BW: accepted bandwidth per node, read plus write bytes per cycle "
           "at the AXI master, avg over every node of the mesh, min and max "
           "the lightest and the heaviest node (booksim2 accepted rate "
-          "reporting). Port capacity is 64 B/cycle per direction. Latency: "
-          "sample-weighted mean from AX handshake to last response beat. A "
-          "cell is the mean over its seeds.")
+          "reporting). Port capacity is 64 B/cycle per direction. Completion: "
+          "cycles from reset release until the last node finished its "
+          "transactions. A cell is the mean over its seeds.")
     print()
     for i, (label, key) in enumerate(labeled, 1):
         patterns = groups[key]
@@ -243,9 +253,11 @@ def main():
                 nodes = [r["nodes"] for r in data if r.get("nodes")]
                 avg = dbw / nodes[0] if dbw is not None and nodes else None
                 lo = hi = None
-            row = [pattern, fmt(avg), fmt(lo), fmt(hi), fmt(dlat)]
+            done = [r["completion"] for r in data if r.get("completion")]
+            comp = f"{sum(done) / len(done):.0f}" if done else "-"
+            row = [pattern, fmt(avg), fmt(lo), fmt(hi), comp]
             if has_narrow:
-                row += [fmt(nlat), delta]
+                row += [fmt(dlat), fmt(nlat), delta]
             if has_util:
                 utils = [r["dat_util"] for r in data if r.get("dat_util")]
                 if utils:
@@ -256,11 +268,11 @@ def main():
                 else:
                     row += ["-", "-", "-"]
             rows.append(row)
-        col_groups = [("pattern", 1), ("BW (B/cyc/node)", 3),
-                      ("latency (cyc)", 3 if has_narrow else 1)]
-        header = ["", "avg", "min", "max", "data"]
+        col_groups = [("pattern", 1), ("BW (B/cyc/node)", 3), ("completion (cyc)", 1)]
+        header = ["", "avg", "min", "max", "all nodes"]
         if has_narrow:
-            header += ["narrow", "narrow-data"]
+            col_groups.append(("latency (cyc)", 3))
+            header += ["data", "narrow", "narrow-data"]
         if has_util:
             col_groups.append(("DAT link util (%)", 3))
             header += ["avg", "min", "max"]

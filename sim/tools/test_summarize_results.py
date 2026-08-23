@@ -74,13 +74,16 @@ def test_per_node_min_max_come_from_the_monitor_lines(tmp_path, capsys,
         "[Monitor node0.master][Write] Latency: 1.0 +- 0.0, N: 1, BW: 80.00 Bits/cycle, Util: 1%\n"
         "[Monitor node1.master][Read] Latency: 1.0 +- 0.0, N: 1, BW: 400.00 Bits/cycle, Util: 1%\n"
         "[Monitor node1.master][Write] Latency: 1.0 +- 0.0, N: 1, BW: 400.00 Bits/cycle, Util: 1%\n")
+    (run_dir / "perf.json").write_text(
+        '{"window":{"start_cyc":0,"end_cyc":1000},"noc":{"links":[]}}')
     monkeypatch.setattr(sys, "argv", ["summarize_results", str(tmp_path)])
     s.main()
     row = [ln for ln in capsys.readouterr().out.splitlines()
            if ln.startswith("| neighbor")][0]
     cells = [c.strip() for c in row.strip("|").split("|")]
     # node0 = 160 bits = 20 B/cyc, node1 = 800 bits = 100 B/cyc: avg over the
-    # two reporting nodes 60, min 20, max 100.
+    # two reporting nodes 60, min 20, max 100. Completion is the perf window.
     assert cells[1] == "60.0"
     assert cells[2] == "20.0"
     assert cells[3] == "100.0"
+    assert cells[4] == "1000"
