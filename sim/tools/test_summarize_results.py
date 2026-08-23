@@ -60,5 +60,5 @@ def test_seeds_column_counts_data_runs_only(tmp_path, capsys, monkeypatch):
     # BW averages the two data runs, so the seeds cell must count those two
     # and not the narrow probe sharing the cell. The column is B/cyc, the csv
     # is bits/cyc: mean(100, 200) / 8 = 18.75.
-    assert cells[2] == "2"
-    assert cells[3] == "18.8"
+    assert cells[1] == "2"
+    assert cells[2] == "18.8"

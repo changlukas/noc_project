@@ -1,8 +1,8 @@
 """Summarize every run under sim/verilator/output/ as markdown tables.
 
 One parameter set = one section: a one-row parameter table, then a result
-table with one row per pattern (status + performance). Runs sharing a
-parameter set and pattern are averaged across seeds (n shown when > 1).
+table with one row per pattern. Runs sharing a parameter set and pattern are
+averaged across seeds (n shown when > 1).
 
 Performance columns are filled from continuous (mode 1) runs only; a directed
 run is a closed-loop two-phase drain, so it contributes its scoreboard verdict
@@ -169,9 +169,7 @@ def main():
     print("BW: accepted bandwidth, B/cycle, summed over all node monitors. "
           "Latency: sample-weighted mean from AX handshake to last response "
           "beat. A cell is the mean over its seeds, counted in the seeds "
-          "column. PASS (completed) means protocol checks, "
-          "model invariants and watchdog stayed clean. The scoreboard is armed "
-          "in directed and checked modes only.")
+          "column.")
     print()
     for i, (label, key) in enumerate(labeled, 1):
         patterns = groups[key]
@@ -191,10 +189,6 @@ def main():
                 ok = [r[field] for r in rs if field in r]
                 return sum(ok) / len(ok) if ok else None
 
-            flags = [f"{name} FAIL" for name, rs in (("data", data),
-                                                     ("narrow", narrow))
-                     if any(r["status"] == "FAIL" for r in rs)]
-            status = ", ".join(flags) if flags else runs[0]["status"]
             dbw, dlat = mean(data, "bw"), mean(data, "latency")
             nlat = mean(narrow, "latency")
             delta = f"{nlat - dlat:+.1f}" if dlat is not None and \
@@ -202,7 +196,7 @@ def main():
             fmt = lambda v: f"{v:.1f}" if v is not None else "-"
             # seeds counts the data runs, the same set BW and data latency
             # average over; narrow probes ride the same cell.
-            row = [pattern, status, str(len(data)), fmt(dbw), fmt(dlat)]
+            row = [pattern, str(len(data)), fmt(dbw), fmt(dlat)]
             if has_narrow:
                 row += [fmt(nlat), delta]
             if has_util:
@@ -215,7 +209,7 @@ def main():
                 else:
                     row += ["-", "-", "-"]
             rows.append(row)
-        header = ["pattern", "status", "seeds", "BW (B/cyc)", "data lat (cyc)"]
+        header = ["pattern", "seeds", "BW (B/cyc)", "data lat (cyc)"]
         if has_narrow:
             header += ["narrow lat (cyc)", "narrow-data (cyc)"]
         if has_util:
