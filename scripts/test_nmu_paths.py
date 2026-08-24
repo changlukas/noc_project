@@ -36,10 +36,9 @@ def main() -> None:
     if VERILATOR is None:
         raise SystemExit("verilator is required for the NMU path elaboration check")
 
-    elaborate(
-        "tb_nmu_request_path",
-        ROOT / "rtl/nmu/request_path/nmu_request_path.sv",
-        ROOT / "rtl/nmu/request_path/tb_nmu_request_path.sv",
+    subprocess.run(
+        ["bash", str(ROOT / "rtl/nmu/request_path/test_request_path.sh"), "lint"],
+        check=True,
     )
     elaborate(
         "tb_nmu_response_path",
