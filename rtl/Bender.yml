@@ -15,6 +15,7 @@ sources:
   - common/axi_async_fifo.sv
   - sam/nmu_sam.sv
   - request_path/nmu_request_path.sv
+  - response_fifo/nmu_response_fifo.sv
   - response_path/nmu_response_path.sv
   - top/nmu.sv
   - request_fifo/nmu_request_fifo.sv
