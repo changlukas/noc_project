@@ -167,6 +167,14 @@ noc:
     min: 2
     sv_symbol: NOC_ROUTER_VC_DEPTH_DFLT
     cpp_symbol: NOC_ROUTER_VC_DEPTH
+  NI_DAT_RX_VC_DEPTH:
+    type: int
+    units: flits
+    description: "NI DAT receive FIFO depth per VC; power of two and at least 2; defaults to the Router VC depth and defines the Router LOCAL sender credit seed"
+    default: 8
+    min: 2
+    sv_symbol: NOC_NI_DAT_RX_VC_DEPTH_DFLT
+    cpp_symbol: NOC_NI_DAT_RX_VC_DEPTH
   ROUTER_OUTPUT_FIFO_DEPTH:
     type: int
     units: flits

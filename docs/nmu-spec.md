@@ -1,6 +1,6 @@
 # Design: Network Master Unit (NMU)
 
-The NMU is the master-side network interface of the NoC. It sits between exactly one external 512-bit AXI4 master interface and the router mesh: it converts AXI4 request beats (AW / W / AR) into NoC flits, and converts response flits (B / R) back into AXI4 response beats. Narrow and Data are internal NoC traffic classes selected by the SAM, not separate AXI interfaces. This document specifies the as-built C++ behavior model (`ref_model/c_model/include/nmu/`), its wrap (`ref_model/c_model/include/wrap/nmu_wrap.hpp`), and target RTL overlays. Existing co-sim checks the as-built model; target CDC, Router-only VC ownership and asymmetric LOCAL DAT flow control require model alignment before cycle-exact RTL comparison.
+The NMU is the master-side network interface of the NoC. It sits between exactly one external 512-bit AXI4 master interface and the router mesh: it converts AXI4 request beats (AW / W / AR) into NoC flits, and converts response flits (B / R) back into AXI4 response beats. Narrow and Data are internal NoC traffic classes selected by the SAM, not separate AXI interfaces. This document specifies the as-built C++ behavior model (`ref_model/c_model/include/nmu/`), its wrap (`ref_model/c_model/include/wrap/nmu_wrap.hpp`), and target RTL overlays. Existing co-sim checks the as-built model; target CDC and NI receive-VC storage require model alignment before cycle-exact RTL comparison.
 
 The production top is `nmu`. Its wrapper-facing ports, clock/reset ownership, and reviewed child
 boundaries are frozen in `rtl/README.md`; this document remains authoritative for behavior.
@@ -19,9 +19,9 @@ The current C++ NMU has three flit faces, one per physical network (Section 3.1)
 - RSP ingress (NMU consumes): `NarrowB` / `DataB` plus `NarrowR`. Ready/valid.
 - DAT egress + ingress: `DataAw` / `DataW` out, `DataR` in. The model uses credit flow control both directions.
 
-The target RTL keeps credit only on DAT egress into the Router LOCAL input VC FIFOs. DAT ingress
-from the Router uses ready/valid, with ready derived from the NMU DAT Read class FIFO. The NMU has
-no receive VC FIFO.
+The target RTL uses per-VC credit on DAT in both directions. DAT egress is credited by the Router
+LOCAL input VC FIFOs; DAT ingress is credited by the NMU DataR receive FIFOs. The NMU has one
+receive FIFO per eligible DAT VC and no second deep shared DataR FIFO after the VC merge.
 
 ### 2.2 Flit format
 
@@ -174,7 +174,8 @@ Because the external AXI interface has only one W channel, `w_meta_fifo_` record
 in AW order. W is steered by the FIFO head's class and inherits that AW's route and ordering fields;
 the entry retires on WLAST. Separate NoC drain never changes this association. The current C++
 model already contains the two network-local arbiter/allocation pairs and tests cross-network
-backpressure independence. A dedicated same-cycle REQ+DAT egress test is `[TBD]`.
+backpressure independence. Target acceptance requires sustained same-cycle REQ+DAT transfer when
+both independent schedulers have eligible backlog and their own flow-control authority.
 
 - `AxiSlavePort`: current-model per-channel FIFOs (depth `NMU_QUEUE_DEPTH` = 16 each for AW / W / AR / B / R). Pure transport, FIFO order per channel regardless of AXI ID.
 - `SAM`: parallel combinational AW and AR range decode. Optional AW and AR register slices are selected independently by Section 2.7 parameters.
@@ -228,11 +229,11 @@ are not overloaded: reservation sets `occupied`; response arrival sets `complete
 retirement releases the slot.
 
 **Target integration overlay.** RSP and DAT Read enter independent `noc_clk` class FIFOs under
-ready/valid. The NoC-to-AXI assigner depacketizes them and writes the B or R dual-clock FIFO;
+ready/valid for RSP and per-VC credit for DAT. The NoC-to-AXI assigner depacketizes them and writes the B or R dual-clock FIFO;
 `vc_id` is not used for NI queue selection. B and R may therefore assert `bvalid` and `rvalid` in
 the same `ACLK` cycle and each waits only on its own ready. `DataB` and `DataR` use different
 physical networks. `NarrowB` and `NarrowR` share RSP bandwidth but become independent after B/R
-assignment. The current C++ model does not implement this CDC or asymmetric DAT overlay.
+assignment. The current C++ model does not implement this CDC or the target receive-FIFO timing.
 
 Why a reorder buffer exists: AXI4 requires that responses with the same ID return in issue order. The fabric does not guarantee this. Two same-ID reads to different destinations can return out of order (a near slave answers before a far one), and with multiple VCs even same-destination traffic could overtake if it changed VC mid-stream. The NMU owns same-ID response ordering: it either proves a request cannot be overtaken (bypass) or reserves reorder storage for it before it enters the network.
 
@@ -294,8 +295,9 @@ behavior. Defaults below are the shipped values.
 | NOC_RSP_FLIT_WIDTH | 126 | fixed | RSP ingress flit port |
 | NOC_DAT_FLIT_WIDTH | 633 | fixed | DAT flit ports, both directions |
 | NOC_ROUTER_VC_DEPTH | 8 | power of two, >= 2 | Router LOCAL input VC FIFO depth and NMU DAT sender-credit seed |
+| `NOC_NI_DAT_RX_VC_DEPTH` | `NOC_ROUTER_VC_DEPTH` (8) | power of two, >= 2 | NMU DataR receive FIFO depth per eligible VC and Router LOCAL sender-credit seed |
 | AXI_FIFO_DEPTH | 8 | power of two, >= 2 | Common AW/W/AR/B/R dual-clock FIFO depth |
-| `NOC_FIFO_DEPTH` | 8 | positive power of two | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
+| `NOC_FIFO_DEPTH` | 8 | positive power of two | REQ/RSP synchronous class FIFO depth; DAT receive capacity is per VC |
 | NMU_ROB_B_DEPTH | 128 | 1..256 | B slot pool |
 | NMU_ROB_R_DEPTH | 128 | 1..256 | R slot pool |
 | READ_ROB_ENABLED | 1 | {0,1} | RTL `generate if`: Normal R RoB or RoB-less per-ID ordering-domain counters |
@@ -409,11 +411,10 @@ Every output is a registered signal: it changes only at posedge clk_i and reflec
 | tx_dat_flit_o | 633 | DAT request flit. 0 when valid is low. |
 | rx_dat_crdvalid_o | DAT_NUM_VC | Per-VC one-cycle consumer credit pulse: bit v high means the NMU consumed one DAT response flit from VC v. At most one pulse per VC per cycle (pending consumptions queue up and drain one per cycle). |
 
-The table above is the current C++/DPI interface. The target RTL changes only the DAT receive
-backpressure surface: `rx_dat_crdvalid_o` is removed and `rx_dat_ready_o` is added. A `DataR` flit
-transfers from the Router when `rx_dat_valid_i && rx_dat_ready_o`; ready reflects DAT Read class
-FIFO capacity. DAT transmit keeps `tx_dat_crdvalid_i` because the destination Router owns the
-credited per-VC FIFO. The target also exposes separate `ACLK`/`ARESETn` and
+The table above is also the target DAT credit surface. A `DataR` flit consumes one NMU receive-VC
+slot selected by its header `vc_id`; popping that slot pulses `rx_dat_crdvalid_o[vc]`. The Router
+LOCAL sender counter is seeded from `NOC_NI_DAT_RX_VC_DEPTH`. DAT transmit keeps
+`tx_dat_crdvalid_i` because the destination Router owns the credited per-VC FIFO. The target also exposes separate `ACLK`/`ARESETn` and
 `noc_clk`/`noc_rst_n` domains around the five AXI channel async FIFOs.
 
 Both resets are generated above the NMU from one common system reset. Each reset asserts
@@ -466,7 +467,7 @@ The implementation does not handle the following, they are guaranteed not to hap
 | G4 | The SAM itself is well-formed: nonzero representable 4 KiB-aligned ranges, valid destination/port/class membership, and complete required space coverage. Overlap is legal and authored-first deterministic. | Target generator checks these constraints. The current C++ `SamTable::validate` still rejects overlap; this is a recorded follow-on implementation gap. |
 | G5 | valid, once asserted, holds with stable payload until ready (both directions of the AXI face). | AXI4 A3.2.1. The one-shot ready policy depends on it: ready asserts one cycle after valid is first seen. |
 | G6 | W beat counts match their AWs (exactly awlen+1 beats, wlast on the final beat, no spurious W). | AXI4 legality is the master's job. The owed-W counter floors at 0 and does not reject an unexpected W. |
-| G7 | On DAT request injection, the Router never returns more credits than LOCAL input VC slots it freed. On target DAT response ejection, the Router holds valid/flit until NMU ready; the current model instead guarantees a response sender credit. | Request credit conservation uses `NOC_ROUTER_VC_DEPTH` = 8. Target response safety follows ready/valid; current-model credit lies abort in `VcAllocator::tick`. |
+| G7 | On DAT request injection, the Router never returns more credits than LOCAL input VC slots it freed. On DAT response ejection, the NMU returns exactly one credit for each receive-VC slot popped. | Request conservation uses `NOC_ROUTER_VC_DEPTH`; response conservation uses `NOC_NI_DAT_RX_VC_DEPTH`. |
 | G8 | awburst / arburst = 2'b11 never occurs, and header.axi_ch values 4'd10 to 4'd15 never occur. | Reserved encodings. |
 | G9 | DAT_NUM_VC is 1 to 8 and the elaborated `noc_credit_t` width equals DAT_NUM_VC. | Out-of-range DAT_NUM_VC aborts at `VcAllocator` construction, width mismatch is `$fatal` at elaboration (`nmu_wrap.sv`). |
 | G10 | A collective is never issued by a peripheral. | Collectives are a tile-to-tile primitive (`noc-target-spec.md` Scope). The fork spreads along the issuer's row and the join collects in its column, and a peripheral hangs off a boundary port, outside both. A peripheral is never a member either: its address space declares no coordinate ranges, so it is not a collective target. Aborts (`collective_translate`, on the issuer's `port_id`). |
@@ -486,7 +487,7 @@ Each item names its verification and the failure condition. "ctest" items run in
 9. One beat, one flit, address forwarded: each accepted AW / W / AR beat emits exactly one flit, and the address payload carries the request address as it arrived. awregion / arregion and all user fields are carried in the flit and are 0 at the co-sim boundary. Verified: `TEST(AddrTrans, TileBaseStaysInTheForwardedAddress)`, `TEST(SamTable, PackedTranslateForwardsTheAddressUnchanged)`. Failure: an altered address in the payload, or wrong dst_id.
 10. header.flit_tail stamping: AW = 0, W = wlast, AR = 1. Verified: `TEST(NmuPacketize, WHeaderFlitTailMatchesWlast)`, malformed stamping aborts in the wormhole arbiter (`WormholeArbiter::tick` defensive guards). Failure: assert abort or a wormhole packet that never closes.
 11. AW before W: a W flit never enters the network before its AW flit. The RoB refuses W beats while no AW-accepted burst owes beats, and W flits inherit dst_id / ordering_req / ordering_tag from the AW-ordered metadata FIFO. Verified: `TEST(NmuRob, Disabled_WCreditBlocksWBeforeAw)`, `TEST(NmuPacketize, WMetaFifoInheritsAwDst)`, `TEST(NmuReqBridge, PushWBackpressuresOnEmptyMeta)`. Failure: W flit precedes its AW flit or carries wrong metadata.
-12. Wormhole atomicity: after an AW flit drains on REQ or DAT, only W flits of that burst drain on that same network until the header.flit_tail = 1 W flit; the other physical network remains independently grantable. Verified: `TEST(NocWormholeArbiter, ArCannotInterleaveDuringLock)`, `MultiBeatWBurstFlowsAndUnlocks` (`ref_model/c_model/tests/router/test_wormhole_arbiter.cpp`), plus `TEST(NmuDatFace, ReqBackpressureDoesNotStallDat)` and `DatBackpressureDoesNotStallReq` for cross-network independence. Same-cycle dual-egress coverage is `[TBD]`. Failure: any foreign flit between an AW and its final W on one network, or backpressure crossing from one already-buffered network path into the other.
+12. Wormhole atomicity: after an AW flit drains on REQ or DAT, only W flits of that burst drain on that same network until the header.flit_tail = 1 W flit; the other physical network remains independently grantable. REQ and DAT own independent queues, round-robin pointers, output state, locks and `transfer` events, and may each transfer one flit in the same cycle. Verified by sustained same-cycle dual-egress and independent-backpressure tests in addition to the wormhole tests. Failure: any foreign flit between an AW and its final W on one network, shared scheduling state, or backpressure crossing from one already-buffered network path into the other.
 13. IMPORTANT wormhole tie-break: each network owns an independent round-robin pointer. REQ scans inputs 0 = AW, 1 = W, 2 = AR; DAT scans inputs 0 = AW, 1 = W. The scan starts after that network's last drained input and the first non-empty input wins, at most 1 flit per network per cycle. Example on REQ: pointer at 0 with AW and AR pending drains AW, locks to W, and after wlast drains from input 1 the pointer is 2, so AR wins the next free REQ cycle even if a new AW is pending. Verified: `TEST(NocWormholeArbiter, AwTriggersLock)` and the co-sim throughput scenarios. Failure: wrong winner or shared arbitration state between REQ and DAT.
 14. SAM lookup: destination is the first authored entry whose `[base, base+size)` contains the
 address, output `{dst_id, dst_port_id, class, collective metadata, addr}`. Overlap is a positive
@@ -518,9 +519,9 @@ Items 23-25 verify the current `SHARED` C++ model. Target `READ_WRITE_SPLIT` cov
 24. IMPORTANT VC selection, per AW / AR flit, first matching rule wins: (a) W flits always take the VC of their AW (no selection). (b) DAT_NUM_VC = 1: VC0. (c) ordering_req = 0 AW whose ID has a recorded destination equal to the flit's dst_id: reuse the recorded VC, and if that VC lacks space or credit the flit stalls, it is never rerouted. (d) otherwise: scan all DAT_NUM_VC VCs round-robin from the selection pointer, first VC with pending space and credit wins, pointer moves past the winner. The (dst_id, VC) record is written on every accepted ordering_req = 0 AW of that ID and persists for the whole run until overwritten by the next such accept, it is never invalidated. AR flits and ordering_req = 1 flits always use rule (d) and never write the record. Example (DAT_NUM_VC = 4, pointer at 0): AW ID 5 dst 8'h12 ordering_req = 0 takes VC0 and records (8'h12, VC0), a second identical AW after the first burst's wlast reuses VC0 even though VC1 is idle, an AW ID 5 dst 8'h07 misses the record and round-robins to VC1. Verified: `TEST(NmuVcAllocatorRoundRobin, SameWriteIdDifferentDestRoundRobins)`, `RobbedFlitsRoundRobinRegardlessOfDest`, `NumVc1SameIdSameDestUnaffected`, `TEST(NmuVcAllocator, WFollowsAW_ReusedFixedVc)`. Header `fixed_vc` follows the same ordering_req = 0 / 1 split (2.4): 1 on every ordering_req = 0 AW of the streak and its W beats, 0 on ordering_req = 1 AW and on AR. Verified: `TEST_P(NmuVcAllocatorParam, FixedVcStampedOnOrderedAwStreak)`, `TEST_P(NmuVcAllocatorParam, FixedVcClearOnRobbedAwAndAr)`. Failure: wrong VC in any listed case, a mid-streak reroute, or wrong fixed_vc bit.
 25. IMPORTANT VC drain tie-break: at most 1 flit per cycle leaves for the NoC, chosen by a single global round-robin over all DAT_NUM_VC VCs starting at the pointer, first VC that is non-empty and has sender credit wins, pointer set to winner+1. Example (DAT_NUM_VC = 4, pointer 2, flits pending on VC1 and VC3): VC3 wins (scan 2, 3), pointer becomes 0, VC1 wins next cycle. Verified: `TEST(NmuVcAllocatorRoundRobin, DistinctReadIdsSpreadAcrossVcs)` and co-sim link utilization scenarios. Failure: two flits in one cycle, a starved non-empty credited VC, or wrong winner in the tie case.
 26. DAT request credit: the per-VC sender counter is seeded to NOC_ROUTER_VC_DEPTH = 8, decrements per emitted flit, increments per pulse on `tx_dat_crdvalid_i`, and a pulse arriving in cycle N is usable in cycle N. Invariant per VC: credit + un-credited in-flight flits = 8, and the NMU never emits on a VC with counter 0. REQ has no credit counter; the model-facing spill register accepts the C++ strobe only with input capacity, then holds it until the RTL-side `valid && ready` handshake. Verified: `TEST(NmuDatCreditConservation, BackpressureStallsAtSeedThenReopens)`, `TEST(RouterWrap, DatLocalCreditReturnReplenishesRouter)`, and `test_nmu_req_model_strobe_holds_until_rtl_handshake` (`sim/tools/test_model_egress_hold.py`). Failure: a 9th un-credited DAT flit, a DAT stall with credit available, or a REQ flit dropped/changed under backpressure.
-27. Response ingress (current model): the NMU accepts every flit presented on either response face (RSP `ready` is tied true, DAT has no ready wire), demuxes B / R into queues of depth NMU_DEPKT_Q_DEPTH = 16 each, and holds at most one pending flit when the target queue is full. That pending flit blocks all later response flits behind it regardless of channel (single-ingress head-of-line blocking, as built). Verified: `TEST(NmuDepacketize, PendingFlitHolBlockingBFullStallsR)`, `DemuxMixedFlitsByAxiCh`. Failure: a dropped response flit, or R progress past a stalled pending flit. Target DAT ingress instead handshakes with `rx_dat_ready_o` before accepting the flit.
+27. Response ingress: the current model accepts every flit presented on either response face and retains its documented single-ingress pending behavior. Target RSP remains ready/valid, while target DAT is accepted only against an advertised per-VC credit and lands in the FIFO selected by `vc_id`. Target DataR merge is work-conserving at beat granularity and does not lock through RLAST.
 28. Held-valid responses: bvalid / rvalid with all payload fields hold unchanged until the cycle their ready is sampled high, then either the next beat or valid = 0 appears (rule P4). Verified: co-sim (the AXI master BFM samples with randomized ready delays, scoreboard compare) and `TEST(NmuWrap, single_aw_w_two_phase_handshake)`. Failure: valid deasserted or payload changed before ready.
-29. DAT response credit return (current model only): one pulse on `rx_dat_crdvalid_o[v]` per `DataR` flit consumed from VC v, at most one pulse per VC per cycle, pending pulses accumulate and drain in later cycles, none is lost. RSP returns no credit — `rx_rsp_ready_o` is tied true (SPEC 27) and the face has no credit pin. Verified: `TEST(NmuDatCreditConservation, ConsumerPulseAccumulatesMultiConsumePerTick)`. Failure: pulse count not equal to consumed-flit count over any window. Target RTL supersedes this rule with `rx_dat_ready_o` as described in Section 3.2.
+29. DAT response credit return: one pulse on `rx_dat_crdvalid_o[v]` per `DataR` receive-VC FIFO pop, at most one pulse per VC per cycle. A full FIFO may pop and accept a replacement flit in the same cycle. RSP returns no credit. Failure: pulse count differs from freed-slot count over any window.
 30. Unloaded latencies: the rule P8 values (AW handshake to model-facing AW flit = 4 cycles, B flit to bvalid = 3 cycles, R flit to rvalid = 2 cycles Disabled / 3 cycles Enabled) are exact in an idle, ready/credit-available NMU. The REQ count includes the verification-only spill register after the existing DPI output register; production RTL does not include this adapter. `TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml)` confirms an AW flit emerges within a bounded window; no ctest pins the exact cycle count. Failure: any deviation from the stated count.
 
 ## 5. Block Diagram

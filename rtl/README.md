@@ -22,8 +22,9 @@ parameter source.
 | `NOC_ID_WIDTH` | 3 | fixed 3 | NoC-carried ID field and fixed REQ/RSP/DAT widths: 136/126/633 b. `SRC_ID` and `SRC_PORT_ID` remain NI identity parameters. |
 | `NOC_DAT_NUM_VC` | 2 | 1..8 | DAT VC count and credit-vector width; REQ and RSP remain single-VC |
 | `NOC_DAT_VC_MODE` | `NOC_DAT_VC_MODE_SHARED` (0) | `NOC_DAT_VC_MODE_SHARED` (0), `NOC_DAT_VC_MODE_READ_WRITE_SPLIT` (1) | One system-wide elaboration choice for NI allocation and DAT Router VA |
+| `NOC_NI_DAT_RX_VC_DEPTH` | `NOC_ROUTER_VC_DEPTH` (8) | power of two, >= 2 | NI DAT receive FIFO depth per eligible VC and Router LOCAL sender-credit seed |
 | `AXI_FIFO_DEPTH` | 8 | power of two, >= 2 | Common depth of the five AXI-channel CDC FIFOs in each NI |
-| `NOC_FIFO_DEPTH` | 8 | positive power of two | Common depth of the REQ, RSP, DAT Write, and DAT Read class FIFOs in each NI |
+| `NOC_FIFO_DEPTH` | 8 | positive power of two | REQ/RSP synchronous class FIFO depth; DAT receive capacity uses `NOC_NI_DAT_RX_VC_DEPTH` per VC |
 
 `READ_WRITE_SPLIT` additionally requires `NOC_DAT_NUM_VC` in {2, 4, 6, 8}; the lower half is
 eligible for `DataAw`/`DataW` and the upper half for `DataR`. Every production top fails
@@ -40,17 +41,16 @@ from the current single-clock model wrappers:
 - `nmu` and `nsu` expose `ACLK`, `ARESETn`, `noc_clk`, and `noc_rst_n` instead of `clk_i` and
   `rst_ni`.
 - No production top has `ctx_i` or any DPI port.
-- NMU and NSU DAT receive replace `rx_dat_crdvalid_o` with scalar `rx_dat_ready_o`; DAT transmit
-  retains `tx_dat_crdvalid_i`.
-- Router DAT credit ports remain per-VC on N/E/S/W. At LOCAL output only,
-  `tx_dat_crdvalid[LOCAL]` is replaced by scalar `tx_dat_ready_local`; LOCAL input still returns
-  `rx_dat_crdvalid[LOCAL]` to the injecting NI.
+- NMU and NSU DAT receive retain per-VC `rx_dat_crdvalid_o`; DAT transmit consumes
+  `tx_dat_crdvalid_i`. Each pulse represents exactly one freed downstream VC FIFO slot.
+- Router DAT credit ports are symmetric per VC on N/E/S/W and LOCAL. LOCAL transmit counters are
+  seeded from `NOC_NI_DAT_RX_VC_DEPTH`; LOCAL receive credits represent Router input VC slots.
 
 | Top | Functional faces | Public production parameters |
 |---|---|---|
-| `nmu` | AXI slave `axi_req_i`/`awuser_i`/`axi_rsp_o`; TX REQ ready/valid; RX RSP ready/valid; TX DAT credit; RX DAT ready/valid | canonical AXI widths, `NOC_DAT_NUM_VC`, `NOC_DAT_VC_MODE`, `AXI_FIFO_DEPTH`, `NOC_FIFO_DEPTH`, NMU RoB/order parameters, AW/AR SAM register type |
-| `nsu` | RX REQ ready/valid; TX RSP ready/valid; RX DAT ready/valid; TX DAT credit; AXI master `axi_req_o`/`axi_rsp_i` | canonical AXI widths, `NOC_DAT_NUM_VC`, `NOC_DAT_VC_MODE`, `AXI_FIFO_DEPTH`, `NOC_FIFO_DEPTH`, Response Queue parameters |
-| `router` | five ports in fixed order LOCAL, NORTH, EAST, SOUTH, WEST; per-port REQ/RSP ready/valid; N/E/S/W DAT credit; LOCAL DAT asymmetry above | `NOC_DAT_NUM_VC`, `NOC_DAT_VC_MODE`, Router VC/output depths, mesh dimensions and this Router's coordinates; port count is fixed at five |
+| `nmu` | AXI slave `axi_req_i`/`awuser_i`/`axi_rsp_o`; TX REQ ready/valid; RX RSP ready/valid; symmetric TX/RX DAT credit | canonical AXI widths, `NOC_DAT_NUM_VC`, `NOC_DAT_VC_MODE`, `NOC_NI_DAT_RX_VC_DEPTH`, `AXI_FIFO_DEPTH`, `NOC_FIFO_DEPTH`, NMU RoB/order parameters, AW/AR SAM register type |
+| `nsu` | RX REQ ready/valid; TX RSP ready/valid; symmetric RX/TX DAT credit; AXI master `axi_req_o`/`axi_rsp_i` | canonical AXI widths, `NOC_DAT_NUM_VC`, `NOC_DAT_VC_MODE`, `NOC_NI_DAT_RX_VC_DEPTH`, `AXI_FIFO_DEPTH`, `NOC_FIFO_DEPTH`, Response Queue parameters |
+| `router` | five ports in fixed order LOCAL, NORTH, EAST, SOUTH, WEST; per-port REQ/RSP ready/valid and symmetric per-VC DAT credit | `NOC_DAT_NUM_VC`, `NOC_DAT_VC_MODE`, Router/NI VC depths, output depths, mesh dimensions and this Router's coordinates; port count is fixed at five |
 
 Topology and SAM records are generated elaboration-time constants. They are not runtime pins.
 Production tops use ANSI port lists and flat, explicit clock/reset ports; internal stream records
@@ -314,8 +314,8 @@ reversed.
 |---|---|---|---|
 | REQ: `NarrowAw`, `NarrowW`, `NarrowAr`, `DataAr` | NMU -> Router mesh -> NSU | ready/valid | NI REQ class FIFO, then Router input FIFO |
 | RSP: `NarrowB`, `NarrowR`, `DataB` | NSU -> Router mesh -> NMU | ready/valid | NI RSP class FIFO, then Router input FIFO |
-| DAT Write: `DataAw`, `DataW` | NMU -> Router mesh -> NSU | credit on injection; ready/valid on ejection | NI DAT Write class FIFO; per-VC storage only in Router inputs |
-| DAT Read: `DataR` | NSU -> Router mesh -> NMU | credit on injection; ready/valid on ejection | NI DAT Read class FIFO; per-VC storage only in Router inputs |
+| DAT Write: `DataAw`, `DataW` | NMU -> Router mesh -> NSU | per-VC credit end to end | Router input and NSU receive per-VC FIFOs |
+| DAT Read: `DataR` | NSU -> Router mesh -> NMU | per-VC credit end to end | Router input and NMU receive per-VC FIFOs |
 
 The NI sender owns the per-VC credit counters and VC selection; each credited slot belongs to the
 destination Router input FIFO. Router-to-NI DAT ejection has one transfer authority,
@@ -348,16 +348,15 @@ reset behavior, proposed replacement, DV evidence, and license impact must first
 | `nmu/nmu_axi_cdc` | AXI slave records across ACLK <-> noc_clk | Exactly five AXI-channel CDC instances; no SAM, ordering, or packet state |
 | `nmu/sam/nmu_sam` | accepted AW/AR -> destination, port, class, collective metadata | Instantiates the shared `ni_sam` for AW and AR, performs burst-footprint and collective validation/translation; AW and AR timing cuts use `stream_register` |
 | `nmu/nmu_rob` | decoded AW/AR and returning B/R metadata -> ordered request/response streams | Per-ID order lists, B/R slot pools, `READ_ROB_ENABLED` behavior, ordering tags, collective admission |
-| `nmu/nmu_packetize` | ordered AXI request records -> complete REQ or DAT flit records | Field mapping and AW-to-W metadata inheritance; no VC allocation or NoC queue |
-| `nmu/nmu_channel_assign` | packetized requests plus Router credits -> TX REQ/TX DAT | REQ and DAT Write class FIFOs, worm lock through WLAST, mode-eligible DAT VC choice and sender credit counters |
-| `nmu/nmu_depacketize` | RX RSP/RX DAT ready/valid -> decoded AXI B/R records for `nmu_rob` | RSP and DAT Read class FIFOs, channel legality/demux, and payload decode; owns `rx_dat_ready_o` |
+| `nmu/request_packetize/nmu_request_packetize` | ordered AXI request records plus Router credits -> TX REQ/TX DAT | Field mapping, global AW-to-W metadata ownership, independent REQ/DAT class FIFOs and packet locks, mode-eligible DAT VC choice, and sender credit counters; the fused leaf avoids a duplicate packetized-flit queue boundary |
+| `nmu/nmu_depacketize` | RX RSP ready/valid and RX DAT credit -> decoded AXI B/R records for `nmu_rob` | RSP class FIFO, DAT Read per-VC FIFOs and beat-level merge, channel legality/decode, and credit return |
 | `nmu/nmu` | production faces above | Parameter guards and child wiring only; no duplicate queue or transaction state |
 
 ## NSU packages (Stage 3)
 
 | Package/module | Inputs -> outputs | Exclusive responsibility |
 |---|---|---|
-| `nsu/nsu_depacketize` | RX REQ/RX DAT ready/valid -> AXI AW/W/AR records | REQ and DAT Write class FIFOs, flit validation, class/address reconstruction, AW-to-W association, and multicast-AW-only shared `ni_sam` lookup; owns `rx_dat_ready_o` |
+| `nsu/nsu_depacketize` | RX REQ ready/valid and RX DAT credit -> AXI AW/W/AR records | REQ class FIFO, DAT Write per-VC FIFOs and AW-to-WLAST merge lock, reconstruction, association, SAM lookup, and credit return |
 | `nsu/nsu_axi_cdc` | AXI master records across noc_clk <-> ACLK | Exactly five AXI-channel CDC instances; no response metadata |
 | `nsu/nsu_response_queue` | issued AW/AR context plus AXI B/R -> restored response context | Downstream-ID allocation/remap, per-ID ordering, burst tracking, retirement only at B or RLAST packet acceptance |
 | `nsu/nsu_packetize` | restored B/R context -> complete RSP or DAT flit records | Response field mapping and collective metadata echo; no VC allocation or NoC queue |
