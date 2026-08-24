@@ -30,6 +30,8 @@ implementation work.
 Issue #48 implements the frozen generated SAM package and pure-combinational shared wrapper,
 updates the approved primitive dependency, and closes the focused generator/elaboration evidence
 without adding NMU/NSU datapath state.
+Issue #23 aligns the C++ RoB ordering key to `{dst_id, dst_port_id, AXI class}` and implements
+the Disabled R-mode per-ID ordering-domain counter, matching the production `nmu_ordering` RTL.
 Establish the NMU top and its request/response paths first, then complete each child in AXI-to-NoC
 or NoC-to-AXI dataflow order and pass the NMU hybrid zero-hop loopback. Repeat for NSU. Router work
 starts only after both NI loopback gates pass.
