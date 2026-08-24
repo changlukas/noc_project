@@ -40,10 +40,9 @@ def main() -> None:
         ["bash", str(ROOT / "rtl/nmu/request_path/test_request_path.sh"), "lint"],
         check=True,
     )
-    elaborate(
-        "tb_nmu_response_path",
-        ROOT / "rtl/nmu/response_path/nmu_response_path.sv",
-        ROOT / "rtl/nmu/response_path/tb_nmu_response_path.sv",
+    subprocess.run(
+        ["bash", str(ROOT / "rtl/nmu/response_path/test_response_path.sh"), "lint"],
+        check=True,
     )
 
 

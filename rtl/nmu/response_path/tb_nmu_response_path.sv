@@ -1,31 +1,53 @@
 `timescale 1ns / 1ps
 
 module tb_nmu_response_path;
+    logic noc_clk_i = 0, axi_clk_i = 0;
+    logic noc_rst_ni = 0, axi_rst_ni = 0;
+    ni_signals_pkg::axi_b_t s_b_i, m_b_o;
+    ni_signals_pkg::axi_r_t s_r_i, m_r_o;
+    logic s_b_valid_i, s_b_ready_o, s_r_valid_i, s_r_ready_o;
+    logic m_b_valid_o, m_b_ready_i, m_r_valid_o, m_r_ready_i;
 
-    ni_flit_pkg::rsp_flit_t s_rsp;
-    logic s_rsp_valid, s_rsp_ready;
-    ni_flit_pkg::dat_flit_t s_dat;
-    logic s_dat_valid, s_dat_ready;
-    ni_signals_pkg::axi_b_t m_b;
-    logic m_b_valid, m_b_ready;
-    ni_signals_pkg::axi_r_t m_r;
-    logic m_r_valid, m_r_ready;
+    nmu_response_path #(.AXI_FIFO_DEPTH (4)) dut (.*);
 
-    nmu_response_path dut (
-        .s_rsp_i       (s_rsp),
-        .s_rsp_valid_i (s_rsp_valid),
-        .s_rsp_ready_o (s_rsp_ready),
-        .s_dat_i       (s_dat),
-        .s_dat_valid_i (s_dat_valid),
-        .s_dat_ready_o (s_dat_ready),
-        .m_b_o         (m_b),
-        .m_b_valid_o   (m_b_valid),
-        .m_b_ready_i   (m_b_ready),
-        .m_r_o         (m_r),
-        .m_r_valid_o   (m_r_valid),
-        .m_r_ready_i   (m_r_ready)
-    );
+    always #5ns noc_clk_i = !noc_clk_i;
+    always #3ns axi_clk_i = !axi_clk_i;
 
-    initial $finish;
+    initial begin
+        s_b_i = '0; s_r_i = '0; s_b_valid_i = 0; s_r_valid_i = 0;
+        m_b_ready_i = 0; m_r_ready_i = 1;
+        repeat (3) @(posedge noc_clk_i); @(negedge noc_clk_i); noc_rst_ni = 1;
+        repeat (3) @(posedge axi_clk_i); @(negedge axi_clk_i); axi_rst_ni = 1;
+        s_b_i.bid = 'h2; s_b_i.bresp = 2'b01;
+        s_r_i.rid = 'h3; s_r_i.rdata = 'h1234; s_r_i.rlast = 1;
+        s_b_valid_i = 1; s_r_valid_i = 1;
+        fork
+            begin do @(posedge noc_clk_i); while (!s_b_ready_o); @(negedge noc_clk_i); s_b_valid_i = 0; end
+            begin do @(posedge noc_clk_i); while (!s_r_ready_o); @(negedge noc_clk_i); s_r_valid_i = 0; end
+        join
+        do @(posedge axi_clk_i); while (!m_r_valid_o);
+        if (m_r_o != s_r_i) $fatal(1, "R changed across response path");
+        if (m_b_valid_o !== 1'b1) $fatal(1, "B did not progress independently to its output FIFO");
+        if (m_b_o != s_b_i) $fatal(1, "B changed across response path");
+        m_b_ready_i = 1;
+        @(posedge axi_clk_i);
 
+        // A destination-domain reset must flush a response already buffered.
+        @(negedge axi_clk_i);
+        m_b_ready_i = 0;
+        s_b_i.bid = 'h1;
+        s_b_valid_i = 1;
+        do @(posedge noc_clk_i); while (!s_b_ready_o);
+        @(negedge noc_clk_i);
+        s_b_valid_i = 0;
+        do @(posedge axi_clk_i); while (!m_b_valid_o);
+        @(negedge axi_clk_i);
+        axi_rst_ni = 0;
+        repeat (2) @(posedge axi_clk_i);
+        if (m_b_valid_o !== 1'b0) $fatal(1, "AXI reset did not flush B FIFO output");
+        axi_rst_ni = 1;
+        $finish;
+    end
+
+    initial begin #10us; $fatal(1, "response path integration timeout"); end
 endmodule

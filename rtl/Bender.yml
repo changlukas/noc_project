@@ -15,6 +15,7 @@ sources:
   - common/axi_async_fifo.sv
   - sam/nmu_sam.sv
   - request_path/nmu_request_path.sv
+  - response_fifo/nmu_response_fifo.sv
   - ordering/nmu_reorder_storage.sv
   - ordering/nmu_ordering.sv
   - request_packetize/nmu_request_packetize.sv
