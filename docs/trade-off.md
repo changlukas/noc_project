@@ -489,6 +489,41 @@ QoS, and does not change this decision. The C++ model and generated wrappers now
 `NOC_DAT_NUM_VC = 2` default; model implementation of the non-default split mode remains separate
 from QoS.
 
+## NMU response reorder storage and retirement
+
+The NMU ordering subsystem keeps B and R ordering state independent.  B responses store only
+metadata in registers.  Enabled-mode R responses use a data-bearing slot pool; disabled mode keeps
+only the per-ID ordering-domain table and counters.  `NMU_ROB_B_DEPTH` and `NMU_ROB_R_DEPTH`
+therefore remain independent sizing parameters, while `NMU_MAX_TXNS_PER_ID` sizes the per-ID issue
+lists rather than either response pool.
+
+The retirement design does not copy FlooNoC's mutually exclusive `RoBRead` / `RoBWrite` FSM.
+Separate fill and retire paths allow an out-of-order response to fill one slot while another ID
+retires a completed slot.  A ready-ID bitmap and independent B/R round-robin pointers prevent a
+blocked ID from becoming a global head-of-line blocker.  Expected head responses retain a direct
+forward path, and buffered R bursts can retire one beat per cycle after their head becomes ready.
+
+The first implementation retains the FlooNoC-style high-water contiguous allocator.  It makes an
+AR reservation of `arlen + 1` slots atomic and keeps the ordering tag equal to the range base, but
+holes below the highest live range cannot be reused.  A first-fit contiguous bitmap allocator would
+recover those holes at the cost of a depth-wide run finder on request acceptance.  That alternative
+is deferred until workload counters show capacity stalls with unused lower slots or synthesis shows
+that the current leading-priority path is not the limiting path.
+
+| Choice | Throughput/latency benefit | Area/timing cost | Decision |
+|---|---|---|---|
+| Independent fill and retire | permits simultaneous response arrival and retirement | separate storage access paths | adopted |
+| Ready-ID round robin | cross-ID progress and bounded scheduler fairness | one ready bit per ID plus small arbiter | adopted |
+| Direct-forward expected head | avoids a storage round trip | response/output arbitration | adopted |
+| B metadata registers | cheap random access at fixed three-bit NoC ID space | flip-flops scale with B depth | adopted |
+| Enabled R data slot pool | restores same-ID order for interleaved fabric responses | dominant data-storage area | adopted when `READ_ROB_ENABLED=1` |
+| RoB-less R ordering-domain interlock | removes R data storage | different-domain same-ID requests may stall | adopted when `READ_ROB_ENABLED=0` |
+| First-fit hole reuse | improves effective capacity under fragmented retirement | wide contiguous-run search | deferred pending measurement |
+
+Signoff must sweep B/R depths and both read modes.  The minimum useful evidence is accepted
+requests per cycle, response fill and retirement overlap, capacity-stall cycles, maximum slot
+occupancy, area, and worst request-acceptance timing.
+
 ## Production shared primitive policy
 
 Production RTL obtains synchronous FIFO, asynchronous FIFO, and reusable register-slice storage
