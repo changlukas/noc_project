@@ -47,7 +47,7 @@ The R0/R1/R2 names below are DV levels. They are unrelated to restrictions R1 an
 | R2 | RTL and reference Router instances driven side by side | identical pin-level stimulus in the aligned lockstep scope, direct cycle comparison, normalized LOCAL DAT event comparison, and explicit divergence counters |
 
 R0 closes ownership and local invariants before integration. R1 is the authoritative Router block
-signoff because it covers target-only reset, asymmetric LOCAL DAT flow control, split VC mode, and
+signoff because it covers target-only reset, symmetric LOCAL DAT credit with NI-depth seeding, split VC mode, and
 all legal parameter builds. R2 is a conditional executable cross-check. R2 must pass before any
 full-RTL mesh run; a mesh result cannot waive an R0, R1, or R2 failure.
 
@@ -105,7 +105,7 @@ The R1 harness instantiates one production Router at an independently selected l
 Each of REQ, RSP, and DAT has five independent input agents and five independent output agents.
 REQ/RSP agents obey ready/valid and can stall each output independently. DAT link agents maintain
 one shadow capacity counter per VC on N/E/S/W, inject only with capacity, and return delayed credits
-only for recorded dequeues. The LOCAL DAT sink uses ready/valid and never fabricates a credit port.
+only for recorded dequeues. The LOCAL DAT sink returns credits only for recorded NI receive-FIFO pops.
 
 The predictor is project-owned and independent of DUT control state. It computes:
 
@@ -139,7 +139,7 @@ during drain; liveness is never claimed while the environment withholds service 
 | join | readiness and selected survivor checked on each reduction opportunity | exact expected set, qualification, equality, priority, worm-boundary hold | contributors consume once and yield one complete result |
 | DAT FIFO/VA | stage occupancy transitions and output FIFO admission checked per cycle at R0 | legal VC, eligible set, fixed VC, tail-only overflow, lock continuity | flit and packet order across pressure and contention |
 | DAT credits | send/return/counter deltas checked per cycle on N/E/S/W | range, no send at zero, return iff slot freed, conservation | all seeded credits restored after drain |
-| LOCAL DAT | held valid/payload checked per cycle | ready/valid only; no LOCAL external-credit ownership | accepted sequence and backpressure recovery |
+| LOCAL DAT | credit-qualified valid checked per cycle | symmetric per-VC credit; LOCAL sender seed uses NI receive depth | accepted sequence, conservation and recovery |
 | reset | outputs/state sampled on every reset/release edge | asynchronous assertion effect, synchronous deassertion use, no stale transfer | pre-reset work is discarded and post-reset traffic completes |
 | illegal parameters | elaboration must fail before time advances | each guard names the violated approved constraint | not applicable |
 | network independence | simultaneous transfer witnesses | no state, pressure, or credit crosses a network | each of seven nonempty active-network combinations drains independently |
@@ -212,7 +212,7 @@ functional failure and cannot count as positive coverage.
 | R0-CRD-04 | fork one input flit to multiple outputs | exactly one upstream credit returns after the input slot is freed |
 | R0-CRD-05 | long random legal traffic followed by drain | seed equals in-flight plus available capacity at every sample and after drain |
 | R0-CRD-06 | duplicate return and send-at-zero negative cases | the corresponding assertion fires in separate red runs |
-| R0-CRD-07 | LOCAL input/output pressure | LOCAL uses ready/valid where specified and no external LOCAL credit is created or consumed |
+| R0-CRD-07 | LOCAL input/output pressure | LOCAL DAT uses per-VC credits in both directions; no credit is invented, duplicated, or consumed on the wrong VC |
 | R0-CRD-08 | one dequeue at each input port/VC with all other traffic idle | the registered credit pulse appears at the exact approved boundary latency and lasts one cycle |
 
 ### 5.4 R0 reset
@@ -280,7 +280,7 @@ named assertion, and is forbidden from reporting PASS.
 | Assertion | Property | Named fault-injection red test and planted fault |
 |---|---|---|
 | RTR-A01 | REQ/RSP output valid remains asserted until handshake | RTR-FI-A01: drop valid for one stalled cycle |
-| RTR-A02 | REQ/RSP and LOCAL DAT payload remains stable while valid and not ready | RTR-FI-A02: flip one payload bit during a stall |
+| RTR-A02 | REQ/RSP payload remains stable while valid and not ready; DAT never transfers without credit | RTR-FI-A02: flip one held REQ/RSP payload bit or force a zero-credit DAT transfer |
 | RTR-A03 | an idle output bus is all zero and no unknown reaches an active interface | RTR-FI-A03: force a nonzero idle flit bit |
 | RTR-A04 | each head's selected route is legal and one-hot | RTR-FI-A04: force a second route bit on one head |
 | RTR-A05 | worm owner, route, and selected VC remain stable before accepted tail | RTR-FI-A05: change owner on a body flit |
@@ -418,7 +418,7 @@ and drives both instances:
   per-instance shadow input-credit accounts permit the same transfer.
 - DAT N/E/S/W returned-credit vectors are identical on every cycle. Lockstep sinks return a credit
   only after the matching pair of output events has been observed and after the same seeded delay.
-- the same LOCAL DAT ready schedule drives the RTL sink and the reference normalizer's sink side.
+- the same LOCAL DAT credit-return schedule drives the RTL sender and the reference normalizer.
 - reset assertion and startup release stimulus are common; target-only reset cases remain R0/R1.
 
 If a supposedly aligned ready, flit, or credit event differs before a common transfer, the
@@ -430,7 +430,8 @@ item index, ready vector, credit vector, output events, and active exclusion tag
 
 ### 11.2 LOCAL DAT normalizer
 
-The reference model exposes credit flow control at LOCAL DAT while the target exposes ready/valid.
+The reference model and target expose credit flow control at LOCAL DAT; the target additionally
+uses explicit NI receive-VC FIFOs and may differ in internal credit-return latency.
 A verification-only bounded normalizer receives reference LOCAL flits without changing any bit or
 order, presents its oldest entry as held ready/valid, and returns the corresponding model credit
 only when the common LOCAL ready schedule frees that entry. Its capacity equals the credits it

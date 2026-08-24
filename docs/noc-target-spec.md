@@ -243,10 +243,11 @@ credit counters; in-flight transactions are discarded rather than preserved or r
 | R | `noc_clk` to `ACLK` | `ACLK` to `noc_clk` |
 
 Each AXI interface therefore has five dual-clock FIFOs. Their entries are AXI channel records, not
-physical flits. `AXI_FIFO_DEPTH` is their common entry count. The NoC side has four logical
-`noc_clk` class FIFOs: REQ, RSP, DAT Write and DAT Read. `NOC_FIFO_DEPTH`, default 8 and any
-positive power of two, is their common entry count. They are not CDC FIFOs and are not
-replicated per VC.
+physical flits. `AXI_FIFO_DEPTH` is their common entry count. The NoC side retains REQ and RSP
+class FIFOs with `NOC_FIFO_DEPTH`, default 8 and any positive power of two. DAT receive instead
+uses one FIFO per eligible VC with `NOC_NI_DAT_RX_VC_DEPTH`, defaulting to the Router VC depth.
+Those per-VC FIFOs are not CDC FIFOs and replace, rather than feed, a second deep shared DAT
+receive class FIFO.
 
 | NoC class FIFO | NMU direction | NSU direction | AXI objects |
 |---|---|---|---|
@@ -261,10 +262,10 @@ applies `NOC_DAT_VC_MODE`, selects an eligible credited VC, stamps `vc_id`, and 
 counter when the flit is sent. `DataW` inherits its owning `DataAw` VC through WLAST. The NI has no
 per-VC queue; the selected Router LOCAL input VC FIFO owns the credited storage.
 
-On ejection, the Router presents REQ, RSP and DAT to the NI with ready/valid. The NoC-to-AXI
-assigner classifies the accepted flit and writes the corresponding AXI channel FIFO. It does not
-demultiplex into VC queues, and `vc_id` has no NI queue-selection role after acceptance. DAT ready
-is derived from the destination DAT Write or DAT Read class FIFO capacity.
+On ejection, the Router presents REQ and RSP to the NI with ready/valid. DAT remains credit-based:
+`vc_id` selects the NMU DataR or NSU DataAw/DataW receive FIFO, and popping that FIFO returns one
+credit for the freed VC slot. NMU DataR merge arbitrates at beat granularity because every R beat is
+a single-flit NoC packet. NSU DataAw/DataW merge locks the selected VC from AW through WLAST.
 
 At the NSU, REQ Narrow and DAT Data write flits enqueue independently before the one downstream
 AXI AW/W interface. The NoC-to-AXI AW assignment selects the only admissible class or round-robins
@@ -390,9 +391,8 @@ record layout.
 - Each link carries the three physical networks, each an independent signal group per direction.
 - `REQ` and `RSP` use ready/valid flow control. A flit transfers when valid and ready are both high.
 - DAT between routers uses per-VC credit flow control in both directions.
-- The Router LOCAL DAT port is asymmetric: NI-to-Router injection uses per-VC credit because the
-  Router input owns VC FIFOs; Router-to-NI ejection uses ready/valid because the NI owns only shared
-  class FIFOs and no per-VC storage.
+- The Router LOCAL DAT port uses symmetric per-VC credit flow. NI-to-Router credits represent
+  Router input VC FIFO slots; Router-to-NI credits represent NI DAT receive VC FIFO slots.
 - Driven signals reset low.
 
 The table below is the NI-facing contract. Directions are from the NI's view.
@@ -416,7 +416,7 @@ The table below is the NI-facing contract. Directions are from the NI's view.
 | `TXDATCRDVALID` | `DAT_NUM_VC` | Input | Router input-FIFO credit return, one pulse per freed VC slot |
 | `RXDATFLIT` | 633 | Input | `DAT` receive flit |
 | `RXDATVALID` | 1 | Input | `DAT` receive valid |
-| `RXDATREADY` | 1 | Output | NI class-FIFO capacity for Router-to-NI DAT ejection |
+| `RXDATCRDVALID` | `DAT_NUM_VC` | Output | NI receive-FIFO credit return, one pulse per freed VC slot |
 
 For NI-to-Router DAT injection, Credit Management initializes every sender counter from
 `NOC_ROUTER_VC_DEPTH`, the actual depth of the Router LOCAL input VC FIFO. A transfer consumes one
@@ -424,9 +424,11 @@ credit for the selected VC; a `TXDATCRDVALID` pulse restores one credit when the
 VC slot. The NI must not transmit with a zero counter, and a counter must not underflow or exceed
 the Router depth.
 
-For Router-to-NI DAT ejection, a transfer occurs only when `RXDATVALID` and `RXDATREADY` are both
-high. No NI receive-credit counter or `RXDATCRDVALID` exists. Inter-router DAT ports retain the
-symmetric per-VC credit signals specified by the Router.
+For Router-to-NI DAT ejection, the Router initializes every LOCAL sender counter from
+`NOC_NI_DAT_RX_VC_DEPTH`. A transfer consumes one credit for the selected VC; an
+`RXDATCRDVALID` pulse restores one credit when the NI pops that VC FIFO. A credit returned in the
+current cycle is immediately eligible for a same-cycle transfer. Counter underflow and overflow
+are errors in both directions.
 
 The five AXI channel async FIFOs use `AXI_FIFO_DEPTH`, default 8 and any power of two at least 2.
 The implementation derives Gray-pointer widths from this entry count. These FIFOs absorb clock-ratio
@@ -470,9 +472,10 @@ and runtime views for parity.
 | Flow control | `DAT_NUM_VC` | 1-8 (2) | Total DAT VC count and the Section 4.3 credit signal width; mode-specific legality applies below |
 | Flow control | `NOC_DAT_VC_MODE` | `SHARED`, `READ_WRITE_SPLIT` (`SHARED`) | System-wide eligible-VC policy for NI allocators and DAT router VA |
 | Flow control | `NOC_ROUTER_VC_DEPTH` | power of two, >= 2 (8) | Router DAT input FIFO depth and NI-to-Router sender-credit seed |
+| Flow control | `NOC_NI_DAT_RX_VC_DEPTH` | power of two, >= 2 (`NOC_ROUTER_VC_DEPTH`, default 8) | NI DAT receive FIFO depth per eligible VC and Router-to-NI LOCAL sender-credit seed |
 | Router staging | `NOC_ROUTER_OUTPUT_FIFO_DEPTH` | positive power of two (8) | DAT Router output FIFO depth; not credit-counted |
 | CDC | `AXI_FIFO_DEPTH` | power of two, >= 2 (8) | Common entry count of the AW/W/AR/B/R dual-clock FIFOs on each AXI interface |
-| NoC class queues | `NOC_FIFO_DEPTH` | positive power of two (8) | Common entry count of the REQ/RSP/DAT Write/DAT Read synchronous FIFOs |
+| NoC class queues | `NOC_FIFO_DEPTH` | positive power of two (8) | Entry count of the REQ/RSP synchronous class FIFOs; DAT receive capacity is per VC above |
 | Ordering | Outstanding transactions per ID | 1-32 (32) | Applies to both R modes. The NoC-side NI holds at most `32 x 2^NOC_ID_WIDTH` = 256 transactions; an external-width remap may backpressure a new ID when all eight NoC IDs are live. Enabled requests that require reordering additionally reserve an `ordering_tag`, see §6 |
 | Ordering | `READ_ROB_ENABLED` | enabled, disabled (enabled) | Selects the R path at elaboration with `generate if`. Disabled permits a same-ID streak only within one `{dst_id, dst_port_id, AXI class}` ordering domain. B always uses a per-ID metadata-only RoB. The §3 ordering requirement holds in either setting |
 | Address map | SAM address spaces | config, memory | Config space selects the narrow class, memory space the data class. Uniform across nodes and fixed for one elaborated RTL image |
@@ -487,8 +490,8 @@ the lower half serves `DataAw`/`DataW` and the upper half serves `DataR`. The NI
 DAT router output VA apply this same class mask. Illegal combinations fail elaboration.
 
 `DataW` inherits the VC selected for its owning `DataAw` in both modes. The modes change only the
-eligible Router VC set: the NI still has one DAT Write and one DAT Read class FIFO and no per-VC
-queue. One shared VC remains protocol-deadlock-free. Split mode reduces cross-class contention in
+eligible Router VC set. The receiver instantiates storage only for its mode-eligible VC subset and
+advertises zero credits for illegal directions. One shared VC remains protocol-deadlock-free. Split mode reduces cross-class contention in
 the Router but may strand Router VC capacity under asymmetric traffic. The first RTL does not map
 `AxQOS` to these VCs and uses no QoS-aware arbitration.
 

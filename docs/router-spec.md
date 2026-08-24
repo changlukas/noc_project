@@ -4,7 +4,7 @@ Block-level design spec for the per-node mesh router of the NoC C++ behavior mod
 The reader implements an RTL block whose cycle behavior is checked against this model
 by the existing testbench. As-built references:
 
-The target LOCAL DAT ready/valid overlay is not implemented by the current model. Cycle-exact RTL
+The target LOCAL DAT receive-FIFO timing is not implemented by the current model. Cycle-exact RTL
 comparison for that port starts only after the model and wrapper are aligned; N/E/S/W credit
 behavior remains the as-built reference.
 
@@ -81,14 +81,14 @@ drive a flit on VC v only when its credit counter for that (output, VC) is nonze
 counter is seeded to the receiver's per-VC input FIFO depth
 (`NOC_ROUTER_VC_DEPTH` = 8), decrements by 1 when a flit is committed toward that
 output, and increments by 1 for each single-cycle credit pulse the receiver returns
-after draining one flit from that input FIFO. Example with depth 8: a sender can fire 8
+after draining one flit from that input FIFO. Example with depth 8: a sender can transfer 8
 back-to-back flits on VC 0, must then idle at credit 0, and resumes one flit per
 returned pulse.
 
-The paragraph above is the inter-router rule and the current C++ model's uniform five-port rule.
-Target RTL makes one LOCAL-output exception: Router-to-NI DAT ejection uses ready/valid because the
-NI has no per-VC FIFO. NI-to-Router DAT injection remains credit-controlled; its credited storage
-is this Router's LOCAL input VC FIFO.
+The paragraph above is the uniform five-port rule for the target RTL. LOCAL is also symmetric:
+NI-to-Router credits represent this Router's LOCAL input VC FIFO, while Router-to-NI credits
+represent the destination NI's per-VC receive FIFO. The LOCAL sender counters are seeded from
+`NOC_NI_DAT_RX_VC_DEPTH`; N/E/S/W sender counters use `NOC_ROUTER_VC_DEPTH`.
 
 REQ and RSP use ready/valid instead. The C++ core computes an almost-full early ready from
 current occupancy, `ready = (occupancy + almost_full_offset <= depth)`. At the model-facing wire the
@@ -171,7 +171,7 @@ one verification-only wire cycle, for 3 cycles per hop at the wrapper pins.
 
 In target RTL, stage 2 checks per-VC credit for N/E/S/W outputs. For LOCAL output it checks output
 FIFO space but does not decrement a per-VC credit counter. Stage 3 holds the LOCAL flit stable until
-the NI asserts DAT ready. Input processing is unchanged: LOCAL DAT arrivals are filed by `vc_id`
+the NI returns a credit. Input processing is unchanged: LOCAL DAT arrivals are filed by `vc_id`
 and their dequeue returns the matching credit to the injecting NI.
 
 The model evaluates stages in reverse order (3, then 2, then 1) within one tick
@@ -284,19 +284,18 @@ to EAST and a packet to NORTH from two inputs proceed in parallel.
 
 ### 2.7 Credit flow control rules (DAT only)
 
-In the current C++ model, counter granularity is per (output port, VC):
-`credit_[out][vc]`. Target RTL retains these counters only for N/E/S/W DAT outputs; LOCAL DAT
-output gates on NI ready. REQ and RSP have no counters.
+Counter granularity is per (output port, VC): `credit_[out][vc]`. Target RTL retains these
+counters on all five DAT outputs. REQ and RSP have no counters.
 
-1. **Seed**: every counter starts at `NOC_ROUTER_VC_DEPTH` = 8, equal to the
-   downstream input VC FIFO depth (`router.hpp:91`).
+1. **Seed**: N/E/S/W counters start at `NOC_ROUTER_VC_DEPTH`; LOCAL counters start at
+   `NOC_NI_DAT_RX_VC_DEPTH`, each equal to the corresponding downstream receive-VC FIFO depth.
 2. **Decrement**: by 1 at the grant event (stage-2 admission into the output FIFO,
    `router.hpp:262-263`), not at link traversal. With seed 8, eight grants toward one
    (output, VC) with no returns leave the counter at 0 and stall further grants on
    that VC.
-3. **Increment**: by 1 per received credit pulse on that (output, VC). On target RTL this applies
-   to N/E/S/W neighbor-router outputs only. The current model also applies it to LOCAL when the NI
-   consumes an ejected flit.
+3. **Increment**: by 1 per received credit pulse on that (output, VC), including LOCAL when the NI
+   pops an ejected flit from its receive-VC FIFO. A current-cycle return is eligible for a
+   same-cycle `transfer`.
 4. **Pulse generation**: when this router's stage 2 pops one flit from input FIFO
    (p, v), it owes one pulse to the upstream of port p on VC v. The pulse is
    registered: dequeue in cycle N, pulse leaves the core at cycle N+1, and after the
@@ -474,6 +473,7 @@ Router model configuration, fixed at `cmodel_router_create` time:
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
 | `NOC_ROUTER_VC_DEPTH` | 8 | power of two, >= 2 | input VC FIFO depth; on DAT it is also the upstream credit seed, on REQ/RSP the depth the almost-full `ready` is computed against |
+| `NOC_NI_DAT_RX_VC_DEPTH` | `NOC_ROUTER_VC_DEPTH` (8) | power of two, >= 2 | LOCAL DAT output sender-credit seed backed by the attached NI receive-VC FIFOs |
 | `NOC_ROUTER_OUTPUT_FIFO_DEPTH` | 8 | positive power of two | DAT stage-3 output FIFO depth, not credit-counted. REQ/RSP run with output FIFO depth 0 (stage 2 drives the link directly) |
 | `almost_full_offset` (REQ/RSP) | 2 | 1..`NOC_ROUTER_VC_DEPTH` - 1 | entries of headroom the almost-full `ready` reserves. Co-sim-calibrated: worst measured overrun is 1 entry, 2 keeps one entry of margin |
 | `mesh_x_dim`, `mesh_y_dim` | 4, 4 | 2, 4, 8, 16 each | the router array, which the generated tb_top passes from the topology's `x_dim` / `y_dim`. A peripheral shares its host router's coordinate, so it adds none. X and Y are independent for unicast; powers of two keep every encoded coordinate valid. The first RTL target guarantees multicast/collective operation only when `mesh_x_dim == mesh_y_dim`. Minimum 2 per dimension; 1x1 and 1xN meshes are illegal. |
@@ -496,10 +496,9 @@ to 0, outputs must stay 0 (SPEC 17).
 
 ### 3.3 Signal tables
 
-The current C++/DPI wrapper uses one uniform per-port array indexed {LOCAL, N, E, S, W}: LOCAL
-carries this node's own NI traffic, N/E/S/W the inter-router links. Target RTL retains the common
-flit arrays but gives LOCAL DAT output the ready signal described below instead of a credit-return
-input. `noc_types_pkg::noc_credit_t` = `{credit[DAT_NUM_VC-1:0]}`, one bit per VC.
+The current C++/DPI wrapper and target RTL use one uniform per-port array indexed
+{LOCAL, N, E, S, W}: LOCAL carries this node's own NI traffic, N/E/S/W the inter-router links.
+`noc_types_pkg::noc_credit_t` = `{credit[DAT_NUM_VC-1:0]}`, one bit per VC.
 
 > REQ/RSP at the model-facing pins use standard held ready/valid. A transfer occurs only with
 > `valid && ready`; the verification wrapper converts that handshake to/from the C++ core's
@@ -532,14 +531,11 @@ Outputs (all registered, reset to 0):
 | `tx_dat_flit` | 633 x 5 | DAT flit toward port p. All zeros when `tx_dat_valid[p]` is low. |
 | `rx_dat_crdvalid` | DAT_NUM_VC x 5 | Per-VC credit pulse to the sender at port p: this node drained one flit from its p-direction DAT input FIFO, VC v. |
 
-The tables above are the current C++/DPI uniform-port interface. Target RTL keeps
-`tx_dat_crdvalid` and `rx_dat_crdvalid` on N/E/S/W. At LOCAL, `tx_dat_crdvalid[LOCAL]` is replaced
-by scalar `tx_dat_ready_local`: the NI accepts `tx_dat_valid/flit[LOCAL]` only when ready is high.
-`rx_dat_crdvalid[LOCAL]` remains, because it returns credit when the Router drains a DAT flit that
-the NI injected into the LOCAL input VC FIFO.
+The tables above are the uniform target interface. `tx_dat_crdvalid` and `rx_dat_crdvalid` remain
+per VC on every port, including LOCAL.
 
-Target NI-edge flow control (LOCAL port, who answers whom): REQ/RSP use ready/valid. DAT injection
-uses Router credits; DAT ejection uses NI ready.
+Target NI-edge flow control (LOCAL port, who answers whom): REQ/RSP use ready/valid. Both DAT
+directions use receiver-owned per-VC credits.
 
 | Flow | Flit pin | Back-pressure pin (opposite direction) |
 |---|---|---|
@@ -548,11 +544,11 @@ uses Router credits; DAT ejection uses NI ready.
 | NSU injects RSP | `rx_rsp_valid/flit[LOCAL]` | `rx_rsp_ready[LOCAL]` (router -> NSU) |
 | Router ejects RSP to NMU | `tx_rsp_valid/flit[LOCAL]` | `tx_rsp_ready[LOCAL]` (NMU -> router, tied true) |
 | NI injects DAT | `rx_dat_valid/flit[LOCAL]` | `rx_dat_crdvalid[LOCAL]` (router -> NI) |
-| Router ejects DAT to the NI | `tx_dat_valid/flit[LOCAL]` | `tx_dat_ready_local` (NI -> router) |
+| Router ejects DAT to the NI | `tx_dat_valid/flit[LOCAL]` | `tx_dat_crdvalid[LOCAL]` (NI -> router) |
 
 The current model's LOCAL DAT port is shared through `dat_merge_wrap`. Target integration keeps
-the same class merge/demux function but no longer synthesizes NI-side VC storage or a LOCAL-output
-credit return.
+the same class merge/demux function and terminates Router-to-NI credits in NMU DataR or NSU
+DataAw/DataW receive-VC FIFOs.
 
 Fabric wiring between nodes pairs opposite ports: node i's `rx_*_valid/flit[NORTH]` comes
 from its north peer's `tx_*_valid/flit[SOUTH]`, and node i's `tx_dat_crdvalid[NORTH]`
