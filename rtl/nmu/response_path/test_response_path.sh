@@ -30,7 +30,7 @@ task_sources=(
 )
 task_verilator=(verilator --timing --assert -Wall -Wno-fatal -Wno-DECLFILENAME
     -Wno-TIMESCALEMOD -Wno-UNUSEDPARAM -Wno-UNUSEDSIGNAL -Wno-SYNCASYNCNET
-    -Wno-PINCONNECTEMPTY)
+    -Wno-PINCONNECTEMPTY -I"$task_common_cells/include")
 
 "${task_verilator[@]}" --lint-only --top-module tb_nmu_response_path \
     "${task_sources[@]}" "$task_root/rtl/nmu/response_path/tb_nmu_response_path.sv"
