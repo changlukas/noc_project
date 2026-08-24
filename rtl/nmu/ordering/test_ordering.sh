@@ -28,10 +28,14 @@ if [[ "${1:-test}" == test ]]; then
     "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_nmu_ordering_robless.sv"
   "$task_tmp/obj_dir_robless/nmu_ordering_robless_tb"
 
+  task_tag_w=$(sed -nE 's/.*ORDERING_TAG_WIDTH[[:space:]]*=[[:space:]]*([0-9]+);/\1/p' \
+    "$task_root/specgen/generated/sv/ni_flit_pkg.sv")
+  test -n "$task_tag_w"
+  task_invalid_limit=$(( (1 << task_tag_w) + 1 ))
   task_guard_values=(
-    "-GNMU_ROB_B_DEPTH=257"
-    "-GNMU_ROB_R_DEPTH=257"
-    "-GNMU_MAX_TXNS_PER_ID=257"
+    "-GNMU_ROB_B_DEPTH=$task_invalid_limit"
+    "-GNMU_ROB_R_DEPTH=$task_invalid_limit"
+    "-GNMU_MAX_TXNS_PER_ID=$task_invalid_limit"
   )
   task_guard_messages=(
     "NMU_ROB_B_DEPTH must be in [1, TAG_SPACE]"

@@ -45,8 +45,10 @@ module nmu_ordering #(
     input  wire logic                                      m_r_ready_i
 );
 
-    localparam int unsigned NUM_IDS = 1 << ni_params_pkg::NOC_ID_WIDTH_DFLT;
+    localparam int unsigned ID_W = $bits(s_aw_i.axi.awid);
+    localparam int unsigned NUM_IDS = 1 << ID_W;
     localparam int unsigned TAG_SPACE = 1 << ni_flit_pkg::ORDERING_TAG_WIDTH;
+    localparam int unsigned BEAT_COUNT_W = ni_flit_pkg::AXI_LEN_WIDTH + 1;
     localparam int unsigned CL_MAX_TXNS = $clog2(NMU_MAX_TXNS_PER_ID + 1);
     localparam int unsigned CL_NUM_IDS = $clog2(NUM_IDS);
 
@@ -58,6 +60,10 @@ module nmu_ordering #(
     end
     if (NMU_MAX_TXNS_PER_ID < 1 || NMU_MAX_TXNS_PER_ID > TAG_SPACE) begin : gen_invalid_max_txns
         $fatal(0, "Error: NMU_MAX_TXNS_PER_ID must be in [1, TAG_SPACE] (instance %m)");
+    end
+    if ($bits(s_ar_i.axi.arid) != ID_W || $bits(s_b_i.axi.bid) != ID_W ||
+        $bits(s_r_i.axi.rid) != ID_W) begin : gen_mismatched_id_width
+        $fatal(0, "Error: AW, AR, B, and R ID widths must match (instance %m)");
     end
 
     typedef ni_child_types_pkg::nmu_rob_order_entry_t order_entry_t;
@@ -91,6 +97,8 @@ module nmu_ordering #(
     ni_signals_pkg::axi_b_t b_peek_data;
     ni_signals_pkg::axi_r_t r_peek_data;
     logic b_fill_ready, r_fill_ready;
+    wire logic [BEAT_COUNT_W-1:0] ar_beat_count =
+        BEAT_COUNT_W'(s_ar_i.axi.arlen) + BEAT_COUNT_W'(1);
     wire logic aw_accept = s_aw_valid_i && s_aw_ready_o;
     wire logic ar_accept = s_ar_valid_i && s_ar_ready_o;
     wire logic b_retire = m_b_valid_o && m_b_ready_i;
@@ -126,7 +134,7 @@ module nmu_ordering #(
         end
         ar_can_accept = read_usage_reg[s_ar_i.axi.arid] < NMU_MAX_TXNS_PER_ID &&
             (READ_ROB_ENABLED ?
-                (!ar_reorder || r_free_count >= ({1'b0, s_ar_i.axi.arlen} + 1)) :
+                (!ar_reorder || r_free_count >= ar_beat_count) :
                 !ar_reorder);
     end
 
@@ -219,12 +227,10 @@ module nmu_ordering #(
 
         if (ar_accept) begin
             int id;
-            int beats;
             id = s_ar_i.axi.arid;
-            beats = s_ar_i.axi.arlen + 1;
             read_order_reg[id][read_tail_reg[id]] <= '{
                 base: READ_ROB_ENABLED && ar_reorder ? r_next_base : '0,
-                beat_count: beats,
+                beat_count: ar_beat_count,
                 ordering_req: READ_ROB_ENABLED && ar_reorder,
                 collective: 1'b0
             };
@@ -318,7 +324,7 @@ module nmu_ordering #(
         ) i_r_storage (
             .clk_i, .rst_i,
             .reserve_valid_i (ar_accept && ar_reorder),
-            .reserve_count_i ({1'b0, s_ar_i.axi.arlen} + 1'b1),
+            .reserve_count_i (ar_beat_count),
             .next_base_o (r_next_base), .free_count_o (r_free_count),
             .fill_valid_i (s_r_valid_i && !r_direct && s_r_i.meta.ordering_req),
             .fill_ready_o (r_fill_ready), .fill_base_i (s_r_i.meta.ordering_tag),

@@ -1,6 +1,8 @@
 `timescale 1ns / 1ps
 
 module tb_nmu_ordering_robless;
+    localparam int unsigned ID_W = $bits(ni_signals_pkg::axi_ar_t'(0).arid);
+
     logic clk_i = 0, rst_i = 1;
     ni_child_types_pkg::nmu_sam_aw_result_t s_aw_i;
     ni_child_types_pkg::nmu_aw_request_t m_aw_o;
@@ -25,7 +27,7 @@ module tb_nmu_ordering_robless;
     always #5ns clk_i = !clk_i;
 
     task automatic send_ar(input int dst);
-        s_ar_i = '0; s_ar_i.axi.arid = 3'd1;
+        s_ar_i = '0; s_ar_i.axi.arid = ID_W'(1);
         s_ar_i.route.domain.dst_id = ni_flit_pkg::DST_ID_WIDTH'(dst);
         s_ar_valid_i = 1;
         do @(posedge clk_i); while (!s_ar_ready_o);
@@ -34,7 +36,7 @@ module tb_nmu_ordering_robless;
     endtask
 
     task automatic send_r;
-        s_r_i = '0; s_r_i.axi.rid = 3'd1; s_r_i.axi.rlast = 1;
+        s_r_i = '0; s_r_i.axi.rid = ID_W'(1); s_r_i.axi.rlast = 1;
         s_r_valid_i = 1;
         do @(posedge clk_i); while (!s_r_ready_o);
         s_r_valid_i = 0;

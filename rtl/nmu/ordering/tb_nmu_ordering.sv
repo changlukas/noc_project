@@ -1,6 +1,11 @@
 `timescale 1ns / 1ps
 
 module tb_nmu_ordering;
+    localparam int unsigned ID_W = $bits(ni_signals_pkg::axi_aw_t'(0).awid);
+    localparam int unsigned LEN_W = $bits(ni_signals_pkg::axi_ar_t'(0).arlen);
+    localparam int unsigned TAG_W = ni_flit_pkg::ORDERING_TAG_WIDTH;
+    localparam int unsigned COLLECTIVE_OP_W = ni_flit_pkg::COLLECTIVE_OP_WIDTH;
+
     logic clk_i = 0, rst_i = 1;
     ni_child_types_pkg::nmu_sam_aw_result_t s_aw_i;
     ni_child_types_pkg::nmu_aw_request_t m_aw_o;
@@ -26,7 +31,7 @@ module tb_nmu_ordering;
 
     task automatic send_aw(input int id, input int dst);
         s_aw_i = '0;
-        s_aw_i.axi.awid = 3'(id);
+        s_aw_i.axi.awid = ID_W'(id);
         s_aw_i.route.route.domain.dst_id = ni_flit_pkg::DST_ID_WIDTH'(dst);
         s_aw_valid_i = 1;
         do @(posedge clk_i); while (!s_aw_ready_o);
@@ -35,10 +40,10 @@ module tb_nmu_ordering;
 
     task automatic send_b(input int id, input bit ordered, input int tag, input logic [1:0] resp);
         s_b_i = '0;
-        s_b_i.axi.bid = 3'(id);
+        s_b_i.axi.bid = ID_W'(id);
         s_b_i.axi.bresp = resp;
         s_b_i.meta.ordering_req = ordered;
-        s_b_i.meta.ordering_tag = 8'(tag);
+        s_b_i.meta.ordering_tag = TAG_W'(tag);
         s_b_valid_i = 1;
         do @(posedge clk_i); while (!s_b_ready_o);
         s_b_valid_i = 0;
@@ -46,8 +51,8 @@ module tb_nmu_ordering;
 
     task automatic send_ar(input int id, input int dst, input int len);
         s_ar_i = '0;
-        s_ar_i.axi.arid = 3'(id);
-        s_ar_i.axi.arlen = 8'(len);
+        s_ar_i.axi.arid = ID_W'(id);
+        s_ar_i.axi.arlen = LEN_W'(len);
         s_ar_i.route.domain.dst_id = ni_flit_pkg::DST_ID_WIDTH'(dst);
         s_ar_valid_i = 1;
         do @(posedge clk_i); while (!s_ar_ready_o);
@@ -59,11 +64,11 @@ module tb_nmu_ordering;
         input logic [31:0] data, input bit last
     );
         s_r_i = '0;
-        s_r_i.axi.rid = 3'(id);
+        s_r_i.axi.rid = ID_W'(id);
         s_r_i.axi.rdata = data;
         s_r_i.axi.rlast = last;
         s_r_i.meta.ordering_req = ordered;
-        s_r_i.meta.ordering_tag = 8'(tag);
+        s_r_i.meta.ordering_tag = TAG_W'(tag);
         s_r_valid_i = 1;
         do @(posedge clk_i); while (!s_r_ready_o);
         s_r_valid_i = 0;
@@ -88,13 +93,13 @@ module tb_nmu_ordering;
 
         // Different ID bypass response progresses although ID 1 has a blocked head.
         send_aw(2, 3);
-        s_b_i = '0; s_b_i.axi.bid = 3'd2; s_b_valid_i = 1; m_b_ready_i = 1;
+        s_b_i = '0; s_b_i.axi.bid = ID_W'(2); s_b_valid_i = 1; m_b_ready_i = 1;
         do @(posedge clk_i); while (!s_b_ready_o);
-        if (!m_b_valid_o || m_b_o.bid != 3'd2) $fatal(1, "different ID did not progress");
+        if (!m_b_valid_o || m_b_o.bid != ID_W'(2)) $fatal(1, "different ID did not progress");
         s_b_valid_i = 0;
 
         // Retire ID 1 bypassed head, then buffered successor.
-        s_b_i = '0; s_b_i.axi.bid = 3'd1; s_b_valid_i = 1;
+        s_b_i = '0; s_b_i.axi.bid = ID_W'(1); s_b_valid_i = 1;
         do @(posedge clk_i); while (!s_b_ready_o);
         s_b_valid_i = 0;
         do @(posedge clk_i); while (!m_b_valid_o);
@@ -120,15 +125,15 @@ module tb_nmu_ordering;
         // A collective request is an ordering barrier for its ID.  A later AW
         // remains blocked until the collective response retires.
         s_aw_i = '0;
-        s_aw_i.axi.awid = 3'd4;
+        s_aw_i.axi.awid = ID_W'(4);
         s_aw_i.route.route.domain.dst_id = ni_flit_pkg::DST_ID_WIDTH'(1);
-        s_aw_i.route.collective_op = 2'd1;
+        s_aw_i.route.collective_op = COLLECTIVE_OP_W'(ni_flit_pkg::COLLECTIVE_OP_MULTICAST);
         s_aw_valid_i = 1;
         do @(posedge clk_i); while (!s_aw_ready_o);
         s_aw_valid_i = 0;
 
         s_aw_i = '0;
-        s_aw_i.axi.awid = 3'd4;
+        s_aw_i.axi.awid = ID_W'(4);
         s_aw_i.route.route.domain.dst_id = ni_flit_pkg::DST_ID_WIDTH'(1);
         s_aw_valid_i = 1;
         repeat (3) begin
