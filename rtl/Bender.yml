@@ -17,6 +17,7 @@ sources:
   - request_path/nmu_request_path.sv
   - ordering/nmu_reorder_storage.sv
   - ordering/nmu_ordering.sv
+  - request_packetize/nmu_request_packetize.sv
   - response_path/nmu_response_path.sv
   - top/nmu.sv
   - request_fifo/nmu_request_fifo.sv

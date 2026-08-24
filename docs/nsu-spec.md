@@ -1,6 +1,6 @@
 # Design: Network Slave Unit (NSU)
 
-Model top module: `nsu_wrap` (`ref_model/top/nsu_wrap.sv`), driving a cycle-accurate C++ model core (`ref_model/c_model/include/nsu/`) through the DPI handle ABI. This document specifies that as-built model and target RTL overlays. Existing co-sim checks the as-built model; target CDC, Router-only VC ownership and asymmetric LOCAL DAT flow control require model alignment before cycle-exact RTL comparison.
+Model top module: `nsu_wrap` (`ref_model/top/nsu_wrap.sv`), driving a cycle-accurate C++ model core (`ref_model/c_model/include/nsu/`) through the DPI handle ABI. This document specifies that as-built model and target RTL overlays. Existing co-sim checks the as-built model; target CDC and NI receive-VC storage require model alignment before cycle-exact RTL comparison.
 
 The production top is `nsu`. Its wrapper-facing ports, clock/reset ownership, and reviewed child
 boundaries are frozen in `rtl/README.md`; this document remains authoritative for behavior.
@@ -13,7 +13,7 @@ The NSU is the slave-side network interface of the NoC. It terminates the reques
 
 **INPUT** request flits (AW, W, AR) from the router LOCAL output port on two faces, REQ (narrow class plus every AR) and DAT (data-class AW/W), one flit per cycle at most per face.
 **COMPUTE** depacketize each flit into exactly one AXI beat, remap the AXI id, remember per-request metadata, drive the beats out of an AXI4 master face in arrival order. When the tile slave answers, packetize each B/R beat into exactly one response flit, restoring the original id and the requester's node id from the remembered metadata, then arbitrate the flit onto a virtual channel.
-**OUTPUT** response flits to the router LOCAL input port on two faces, RSP (every B, plus narrow-class R) and DAT (data-class R). The current model exposes per-VC credit pulses in both DAT directions. Target RTL keeps per-VC credit only for DAT response injection into the Router and uses ready/valid for DAT request ejection from the Router.
+**OUTPUT** response flits to the router LOCAL input port on two faces, RSP (every B, plus narrow-class R) and DAT (data-class R). Both the model and target expose per-VC credit pulses in both DAT directions; target RTL backs receive credits with explicit per-VC FIFOs.
 
 The NSU contains no reorder buffer and does not perform destination routing. Requests are issued
 toward the slave in NoC arrival order per channel, regardless of AXI id. Reordering same-id
@@ -168,7 +168,7 @@ Worked example, `num_vc` = 4:
 
 In the current C++ model, admission for `num_vc` > 1 also requires space in a per-VC pending queue;
 for `num_vc` = 1 the pending-space and credit checks occur at different stages. This asymmetry is
-as-built. Target RTL has no per-VC pending queue: the response assigner inspects the DAT Read class
+as-built. Target RTL has no transmit-side per-VC pending queue: the response assigner inspects the DAT Read class
 FIFO head, selects its required eligible VC only when Router credit is available, stamps `vc_id`,
 and sends at most one flit per cycle.
 
@@ -210,7 +210,7 @@ Request path stages (tick T = the posedge at which the request flit is sampled o
 The ingress is a single serialized stream from the router LOCAL port, VC-blind, with one head-of-line pending slot: if a flit's stage register is still occupied, that flit waits in the single `pending_` slot and everything behind it stalls. At most 1 flit per channel is parked per cycle (3 total when a backlog exists).
 
 **Target integration overlay.** REQ and DAT Write enter independent `noc_clk` class FIFOs under
-ready/valid. The NoC-to-AXI assigner may accept one Narrow and one Data flit in the same cycle when
+ready/valid on REQ and per-VC credit on DAT. The NoC-to-AXI assigner may pop one Narrow and one Data flit in the same cycle when
 their destination AXI channel FIFOs can accept them. It does not inspect VC queues or return DAT
 receive credits. The current C++ model's serialized ingress and receive-credit interface remain
 as-built behavior until target alignment.
@@ -265,10 +265,10 @@ channels. `noc_types_pkg::noc_credit_t` = {`credit` [`DAT_NUM_VC`-1:0]}; elabora
 | `tx_dat_valid_o` / `tx_dat_flit_o` | 1 / 633 | To router LOCAL input. `DataR` flits; `valid` is a one-cycle credit-qualified strobe and does not use the RSP ready/valid adaptation. |
 | `tx_dat_crdvalid_i` | DAT_NUM_VC | From router. Credit pulse vector: bit v pulses when the router drained one NSU DAT response flit from VC v. Replenishes the NSU per-VC sender counter (seed `NOC_ROUTER_VC_DEPTH` = 8). |
 
-The table above is the current C++/DPI interface. Target RTL removes `rx_dat_crdvalid_o` and adds
-`rx_dat_ready_o`. A `DataAw` or `DataW` flit transfers from the Router only when
-`rx_dat_valid_i && rx_dat_ready_o`; ready reflects DAT Write class FIFO capacity. DAT response
-transmit keeps `tx_dat_crdvalid_i` because the destination Router owns the credited per-VC FIFO.
+The table above is also the target DAT credit surface. A `DataAw` or `DataW` flit consumes one NSU
+receive-VC slot selected by its header `vc_id`; popping that slot pulses
+`rx_dat_crdvalid_o[vc]`. The Router LOCAL sender counter is seeded from
+`NOC_NI_DAT_RX_VC_DEPTH`. DAT response transmit keeps `tx_dat_crdvalid_i` because the destination Router owns the credited per-VC FIFO.
 Target RTL also exposes separate `ACLK`/`ARESETn` and `noc_clk`/`noc_rst_n` domains around the five
 AXI channel async FIFOs.
 
@@ -357,8 +357,9 @@ second decoder. The complete generated type and array contract is in `rtl/README
 | `NOC_DAT_NUM_VC` | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector widths; wrapper-local `DAT_NUM_VC` is an alias |
 | `NOC_DAT_VC_MODE` | SHARED (0) | {SHARED (0), READ_WRITE_SPLIT (1)} | Target `DataR` eligible mask; system-wide with DAT router VA; current model implements SHARED only |
 | `NOC_ROUTER_VC_DEPTH` | 8 | power of two, >= 2 | Router LOCAL input VC FIFO depth and NSU DAT response sender-credit seed |
+| `NOC_NI_DAT_RX_VC_DEPTH` | `NOC_ROUTER_VC_DEPTH` (8) | power of two, >= 2 | NSU DataAw/DataW receive FIFO depth per eligible VC and Router LOCAL sender-credit seed |
 | `AXI_FIFO_DEPTH` | 8 | power of two, >= 2 | common AW/W/AR/B/R dual-clock FIFO depth |
-| `NOC_FIFO_DEPTH` | 8 | positive power of two | Common REQ/RSP/DAT Write/DAT Read synchronous `noc_clk` FIFO depth |
+| `NOC_FIFO_DEPTH` | 8 | positive power of two | REQ/RSP synchronous class FIFO depth; DAT receive capacity is per VC |
 | `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 136 / 126 / 633 | fixed | per-network flit containers and DPI marshalling |
 | `AXI_ID_WIDTH` / `NOC_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 3 / 48 / 512 | external ID 1..8 / fixed 3 / 1..64 / {32,64,128,256,512,1024} | external endpoint ID / NoC-carried ID, beat structs and DPI |
 | create-time `src_id` | 0 | 8 bit | stamped into every response flit `src_id` |
@@ -373,11 +374,11 @@ The request ingress stage is a 1-entry register per channel plus the single pend
 4. **Output valid behavior.** `awvalid`, `wvalid`, `arvalid`, once high, stay high with stable fields until the corresponding ready is sampled high (IHI 0022, A3.2.1). `tx_rsp_valid_o` follows the same held-ready/valid rule and transfers only with `tx_rsp_ready_i`; `tx_dat_valid_o` remains a one-cycle credit-qualified strobe. At most one flit per cycle transfers on either face, and distinct transfers may occur in consecutive cycles.
 5. **Output idle value.** Every output field whose valid is low is 0. Example: with `awvalid` = 0, `awaddr` = 48'h0. `tx_rsp_flit_o` = 126'h0 while `tx_rsp_valid_o` = 0, and `tx_dat_flit_o` = 633'h0 while `tx_dat_valid_o` = 0. `bready`/`rready` are policy levels (rule 10) and carry meaning while low.
 6. **Reset.** `rst_ni` is synchronous active-low, asserted only once at the beginning of simulation. All `nsu_wrap` output registers clear to 0 during reset. Model state is initialized by `cmodel_nsu_create` at time 0. There is no mid-run reset.
-7. **Gap and rate (current model).** No minimum gap anywhere: request flits may arrive every cycle, response flits may leave every cycle, subject only to credit. Each modeled credit pulse is exactly 1 cycle wide, at most 1 per VC per cycle on each credit port. Target request ingress is instead subject to ready/valid.
+7. **Gap and rate.** No minimum gap anywhere: request flits may arrive every cycle, response flits may leave every cycle, subject only to credit. Each credit pulse is exactly 1 cycle wide, at most 1 per VC per cycle on each credit port.
 8. **Latency.** Request: from the posedge at which an AW (or AR) flit is sampled on its ingress face to the posedge at which the slave first samples `awvalid` (`arvalid`) high is exactly 2 cycles when uncontended (empty queues, MetaBuffer pool not full, slave ready). Response: from the posedge at which the B/R wire handshake is sampled to the posedge at which the router first samples the model-facing RSP egress `valid` high is exactly 5 cycles when uncontended (empty queues, egress ready). The fifth cycle is the verification-only spill register. DAT response latency remains 4 cycles when sender credit is available. Under contention the latency grows with backpressure and has no bound in this spec.
 9. **W presentation budget.** `wvalid` never rises for a beat whose owning AW handshake has not completed. The budget counter `w_pop_budget_` (model type uint32) increments by `awlen` + 1 at each AW handshake and decrements by 1 per W beat presented. Example: AW with `awlen` = 8'd1 handshakes at cycle 2, budget 0 to 2, W beat 0 may be presented from cycle 3, never earlier.
 10. **Context-gated ready pre-assert.** `bready` = (`outstanding_w_` > 0) and B FIFO has space. `rready` = (`expected_r_beats_` > 0) and R FIFO has space. Both are asserted without waiting for valid. `outstanding_w_` (uint32) increments when a `wlast` beat completes its W handshake and decrements at each B wire handshake. `expected_r_beats_` (uint32) increments by `arlen` + 1 at each AR handshake and decrements at each R beat wire handshake. Example: after one AR with `arlen` = 8'd3 handshakes, `expected_r_beats_` = 4 and `rready` stays high until 4 R beats have been accepted (given FIFO space). A B/R beat is accepted into the model only on a true wire handshake, valid together with the ready level the NSU drove in that cycle.
-11. **Request credit (current model only).** On the DAT face, one `rx_dat_crdvalid_o` pulse is returned for each flit the depacketizer ingress consumes, on the consumed flit's header `vc_id`, at most 1 per VC per cycle. Uncontended, the pulse for a flit sampled at posedge T is on the wire during the next cycle. A stalled ingress returns no pulses, which is the current-model request-side backpressure mechanism. Target RTL supersedes this rule with `rx_dat_ready_o` as described in Section 3.1.
+11. **Request credit.** On the DAT face, one `rx_dat_crdvalid_o` pulse is returned for each receive-VC FIFO slot popped, on the consumed flit's header `vc_id`, at most 1 per VC per cycle. The target FIFO supports full-state simultaneous pop and push. The merge locks a selected DataAw VC through DataW with WLAST and returns credit per popped flit.
 12. **Response flow control.** On the DAT face the NSU holds one sender credit counter per VC, seeded to `NOC_ROUTER_VC_DEPTH` = 8 at time 0. Sending a flit on VC v decrements counter v, a `tx_dat_crdvalid_i` pulse on bit v increments it. A flit is sent only while its counter is nonzero. Invariant: counter + flits in flight toward the router on that VC = 8 at all times. RSP has no counter: its model-facing wrapper accepts a C++ strobe only with spill capacity, then holds it until `tx_rsp_valid_o && tx_rsp_ready_i`.
 13. **Address handling.** The NSU never subtracts a SAM region base. A unicast AW/AR address passes
 unchanged and does not enable SAM lookup. Only a multicast AW enables `ni_sam`; on a valid,

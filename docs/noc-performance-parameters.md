@@ -200,9 +200,9 @@ The bandwidth and area parameters, `AXI_DATA_WIDTH` and the per-network `NUM_VC`
 knobs on both axes and interact. Router input buffering is their product, so raising the data class
 width and the channel count together raises buffer area faster than either alone.
 `NOC_DAT_VC_MODE` does not change the number or depth of NI buffers: it changes only the
-eligible-VC mask used by NI injection and every DAT router output VA. The NI has no per-VC receive
-scheduler. Router-to-NI DAT traffic enters the Read or Write class FIFO under ready/valid, while
-Router VC arbitration remains responsible for choosing the ejected flit.
+eligible-VC mask used by NI injection and every DAT router output VA. The NI owns per-VC receive
+scheduler. Router-to-NI DAT traffic enters the NI receive FIFO selected by `vc_id` under per-VC
+credit flow control, while Router VC arbitration remains responsible for choosing the ejected flit.
 After NMU classification, Narrow and Data writes use independent REQ and DAT assignment and class
 FIFO paths. They may each emit one flit per `noc_clk`; their combined throughput is limited by the
 shared AXI source only while filling those buffers, not while draining an existing backlog.

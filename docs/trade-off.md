@@ -307,18 +307,24 @@ is their common entry count. Separate per-class depth parameters are not introdu
 | NI to Router REQ/RSP | NI class FIFO, then Router input FIFO | ready/valid |
 | NI to Router DAT | NI class FIFO, then Router LOCAL per-VC input FIFO | NI sender counter per VC, seeded by `NOC_ROUTER_VC_DEPTH` |
 | Router to NI REQ/RSP | Router output, then NI class FIFO | ready/valid |
-| Router to NI DAT | Router output, then NI DAT Write or DAT Read class FIFO | ready/valid |
+| Router to NI DAT | Router output, then NI per-VC DAT receive FIFO | per-VC credit |
 | Router to Router DAT | downstream Router per-VC input FIFO | per-VC credit in both directions |
 
 The AXI-to-NoC assigner owns DAT VC selection. It reads the sender-side per-VC credit counters,
 applies `NOC_DAT_VC_MODE`, stamps the selected `vc_id`, and decrements that counter on send.
 `DataW` inherits its owning `DataAw` VC through WLAST. The credit state is not a FIFO: the credited
-slots reside in the Router LOCAL input VC FIFOs. The NI has no per-VC pending or ingress queue.
+transmit slots reside in the Router LOCAL input VC FIFOs. Receive slots reside in NI per-VC ingress
+FIFOs of `NOC_NI_DAT_RX_VC_DEPTH`; the receive side does not add a second deep shared DAT FIFO.
 
-Router-to-NI DAT ejection uses ready/valid because the NI receiver has shared class storage, not a
-separately provisioned FIFO per VC. Combining per-VC credit and ready on this direction is rejected:
-two authorities would define one transfer. Keeping per-VC receive credit would instead require
-partitioned NI VC storage, which is outside the adopted ownership boundary.
+The NMU request packetizer and channel assigner are one physical RTL leaf while retaining separate
+REQ and DAT queue, arbitration, lock, and output state. A module boundary between them would either
+add a second complete-flit queue or expose the same internal queue heads across hierarchy; neither
+improves throughput, and the former adds 633-bit DAT storage. The fused leaf keeps AW/W association
+beside the class queues and still permits one REQ and one DAT transfer in the same cycle.
+
+Router-to-NI DAT ejection uses per-VC credit because the NI receiver owns matching per-VC storage.
+The NMU DataR merge drains at beat granularity without an RLAST lock; the NSU DataAw/DataW merge
+retains its AW-to-WLAST packet lock. Neither path adds a second deep shared DAT FIFO after the merge.
 
 | CDC partition | Benefit | Decision |
 |---|---|---|

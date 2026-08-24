@@ -66,8 +66,8 @@ N1's multi-destination ordering tests or model a Router.
 
 ## 3. Testbench and checking model
 
-The N1 harness has five independent AXI channel agents, REQ/RSP ready/valid agents, and DAT agents
-with asymmetric target flow control. The AXI driver may issue AW, W, and AR independently while
+The N1 harness has five independent AXI channel agents, REQ/RSP ready/valid agents, and symmetric
+per-VC DAT credit agents. The AXI driver may issue AW, W, and AR independently while
 obeying AXI rules. The NoC response agent accepts requests into a transaction predictor, then emits
 legal B, NarrowR, or DataR flits in a programmable physical order. It never derives its expected
 packet by calling the DUT packetizer.
@@ -268,6 +268,7 @@ are observed before time advances; an unrelated compile or simulator failure is 
 | `AXI_FIFO_DEPTH` | 2, default, 32 | 0 and a positive non-power-of-two value |
 | `NOC_FIFO_DEPTH` | 1, default, 32 | 0 and a positive non-power-of-two value |
 | `NOC_ROUTER_VC_DEPTH` | 2, default, 32 | 0, 1, and a positive non-power-of-two value |
+| `NOC_NI_DAT_RX_VC_DEPTH` | 2, default, 32 | 0, 1, and a positive non-power-of-two value |
 | `NMU_ROB_B_DEPTH` | 1, default, 256 | 0 and 257 |
 | `NMU_ROB_R_DEPTH` | 1, default, 256 | 0 and 257 |
 | `NMU_MAX_TXNS_PER_ID` | 1, default, 256 | 0 and 257 |
@@ -350,8 +351,8 @@ They do not emulate RTL CDC implementation details or force the RTL to use model
 | B RoB | slot pool, tags, bypass/fallback, sticky behavior, and per-ID ordering are modeled | retain behavior; add the exact N1 overtaking trace counters/metadata needed for accepted-event comparison |
 | enabled R RoB | per-beat slots, high-water allocation, bypass/fallback, and ordering are modeled, with the same missing port term | add destination port to the key and preserve per-beat fill/release tests before enabling comparison |
 | disabled R path | model permits only one outstanding read per ID | implement same-key streaks up to `NMU_MAX_TXNS_PER_ID`, latch the complete key while non-idle, block only a key change, and decrement only on RLAST |
-| VC ownership and modes | model allocators own per-VC pending queues and implement `SHARED` only | expose class-FIFO-head acceptance and Router-credit behavior with no NI per-VC storage; add split-mode masks and fixed-VC no-spill tests; do not compare model queue timing |
-| LOCAL DAT receive | current model consumes DataR through symmetric credit flow control | keep the production target ready/valid; isolate the mismatch in F0 for hybrid comparison and never treat model receive-credit timing as DUT behavior |
+| VC ownership and modes | model allocators own transmit-side per-VC pending queues and implement `SHARED` only | expose target transmit class-head acceptance plus receive per-VC FIFO behavior; add split-mode masks and fixed-VC no-spill tests; do not compare internal queue timing |
+| LOCAL DAT receive | current model consumes DataR through symmetric credit flow control | compare credit-qualified accepted sequence and conservation; target receive FIFO timing remains implementation-specific |
 | REQ/DAT parallelism | independent paths exist, but no shared-AXI test proves same-cycle egress | add a focused model test that records simultaneous REQ and DAT transfers; use it for functional capability, not exact RTL latency |
 | B/R independence | model drains RSP and DAT response inputs independently but lacks target CDC/class-FIFO timing | compare decoded content and order after independent accepted inputs; exclude internal queue occupancy and exact cycle |
 | CDC/reset | model is single-clock | do not emulate synchronizers or compare crossing latency in C++; verify CDC structure, dual-clock behavior, and reset in RTL N0/N1 |
@@ -372,7 +373,7 @@ recorded only in `docs/verification-environment.md`, Provenance. This plan uses 
   asynchronous clock ratios, and reset stress may inform project-owned DV. P2 RTL may not be copied,
   adapted, or instantiated in production. Existing notices remain untouched.
 - The C++ NMU is project-owned and follows the conditional-oracle rules in Section 9; it is not a
-  substitute for RTL CDC or asymmetric LOCAL DAT flow control.
+  substitute for RTL CDC or target receive-FIFO timing.
 
 Review evidence records the source ID and revision, never a copied RTL fragment. Production and DV
 source-list checks fail if a reference-tree path or the F0 adapter appears in a production closure.

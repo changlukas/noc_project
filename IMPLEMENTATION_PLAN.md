@@ -110,6 +110,23 @@ Goal: Cross-check every generated SAM vector against the approved C++ table orac
 Success Criteria: Generated memory, config, and peripheral vectors match the C++-checked SAM oracle in authored order; legal overlap and miss behavior are explicitly checked.
 Status: Complete
 
+### Issue #80: NMU request packetization and NoC channel assignment
+
+#### Stage 1: Contract and packet formats
+Goal: Freeze the post-ordering AW/W/AR boundary, generated REQ/DAT field mapping, global AW-to-W ownership rule, and symmetric DAT credit interface.
+Success Criteria: The issue and canonical specs require independent REQ/DAT schedulers, Router-depth-seeded DAT credits, same-cycle credit reuse, and `transfer` terminology.
+Status: Complete
+
+#### Stage 2: Packetizer and schedulers
+Goal: Implement request packetization, AW/W association, independent REQ/DAT arbitration, packet locks, and DAT VC credit accounting.
+Success Criteria: Narrow writes and all reads use REQ; Data writes use DAT; W inherits its accepted AW metadata and selected VC; REQ and DAT may transfer in the same cycle.
+Status: Complete
+
+#### Stage 3: Focused DV and cleanup
+Goal: Verify format mapping, backpressure, credit exhaustion/return, arbitration fairness, packet contiguity, and parallel REQ/DAT progress.
+Success Criteria: Focused lint and behavior tests pass with no avoidable bubble under available downstream authority; generated-contract checks and affected regressions pass; all build artifacts are removed.
+Status: Complete
+
 #### Stage 2: Leaf behavior coverage
 Goal: Exercise every generated entry boundary and all independent AW/AR timing-cut mode pairs under backpressure.
 Success Criteria: Addresses are preserved; route metadata matches the generated vectors; simultaneous AW/AR traffic remains independent; modes 0, 1, and 2 conserve stable payloads without avoidable full-skid bubbles.

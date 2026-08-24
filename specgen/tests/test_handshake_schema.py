@@ -269,7 +269,8 @@ def test_noc_intf_protocol_semantics_complete():
     sem = data["interfaces"]["noc_intf"]["protocol_semantics"]
     assert sem["credit_return_encoding"]["scheme"] == "per_vc_credit_pulse_vector"
     assert sem["credit_return_encoding"]["onehot_check_required"] is False
-    assert sem["initial_credits"]["value_per_vc"] == "ROUTER_VC_DEPTH"
+    assert sem["initial_credits"]["value_per_vc"] == "downstream receive depth"
+    assert "NI_DAT_RX_VC_DEPTH" in sem["initial_credits"]["note"]
     assert sem["combinational_loops"].startswith("forbidden")
 
 
