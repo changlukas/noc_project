@@ -91,8 +91,6 @@ class AxiMasterObserver {
     // ---- Accessors ----------------------------------------------------
     bool ok() const { return failures_.empty(); }
     const std::vector<std::string>& failures() const { return failures_; }
-    std::size_t aw_count() const { return aw_count_; }
-    std::size_t ar_count() const { return ar_count_; }
     std::size_t b_count() const { return b_count_; }
     std::size_t r_count() const { return r_count_; }
     std::size_t mismatches() const { return mismatches_; }
@@ -103,8 +101,6 @@ class AxiMasterObserver {
     // should let the AxiMaster callbacks drive the observer.
     void test_inject_write_result(const axi::WriteResult& wr) { on_write(wr); }
     void test_inject_read_result(const axi::ReadResult& rr) { on_read(rr); }
-    void test_set_aw_count(std::size_t n) { aw_count_ = n; }
-    void test_set_ar_count(std::size_t n) { ar_count_ = n; }
 
   private:
     void init_verbose_() {
