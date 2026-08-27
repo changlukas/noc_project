@@ -6,8 +6,10 @@ Design for `router::Router` (DAT). `SimpleRouter` (REQ/RSP) is unchanged.
 
 The DAT router pipeline follows the canonical input buffered VC router (On-Chip Networks 2nd ed.
 ch 6): BW, RC + VA, SA + ST, LT. A head flit passes all four. A body or tail flit skips RC + VA
-and inherits the route and output VC its head obtained. Head 4 cycles per router, body and tail
-3. A single flit packet is a head and a tail, 4 cycles.
+and inherits the route and output VC its head obtained. Head 4 cycles per router, and each
+following flit of the packet leaves one cycle after the flit ahead of it, so a packet of n flits
+leaves n minus 1 cycles after its head. A single flit packet is a head and a tail, 4 cycles. A
+body measures 3 only when it enters an empty FIFO after its head's SA grant.
 
 | Point | Ruling | Source |
 |---|---|---|
@@ -67,7 +69,7 @@ RSP, both `SimpleRouter`, unchanged.
 | Packet | Per router | mesh_4x4 zero load probe, 3 hops, 4 routers | Before |
 |---|---|---|---|
 | `DataR` | 4 | 16 | 12 |
-| AW + 32 W | head 4, each W 3 | head 16, W stream unchanged | head 12 |
+| AW + 32 W | head 4, each W one cycle behind the flit ahead of it | head 16, W stream unchanged | head 12 |
 
 Scenario 2 zero load data read moves from 37 to 41, data write from 38 to 42. Within the target
 range DAT 3 to 5 per hop (`docs/noc-target-spec.md:812`). Throughput: SA still grants one flit per

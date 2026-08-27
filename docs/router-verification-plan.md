@@ -87,7 +87,7 @@ full-RTL mesh run; a mesh result cannot waive an R0, R1, or R2 failure.
 | SPEC 12, arbitration order | R0-ARB-01/04, R1-TOP-04, RTR-A07 |
 | SPEC 13, VC independence | R0-DAT-05/06, R1-TOP-03, RTR-A14/RTR-A19 |
 | SPEC 14, output FIFO | R0-DAT-08, RTR-A17 |
-| SPEC 15, withdrawn | the DAT `Router` pops at most one flit per input VC FIFO per cycle, so nothing remains to verify. R1-TOP-14 and RTR-A26 still enforce one flit per output and concurrent independent outputs; R2-X02 now covers the `SimpleRouter` same-FIFO multi-read alone (`docs/verification-environment.md`, S3b ruling) |
+| SPEC 15, withdrawn | what ended is multiple pops of one input VC FIFO in a tick. A fork still supplies several outputs from one parked head in one tick (`router.hpp:628-635`, a branch grant copies the head and never pops), so R2-X02's collective fanout and M-ALIGN-01 stand unchanged. R1-TOP-14 and RTR-A26 still enforce one flit per output and concurrent independent outputs |
 | SPEC 16, fairness | R0-ARB-05, R1-TOP-04, RTR-A08 |
 | SPEC 17, boundary silence | R1-TOP-13, RTR-A27 |
 | SPEC 18, network independence | R1-TOP-10 through R1-TOP-12, RTR-A23 |

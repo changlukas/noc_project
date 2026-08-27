@@ -158,11 +158,14 @@ if it ever does (`route_compute`, `router.hpp:65-68`).
 ### 2.4 Pipeline: four stages, one stage per cycle (DAT)
 
 The DAT `Router` is a 4-stage pipeline, the canonical input-buffered VC router. A flit advances
-exactly one stage per cycle. A head flit passes all four stages; a body or tail flit skips
-RC + VA and inherits the route and output VC its head obtained, so it passes three. A
-single-flit packet is a head and a tail at once and pays four. Per router: DAT head 4 cycles,
-DAT body or tail 3 (`RouterDatapath.ZeroLoadLatencyIsFourTicks`,
-`RouterDatapath.BodyFlitsFollowHeadOneCycleApart`). The REQ/RSP `SimpleRouter` is unchanged: two
+exactly one stage per cycle. A head flit passes all four stages. A body or tail flit skips
+RC + VA and inherits the route and output VC its head obtained, so it passes three. Per router a
+head takes 4 cycles, and each following flit of the same packet leaves one cycle after the flit
+ahead of it, so a packet of n flits leaves n - 1 cycles after its head
+(`RouterDatapath.ZeroLoadLatencyIsFourTicks`,
+`RouterDatapath.BodyFlitsFollowHeadOneCycleApart`). A single-flit packet is a head and a tail at
+once and takes 4. The one case where a body measures 3 is a body entering an empty FIFO after its
+head's SA grant, which is not what a 0-gap worm does. The REQ/RSP `SimpleRouter` is unchanged: two
 stages with `output_fifo_depth` = 0, the second driving the link, 2 cycles per router
 (`SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`). The wrapper egress hold register
 loads on the edge the model emits, so it adds no cycle at zero load. It adds cycles only while
@@ -204,10 +207,10 @@ The model evaluates stages in reverse order (4, then 3, then 2, then 1) within o
   by construction, not by the wrap's draining (`router_adapters.hpp` `LinkCreditOut`).
 
 Zero-load latency per router, input wire handshake at posedge N to output wire handshake at
-posedge N+k with output ready high: k = 2 on REQ and RSP, k = 4 for a DAT head and k = 3 for a
-DAT body or tail whose worm already holds its output VC. A path of H hops passes H + 1 routers.
-Measured on the mesh_4x4 zero-load probe (`docs/backlog.md`, Scenario 2 recipe): 3 hops,
-4 routers, 8 cycles on REQ/RSP and 16 on DAT.
+posedge N+k with output ready high: k = 2 on REQ and RSP and k = 4 for a DAT head. Each following
+flit of the same packet transfers one cycle after the flit ahead of it. A path of H hops passes
+H + 1 routers. Measured on the mesh_4x4 zero-load probe (`docs/backlog.md`, Scenario 2 recipe):
+3 hops, 4 routers, 8 cycles on REQ/RSP and 16 on DAT.
 
 On DAT the LOCAL port also passes `dat_merge_wrap`, 1 cycle each way (section 3.3). The TX cycle
 is the DPI wrap's output register; target RTL folds the merge into the NI and has no TX cycle.
@@ -307,8 +310,8 @@ The three pointers belong to different stages (`router.hpp:661`, `router.hpp:730
 
 Moving the output-VC pointer on every SA grant is what makes the VCs of one output share the
 link: a worm holding VC0 gives up the link for one cycle whenever another VC has a flit to
-send. The two VA pointers move at packet granularity because a packet reaches VA once, at its
-head, so a worm keeps its place in the input rotation for as long as it runs. For streams of
+send. The two VA pointers move once per packet, at its VA grant, because a packet reaches VA
+once, at its head. For streams of
 single-flit packets all three degenerate to flit-level round-robin. There is no priority or
 QoS input: the flit header carries no QoS field.
 
@@ -380,7 +383,9 @@ counters on all five DAT outputs. REQ and RSP have no counters.
    assigned to VC0 wait.
 
 The input FIFO slot frees at SA, one cycle later than in the merged stage this pipeline
-replaced, so the credit round trip is one cycle longer. `NOC_ROUTER_VC_DEPTH` = 8 covers it.
+replaced. The credit loop runs grant to pulse to refill, 4 cycles before the split and 5 after,
+against a seed of `NOC_ROUTER_VC_DEPTH` = 8 credits. The continuous-injection co-sim gate
+(`INJECTION_MODE=1` at a sustained rate) is where the remaining headroom is measured.
 
 The stage-4 output FIFO (default depth 8) is an architectural parameter of this design
 (`NOC_ROUTER_OUTPUT_FIFO_DEPTH`) but is not credit-counted and is invisible to the
@@ -702,8 +707,10 @@ modeled.
 R10 (latency definition). Per-router latency is measured from the posedge of the input transfer
 to the posedge of the corresponding output transfer, with output ready high. At zero load (no
 contention, nonzero DAT credit, output FIFO below depth) it is exactly 2 cycles on REQ and RSP,
-and on DAT exactly 4 cycles for a head and exactly 3 for a body or tail whose worm already holds
-its output VC (section 2.4). A single-flit packet is a head, so 4.
+and on DAT exactly 4 cycles for a head. Each following flit of the same packet transfers one
+cycle after the flit ahead of it, so a packet of n flits completes n - 1 cycles after its head
+(section 2.4). A single-flit packet is a head, so 4. A body measures 3 only when it enters an
+empty FIFO after its head's SA grant.
 
 R11 (output uniqueness). At most one flit per output port per network per cycle: each
 bit of `tx_req_valid` / `tx_rsp_valid` / `tx_dat_valid` covers exactly one flit bus.
@@ -757,9 +764,9 @@ of its `dst_id` (section 2.3), recomputed at every hop. Verified by ctest
 data to the wrong NSU). Failure: wrong output port on any flit.
 
 SPEC 4 (zero-load latency). Input transfer to output transfer at the model-facing wrapper pins is
-exactly 4 cycles for a DAT head, exactly 3 for a DAT body or tail whose worm already holds its
-output VC, and exactly 3 for REQ and RSP, when the granted output is uncontended, has credit
-or ready, and its output FIFO is below depth. Verified by ctest
+exactly 4 cycles for a DAT head and exactly 3 for REQ and RSP, when the granted output is
+uncontended, has credit or ready, and its output FIFO is below depth. Each following flit of a
+DAT packet transfers one cycle after the flit ahead of it. Verified by ctest
 `RouterDatapath.ZeroLoadLatencyIsFourTicks` and `RouterDatapath.BodyFlitsFollowHeadOneCycleApart`
 for DAT and `SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks` for the 2-tick REQ/RSP core,
 plus wrapper elaboration and co-sim for the spill-register cycle. Failure: the flit transfers
@@ -848,10 +855,12 @@ so a head may hold a VC while waiting in SA behind a full one. Verified by ctest
 `RouterVcArbitration.SameCycleOutputFifoEnqueueDequeue`. Failure: a grant into a full
 FIFO, or a stall in the same-cycle drain-and-fill case.
 
-SPEC 15 (withdrawn). Route and output VC belong to the input VC since VA became its own stage,
-so only the front flit of an input VC is eligible and only the output holding it can pop it:
-one input VC FIFO pops at most one flit per cycle (section 2.4) and the multi-pop property this
-item pinned no longer exists.
+SPEC 15 (withdrawn). Route and output VC belong to the input VC since VA became its own stage, so
+only the front flit of an input VC is eligible. For a unicast only the output holding it pops it,
+and for a fork no output pops at all: the fork pop pass does that, once every branch has granted
+the head. One input VC FIFO therefore pops at most one flit per cycle (section 2.4) and the
+multi-pop property this item pinned no longer exists. A fork still feeds several outputs from one
+parked head in one cycle, which SPEC 20 covers.
 
 SPEC 16 (fairness). Under sustained contention, every competing (input, VC) is
 granted infinitely often (round-robin starvation freedom). VA's two pointers advance on a grant
@@ -1022,7 +1031,7 @@ Annotations: three flits, 0-gap injection (R8). Lock row `L` = (EAST, VC0) locke
 nothing else departs on that VC in between (SPEC 10). `credit_[EAST][0]` bottoms at 5
 with three flits outstanding and is back to the seed 8 after cycle 10 (conservation,
 SPEC 8). A grants F0..F2 at cycles 2,3,4 and B at 6,7,8, so B's LOCAL wire carries them at
-8,9,10. Head latency 8 = 2 routers x 4 cycles; F1 and F2 skip VA and follow one cycle apart.
+8,9,10. Head latency 8 = 2 routers x 4 cycles. F1 and F2 skip VA and follow one cycle apart.
 Each credit wire pulse is exactly 1 cycle wide, one per freed slot (R5).
 
 ## 7. Appendix: Hints
