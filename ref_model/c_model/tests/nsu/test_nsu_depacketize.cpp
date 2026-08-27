@@ -14,11 +14,12 @@ namespace axi = ni::cmodel::axi;
 namespace {
 ni::cmodel::Flit make_aw_flit(uint8_t awid, uint64_t addr, uint8_t src_id = 0x10,
                               uint8_t ordering_req = 0, uint8_t ordering_tag = 0,
-                              uint8_t axi_ch = ni::AXI_CH_NarrowAw) {
+                              uint8_t axi_ch = ni::AXI_CH_NarrowAw, uint8_t vc = 0) {
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", axi_ch);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", 0x02);
+    f.set_header_field("vc_id", vc);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", ordering_req);
     f.set_header_field("ordering_tag", ordering_tag);
@@ -28,10 +29,12 @@ ni::cmodel::Flit make_aw_flit(uint8_t awid, uint64_t addr, uint8_t src_id = 0x10
     f.set_payload_field("AW", "awburst", static_cast<uint64_t>(axi::Burst::INCR));
     return f;
 }
-ni::cmodel::Flit make_w_flit(uint32_t strb, bool last, uint8_t axi_ch = ni::AXI_CH_NarrowW) {
+ni::cmodel::Flit make_w_flit(uint32_t strb, bool last, uint8_t axi_ch = ni::AXI_CH_NarrowW,
+                             uint8_t vc = 0) {
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", axi_ch);
     f.set_header_field("dst_id", 0x02);
+    f.set_header_field("vc_id", vc);
     f.set_header_field("flit_tail", 1);
     const char* ch = (axi_ch == ni::AXI_CH_DataW) ? "DATA_W" : "NARROW_W";
     f.set_payload_field(ch, "wlast", last ? 1u : 0u);
@@ -282,28 +285,95 @@ TEST(NsuDepacketize, DemuxMixedAwWAr) {
     EXPECT_EQ(depkt.pop_ar()->id, 0x02);
 }
 
-TEST(NsuDepacketize, PendingHolBlockingS1WFullBlocksAwBehind) {
+// Two data-class worms on different VCs arrive flit-interleaved, which is
+// what the per-(output, VC) router lock produces. Each VC reassembles its
+// own burst; the AXI side sees A's beats, then B's, never mixed.
+TEST(NsuDepacketize, InterleavedDataWormsReassemblePerVc) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::NOC_ID_SPACE);
-    // Order: AW(2 beats), W, W, AW -- data class throughout. The leading AW owns
-    // both W beats, which is what makes them poppable at all now; the mechanic
-    // under test is unchanged, the second W still stalls in the ingress stash
-    // and the AW behind it is still blocked.
+    Depacketize depkt(noc.req_in(), mb, axi::NOC_ID_SPACE, ni::cmodel::router::null_req_in(), 0, {},
+                      0, /*dat_num_vc=*/2);
+    auto aw_a = make_aw_flit(0x01, 0x0, 0x10, 0, 0, ni::AXI_CH_DataAw, /*vc=*/0);
+    auto aw_b = make_aw_flit(0x02, 0x0, 0x11, 0, 0, ni::AXI_CH_DataAw, /*vc=*/1);
+    aw_a.set_payload_field("AW", "awlen", 1);
+    aw_b.set_payload_field("AW", "awlen", 1);
+    ASSERT_TRUE(noc.req_out().push_flit(aw_a));
+    ASSERT_TRUE(noc.req_out().push_flit(aw_b));
+    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xA0, false, ni::AXI_CH_DataW, 0)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xB0, false, ni::AXI_CH_DataW, 1)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xA1, true, ni::AXI_CH_DataW, 0)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xB1, true, ni::AXI_CH_DataW, 1)));
+    for (int i = 0; i < 6; ++i) depkt.tick();
+    auto a = depkt.pop_aw();
+    ASSERT_TRUE(a.has_value());
+    EXPECT_EQ(a->id, 0x01);
+    EXPECT_EQ(depkt.pop_w()->strb, 0xA0u);
+    EXPECT_EQ(depkt.pop_w()->strb, 0xA1u);
+    auto b = depkt.pop_aw();
+    ASSERT_TRUE(b.has_value());
+    EXPECT_EQ(b->id, 0x02);
+    EXPECT_EQ(depkt.pop_w()->strb, 0xB0u);
+    EXPECT_EQ(depkt.pop_w()->strb, 0xB1u);
+    EXPECT_FALSE(depkt.pop_w().has_value());
+}
+
+// Credit is the VC queue slot, returned when the flit leaves the queue
+// (pop_aw / pop_w), not when it arrives. One pulse per consumed flit.
+TEST(NsuDepacketize, DatCreditPulsesOnConsumption) {
+    ChannelModel noc(16, 16);
+    MetaBuffer mb(4);
+    Depacketize depkt(noc.req_in(), mb, axi::NOC_ID_SPACE, ni::cmodel::router::null_req_in(), 0, {},
+                      0, /*dat_num_vc=*/2);
+    ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x01, 0x0, 0x10, 0, 0, ni::AXI_CH_DataAw, 1)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xFF, true, ni::AXI_CH_DataW, 1)));
+    depkt.tick();
+    depkt.tick();
+    EXPECT_FALSE(depkt.take_dat_credit(1));  // arrived, not consumed
+    ASSERT_TRUE(depkt.pop_aw().has_value());
+    EXPECT_TRUE(depkt.take_dat_credit(1));
+    EXPECT_FALSE(depkt.take_dat_credit(1));
+    ASSERT_TRUE(depkt.pop_w().has_value());
+    EXPECT_TRUE(depkt.take_dat_credit(1));
+    EXPECT_FALSE(depkt.take_dat_credit(0));
+}
+
+// A second worm on the SAME VC queues behind the first worm's beats: a VC's
+// W stream is one worm at a time. Same order semantics as the deleted
+// PendingHolBlockingS1WFullBlocksAwBehind, without the ingress stash.
+TEST(NsuDepacketize, SecondWormOnSameVcWaitsBehindFirstWormsBeats) {
+    ChannelModel noc(16, 16);
+    MetaBuffer mb(4);
+    Depacketize depkt(noc.req_in(), mb, axi::NOC_ID_SPACE);
     auto aw_owner = make_aw_flit(0x06, 0x0, 0x10, 0, 0, ni::AXI_CH_DataAw);
-    aw_owner.set_payload_field("AW", "awlen", 1);  // 2 beats
+    aw_owner.set_payload_field("AW", "awlen", 1);
     ASSERT_TRUE(noc.req_out().push_flit(aw_owner));
     ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xAA, false, ni::AXI_CH_DataW)));
     ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xBB, true, ni::AXI_CH_DataW)));
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x07, 0x0, 0x10, 0, 0, ni::AXI_CH_DataAw)));
-    depkt.tick();
-    ASSERT_TRUE(depkt.pop_aw().has_value());   // owning AW admitted
-    EXPECT_TRUE(depkt.pop_w().has_value());    // first W (0xAA) demuxed
-    EXPECT_FALSE(depkt.pop_aw().has_value());  // AW blocked behind pending W
-    depkt.tick();
-    EXPECT_TRUE(depkt.pop_w().has_value());  // pending W (0xBB)
-    depkt.tick();
-    EXPECT_TRUE(depkt.pop_aw().has_value());  // AW now demuxed
+    for (int i = 0; i < 4; ++i) depkt.tick();
+    ASSERT_TRUE(depkt.pop_aw().has_value());
+    EXPECT_FALSE(depkt.pop_aw().has_value());  // vc0 front is W, not AW
+    EXPECT_EQ(depkt.pop_w()->strb, 0xAAu);
+    EXPECT_EQ(depkt.pop_w()->strb, 0xBBu);
+    EXPECT_TRUE(depkt.pop_aw().has_value());
+}
+
+// Fault injection: a VC's W stream interrupted by another head means the
+// fabric broke per-VC contiguity. Fail loud, never mis-pair.
+TEST(NsuDepacketizeDeath, WStreamInterruptedOnItsVcAborts) {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    ChannelModel noc(16, 16);
+    MetaBuffer mb(4);
+    Depacketize depkt(noc.req_in(), mb, axi::NOC_ID_SPACE);
+    auto aw_a = make_aw_flit(0x01, 0x0, 0x10, 0, 0, ni::AXI_CH_DataAw);
+    aw_a.set_payload_field("AW", "awlen", 1);
+    ASSERT_TRUE(noc.req_out().push_flit(aw_a));
+    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xA0, false, ni::AXI_CH_DataW)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x02, 0x0, 0x10, 0, 0, ni::AXI_CH_DataAw)));
+    for (int i = 0; i < 3; ++i) depkt.tick();
+    ASSERT_TRUE(depkt.pop_aw().has_value());
+    ASSERT_TRUE(depkt.pop_w().has_value());
+    EXPECT_DEATH(depkt.pop_w(), "contiguity");
 }
 
 // NsuDepacketize::PopBAssertFalse was a runtime wrong_side_() test.

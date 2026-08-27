@@ -7,6 +7,7 @@
 // harness weight.
 #include "nmu/nmu.hpp"
 // router bases needed by QueueNoc*
+#include "router/queue_credit_out.hpp"
 #include "router/req_out.hpp"
 #include "router/rsp_in.hpp"
 #include <deque>
@@ -31,79 +32,14 @@ namespace ni::cmodel::nmu {
 // NmuWrap can drain produced req flits and inject incoming rsp flits
 // at the DPI boundary without modifying the Nmu internals.
 //
-// QueueNocReqOut: push_flit enqueues into an internal deque (capped at
-//   kMaxQueueDepth as a drain-forgotten sanity check). With FlooNoC credit
-//   enabled (cosim opt-in) push_flit also gates+consumes per-VC credit and
-//   credit_avail reflects the counter; with credit OFF (default) it accepts
-//   unconditionally. Wrap drains via pop_req_flit() each tick.
+// QueueNocReqOut: router::QueueCreditOut over NocReqOut — see
+//   router/queue_credit_out.hpp. Wrap drains via pop_flit() each tick.
 //
 // QueueNocRspIn: Wrap injects flits via inject_rsp_flit() before
 //   calling nmu_.tick(); Nmu's Depacketize stage drains via pop_flit().
 namespace detail {
 
-struct QueueNocReqOut : router::NocReqOut {
-    // Sanity cap: a real Wrap drains every tick, so a queue this deep
-    // means the test forgot to drain. Asserts in debug; release builds skip
-    // the check (and the queue is still allowed to grow unboundedly).
-    static constexpr std::size_t kMaxQueueDepth = 1024;
-
-    // FlooNoC-style NI-edge sender credit (default OFF = today's always-available).
-    // When enabled, this models the InjectAdapter credit pattern: a per-VC
-    // counter seeded to the downstream (router LOCAL input) depth; push_flit
-    // decrements on accept, receive_credit increments on a credit pulse.
-    // INVARIANT: credit_[vc] is decremented ONLY in push_flit and incremented
-    // ONLY in receive_credit, so credit_[vc] + outstanding == seed holds.
-    void enable_credit(uint8_t num_vc, std::size_t seed) {
-        credit_enabled_ = true;
-        credit_.assign(num_vc, seed);
-    }
-    void receive_credit(uint8_t vc) { ++credit_[vc]; }
-
-    // S3a T5: ready/valid mode for the REQ face (SimpleRouter downstream, no
-    // credit at all — spec §4.3). Orthogonal to credit_enabled_; exactly one
-    // of the two is ever enabled by a given caller. ready_ is a live signal
-    // (not consumed), set from the DPI-sampled tx_req_ready wire each tick
-    // (S3a stage design §5.3 — credit_avail(vc) stays the predicate name,
-    // it just reports downstream ready instead of a credit pool).
-    void enable_ready_track() { ready_track_ = true; }
-    void set_ready(bool r) { ready_ = r; }
-
-    // Accept a flit into the queue. Ready-track mode gates on the live ready
-    // signal. Credit mode gates on and consumes one per-VC credit. Neither
-    // enabled models infinite downstream bandwidth (always accept).
-    bool push_flit(const Flit& f) override {
-        if (ready_track_) {
-            if (!ready_) return false;
-        } else if (credit_enabled_) {
-            const auto vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
-            if (credit_[vc] == 0) return false;
-            --credit_[vc];
-        }
-        assert(queue_.size() < kMaxQueueDepth &&
-               "QueueNocReqOut overflow — did the test Wrap forget to drain?");
-        queue_.push_back(f);
-        return true;
-    }
-    bool credit_avail(uint8_t vc) const override {
-        if (ready_track_) return ready_;
-        return !credit_enabled_ || credit_[vc] > 0;
-    }
-
-    // Wrap accessor: pop one flit per tick for DPI forwarding.
-    std::optional<Flit> pop_req_flit() {
-        if (queue_.empty()) return std::nullopt;
-        Flit f = queue_.front();
-        queue_.pop_front();
-        return f;
-    }
-
-  private:
-    std::deque<Flit> queue_;
-    bool credit_enabled_ = false;
-    std::vector<std::size_t> credit_;
-    bool ready_track_ = false;
-    bool ready_ = false;
-};
+using QueueNocReqOut = router::QueueCreditOut<router::NocReqOut>;
 
 struct QueueNocRspIn : router::NocRspIn {
     // Wrap accessor: inject one flit per tick from DPI wire.
@@ -174,7 +110,7 @@ class NmuStandalone {
     Nmu& nmu() noexcept { return nmu_; }
 
     // Wrap accessors — drain req side, inject rsp side.
-    std::optional<Flit> pop_req_flit() { return queue_req_out_.pop_req_flit(); }
+    std::optional<Flit> pop_req_flit() { return queue_req_out_.pop_flit(); }
     void inject_rsp_flit(const Flit& f) { queue_rsp_in_.inject_rsp_flit(f); }
     bool req_credit_avail(uint8_t vc = 0) const { return queue_req_out_.credit_avail(vc); }
 
@@ -192,7 +128,7 @@ class NmuStandalone {
     // DAT egress (push into nmu().dat_wormhole_arbiter().input(0/1), drain
     // here) and DAT ingress (inject here, Depacketize's second ingress
     // drains it). Unwired to real DPI until T5; ctest-mock-only until then.
-    std::optional<Flit> pop_dat_req_flit() { return queue_dat_req_out_.pop_req_flit(); }
+    std::optional<Flit> pop_dat_req_flit() { return queue_dat_req_out_.pop_flit(); }
     void inject_dat_rsp_flit(const Flit& f) { queue_dat_rsp_in_.inject_rsp_flit(f); }
     bool dat_req_credit_avail(uint8_t vc = 0) const { return queue_dat_req_out_.credit_avail(vc); }
     void enable_dat_noc_credit(std::size_t seed) {

@@ -5,6 +5,7 @@
 // the fork set, not the mask math.
 #include "router/route_mask.hpp"
 #include "router/router.hpp"
+#include "common/flit_builders.hpp"
 
 #include <gtest/gtest.h>
 
@@ -69,15 +70,7 @@ Flit make_mc_flit(uint8_t dst, uint8_t src, uint8_t cmask, uint8_t vc, uint64_t 
     return f;
 }
 
-Flit make_unicast_flit(uint8_t dst, uint8_t src, uint8_t vc, uint64_t flit_tail, uint8_t tag) {
-    Flit f;
-    f.set_header_field("dst_id", dst);
-    f.set_header_field("src_id", src);
-    f.set_header_field("vc_id", vc);
-    f.set_header_field("flit_tail", flit_tail);
-    f.set_header_field("ordering_tag", tag);
-    return f;
-}
+using ni::cmodel::testing::make_unicast_flit;
 
 // Build an n-flit worm (head flit_tail=0 .. tail flit_tail=1), tags 0..n-1.
 std::vector<Flit> make_mc_worm(uint8_t dst, uint8_t src, uint8_t cmask, uint8_t vc,
@@ -156,7 +149,7 @@ TEST(RouterFork, ThreeWayInclLocalReplicatesWholeWorm) {
     EXPECT_EQ(west_up.pulses.size(), static_cast<std::size_t>(kFlits));
     // Per-branch tail release: no branch lock survives the worm.
     for (std::size_t o = 0; o < ni::cmodel::router::ROUTER_PORT_COUNT; ++o) {
-        EXPECT_FALSE(r.wormhole_locked_input(o).has_value()) << "output " << o;
+        EXPECT_FALSE(r.wormhole_locked_input(o, 0).has_value()) << "output " << o;
     }
     EXPECT_EQ(r.fork_done_mask(W, 0), 0u);
 }
@@ -215,8 +208,8 @@ TEST(RouterFork, MidBurstBranchStarvationStallsWormWithoutSkipOrReorder) {
     // Introspection (§1.3 detection b): live masks + both branch locks held.
     EXPECT_EQ(r.fork_expected_mask(W, 0), port_bit(RouterPort::EAST) | port_bit(RouterPort::NORTH));
     EXPECT_EQ(r.fork_done_mask(W, 0), port_bit(RouterPort::EAST));
-    EXPECT_EQ(r.wormhole_locked_input(N), std::optional<std::size_t>(W));
-    EXPECT_EQ(r.wormhole_locked_input(E), std::optional<std::size_t>(W));
+    EXPECT_EQ(r.wormhole_locked_input(N, 0), std::optional<std::size_t>(W));
+    EXPECT_EQ(r.wormhole_locked_input(E, 0), std::optional<std::size_t>(W));
 
     // Phase B: downstream NORTH drains its two held flits (credits come
     // home), then keeps draining — the worm completes, both branches carry
@@ -233,8 +226,8 @@ TEST(RouterFork, MidBurstBranchStarvationStallsWormWithoutSkipOrReorder) {
     expect_worm_in_order(north, kFlits, "NORTH");
     expect_worm_in_order(east, kFlits, "EAST");
     EXPECT_EQ(west_up.pulses.size(), static_cast<std::size_t>(kFlits));
-    EXPECT_FALSE(r.wormhole_locked_input(N).has_value());
-    EXPECT_FALSE(r.wormhole_locked_input(E).has_value());
+    EXPECT_FALSE(r.wormhole_locked_input(N, 0).has_value());
+    EXPECT_FALSE(r.wormhole_locked_input(E, 0).has_value());
     EXPECT_EQ(r.fork_done_mask(W, 0), 0u);
 }
 
@@ -389,10 +382,10 @@ TEST(RouterFork, PerBranchVaAssignsEachBranchItsOwnPreferredVc) {
         feed_worm(r, worm, fed, W, 0);
         const std::size_t bn = north.received.size(), be = east.received.size();
         r.tick();
-        if (!checked_locks && r.wormhole_locked_output_vc(E).has_value() &&
-            r.wormhole_locked_output_vc(N).has_value()) {
-            EXPECT_EQ(*r.wormhole_locked_output_vc(E), 1u) << "EAST branch locked_output_vc";
-            EXPECT_EQ(*r.wormhole_locked_output_vc(N), 0u) << "NORTH branch locked_output_vc";
+        if (!checked_locks && r.wormhole_locked_output_vc(E, 1).has_value() &&
+            r.wormhole_locked_output_vc(N, 0).has_value()) {
+            EXPECT_EQ(*r.wormhole_locked_output_vc(E, 1), 1u) << "EAST branch locked_output_vc";
+            EXPECT_EQ(*r.wormhole_locked_output_vc(N, 0), 0u) << "NORTH branch locked_output_vc";
             checked_locks = true;
         }
         return_credit(r, north, N, bn);
@@ -593,8 +586,8 @@ TEST(RouterForkWedge, OverlappingTreesOppositeOrderWedgeDetectedWithinBound) {
     EXPECT_EQ(r1.fork_expected_mask(E, 0), kWN);
     EXPECT_EQ(r1.fork_done_mask(E, 0), port_bit(RouterPort::WEST));
     // The wait-for cycle: M1 holds N@R1, M2 holds N@R2.
-    EXPECT_EQ(r1.wormhole_locked_input(N), std::optional<std::size_t>(W));
-    EXPECT_EQ(r2.wormhole_locked_input(N), std::optional<std::size_t>(E));
+    EXPECT_EQ(r1.wormhole_locked_input(N, 0), std::optional<std::size_t>(W));
+    EXPECT_EQ(r2.wormhole_locked_input(N, 0), std::optional<std::size_t>(E));
     // Credit exhaustion on both directions of the contended link.
     EXPECT_EQ(r1.credit(E, 0), 0u);
     EXPECT_EQ(r2.credit(W, 0), 0u);
@@ -643,8 +636,8 @@ TEST(RouterForkChain, MultiHopWormCrossesDivergentOneHotHop) {
         EXPECT_EQ(nb.received[i].get_header_field("ordering_tag"), static_cast<uint64_t>(i));
     }
     for (std::size_t o = 0; o < ni::cmodel::router::ROUTER_PORT_COUNT; ++o) {
-        EXPECT_FALSE(ra.wormhole_locked_input(o).has_value()) << "ra output " << o;
-        EXPECT_FALSE(rb.wormhole_locked_input(o).has_value()) << "rb output " << o;
+        EXPECT_FALSE(ra.wormhole_locked_input(o, 0).has_value()) << "ra output " << o;
+        EXPECT_FALSE(rb.wormhole_locked_input(o, 0).has_value()) << "rb output " << o;
     }
     EXPECT_EQ(ra.fork_done_mask(W, 0), 0u);
     EXPECT_EQ(rb.fork_done_mask(W, 0), 0u);

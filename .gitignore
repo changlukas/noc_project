@@ -10,19 +10,18 @@ ref_model/c_model/Testing/
 # Legacy locations (pre build/-tree restructure); keep ignored so stale
 # checkouts don't show noise
 sim/verilator/obj_dir/
-sim/verilator/obj_genamba/
 ref_model/c_model/build/
 
 # Temporary files
 *.tmp
 *.log
 /node_modules/
-/.sandcastle/.env
-/.sandcastle/logs/
+
+# sandcastle runner scratch (its runner script is tracked regardless)
+/.sandcastle/*.lock
 
 # Co-sim runtime artifacts (per-instance variants since multi-instance DPI refactor)
 master_wrap_read_dump*.txt
-w_beats_received_
 
 # Editor/tool files
 .vscode/
@@ -72,10 +71,6 @@ sim/tb/test/topology_pkg.sv
 # Codegraph MCP database
 /.codegraph/
 
-# User-local workspace (kept local-only by default)
-/dpi_ref/
-/issue/
-
 # Python tooling caches
 /.pytest_cache/
 __pycache__/
@@ -85,21 +80,16 @@ __pycache__/
 /cross-review/
 
 # Local-only doc references (not version-controlled)
-/docs/probe_section_layout_draft.md
 /docs/image/draw.vsdx
 /docs/backlog.md
 
 # SDD scratch (ledger, briefs, reports, codex reviews) — not version-controlled
 /.superpowers/
 
-# saturation sweep outputs (make sim-saturation)
-sim/tools/saturation.csv
-sim/tools/saturation.png
-
-# injection-rate sweep outputs (make sim-injection-sweep)
+# injection-rate sweep outputs (make sim-injection-sweep) and every other
+# generated plot. The measurement figures already committed here stay tracked.
 sim/tools/injection_sweep.csv
-sim/tools/injection_sweep.png
-sim/tools/injection_sweep_dark.png
+sim/tools/*_sweep*.png
 
 # Knowledge-base binaries and derived index. Text extractions are tracked so the
 # corpus travels with the repository; the source PDFs and the embedding index are

@@ -1,8 +1,8 @@
 """Summarize every run under sim/verilator/output/ as markdown tables.
 
 One parameter set = one section: a one-row parameter table, then a result
-table with one row per pattern (status + performance). Runs sharing a
-parameter set and pattern are averaged across seeds (n shown when > 1).
+table with one row per pattern. Runs sharing a parameter set and pattern are
+averaged across seeds.
 
 Performance columns are filled from continuous (mode 1) runs only; a directed
 run is a closed-loop two-phase drain, so it contributes its scoreboard verdict
@@ -32,7 +32,16 @@ _PARAM_COLS = ("topology", "vc", "router_depth", "outstanding", "txns_per_id",
                "ids/init", "burst_len", "mode", "rate", "txns/node", "mst_stall")
 
 
-def emit_table(header, rows):
+def emit_table(header, rows, groups=None):
+    """Markdown table. With `groups` = [(title, span), ...] the header row
+    carries the group titles (first cell of each span) and `header` becomes
+    the first body row, the sub-column names under each group."""
+    if groups:
+        top = []
+        for title, span in groups:
+            top += [title] + [""] * (span - 1)
+        rows = [header] + rows
+        header = top
     widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(header)]
     line = lambda cells: "| " + " | ".join(c.ljust(w) for c, w in zip(cells, widths)) + " |"
     print(line(header))
@@ -40,6 +49,38 @@ def emit_table(header, rows):
     for r in rows:
         print(line(r))
     print()
+
+
+_NODE_BW = re.compile(
+    r"\[Monitor node(?P<node>\d+)\.master\]\[(?:Read|Write)\].*?BW:\s*"
+    r"(?P<bw>[\d.]+)\s*Bits/cycle")
+
+
+def node_rates(log_path):
+    """Accepted bytes per cycle per node from the run.log monitor lines: read
+    plus write BW of each node's master, in node order. Idle nodes count with
+    0. None when the run carries no run.log."""
+    if not log_path.exists():
+        return None
+    per_node = defaultdict(float)
+    for m in _NODE_BW.finditer(log_path.read_text()):
+        per_node[int(m.group("node"))] += float(m.group("bw")) / 8
+    return [per_node[n] for n in sorted(per_node)] or None
+
+
+def mesh_nodes(topology):
+    """Node count named by a mesh_<x>x<y> topology, None for other names."""
+    m = re.match(r"mesh_(\d+)x(\d+)$", topology)
+    return int(m.group(1)) * int(m.group(2)) if m else None
+
+
+def completion_cycles(perf_path):
+    """Cycles from reset release until the last node finished, the perf.json
+    window the tb closes at end of simulation. None without perf.json."""
+    if not perf_path.exists():
+        return None
+    w = json.loads(perf_path.read_text())["window"]
+    return w["end_cyc"] - w["start_cyc"]
 
 
 def dat_link_util(perf_path):
@@ -91,9 +132,12 @@ def collect(out_root):
             groups[key][row["pattern"]].append({
                 "status": "PASS (completed, no data check)",
                 "space": row.get("space", "memory"),
-                "bw": float(row["accepted_bits_per_cycle"]) / 8,  # bytes/cycle
+                "bw": float(row["accepted_bits_per_cycle"]) / 8,  # bytes/cycle, all nodes
+                "nodes": mesh_nodes(row["topology"]),
+                "bw_node": node_rates(run_dir / "run.log"),
                 "latency": float(row["mean_latency"]),
                 "dat_util": dat_util,
+                "completion": completion_cycles(run_dir / "perf.json"),
             })
         else:
             m = _TAG.match(run_dir.name)
@@ -166,11 +210,12 @@ def main():
                         lk[0] != "default", lk[0]))
 
     print("# Continuous-mode parameter sweep\n")
-    print("BW: accepted bandwidth, B/cycle, summed over all node monitors. "
-          "Latency: sample-weighted mean from AX handshake to last response "
-          "beat. One seed per cell. PASS (completed) means protocol checks, "
-          "model invariants and watchdog stayed clean. The scoreboard is armed "
-          "in directed and checked modes only.")
+    print("BW: accepted bandwidth per node, read plus write bytes per cycle "
+          "at the AXI master, avg over every node of the mesh, min and max "
+          "the lightest and the heaviest node (booksim2 accepted rate "
+          "reporting). Port capacity is 64 B/cycle per direction. Completion: "
+          "cycles from reset release until the last node finished its "
+          "transactions. A cell is the mean over its seeds.")
     print()
     for i, (label, key) in enumerate(labeled, 1):
         patterns = groups[key]
@@ -190,34 +235,48 @@ def main():
                 ok = [r[field] for r in rs if field in r]
                 return sum(ok) / len(ok) if ok else None
 
-            flags = [f"{name} FAIL" for name, rs in (("data", data),
-                                                     ("narrow", narrow))
-                     if any(r["status"] == "FAIL" for r in rs)]
-            status = ", ".join(flags) if flags else runs[0]["status"]
             dbw, dlat = mean(data, "bw"), mean(data, "latency")
             nlat = mean(narrow, "latency")
             delta = f"{nlat - dlat:+.1f}" if dlat is not None and \
                 nlat is not None else "-"
             fmt = lambda v: f"{v:.1f}" if v is not None else "-"
-            row = [pattern, status, fmt(dbw), fmt(dlat)]
+            # BW and data latency average over the data runs; narrow probes
+            # ride the same cell.
+            per_node = [r["bw_node"] for r in data if r.get("bw_node")]
+            if per_node:
+                avg = sum(sum(v) / len(v) for v in per_node) / len(per_node)
+                lo = sum(min(v) for v in per_node) / len(per_node)
+                hi = sum(max(v) for v in per_node) / len(per_node)
+            else:
+                # No run.log (ctest fixtures): avg from the csv sum and the
+                # mesh node count, extremes unknown.
+                nodes = [r["nodes"] for r in data if r.get("nodes")]
+                avg = dbw / nodes[0] if dbw is not None and nodes else None
+                lo = hi = None
+            done = [r["completion"] for r in data if r.get("completion")]
+            comp = f"{sum(done) / len(done):.0f}" if done else "-"
+            row = [pattern, fmt(avg), fmt(lo), fmt(hi), comp]
             if has_narrow:
-                row += [fmt(nlat), delta]
+                row += [fmt(dlat), fmt(nlat), delta]
             if has_util:
                 utils = [r["dat_util"] for r in data if r.get("dat_util")]
                 if utils:
-                    # mean of per-run means; extremes across runs
-                    row += [f"{100 * sum(u[0] for u in utils) / len(utils):.1f}%",
-                            f"{100 * max(u[1] for u in utils):.1f}%",
-                            f"{100 * min(u[2] for u in utils):.1f}%"]
+                    # avg of per-run avgs; extremes across runs
+                    row += [f"{100 * sum(u[0] for u in utils) / len(utils):.1f}",
+                            f"{100 * min(u[2] for u in utils):.1f}",
+                            f"{100 * max(u[1] for u in utils):.1f}"]
                 else:
                     row += ["-", "-", "-"]
             rows.append(row)
-        header = ["pattern", "status", "BW (B/cyc)", "data lat (cyc)"]
+        col_groups = [("pattern", 1), ("BW (B/cyc/node)", 3), ("completion (cyc)", 1)]
+        header = ["", "avg", "min", "max", "all nodes"]
         if has_narrow:
-            header += ["narrow lat (cyc)", "narrow-data (cyc)"]
+            col_groups.append(("latency (cyc)", 3))
+            header += ["data", "narrow", "narrow-data"]
         if has_util:
-            header += ["DAT util mean (%)", "max (%)", "min (%)"]
-        emit_table(header, rows)
+            col_groups.append(("DAT link util (%)", 3))
+            header += ["avg", "min", "max"]
+        emit_table(header, rows, col_groups)
 
 
 if __name__ == "__main__":

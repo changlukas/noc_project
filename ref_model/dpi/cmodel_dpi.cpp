@@ -360,7 +360,8 @@ extern "C" unsigned long long cmodel_dat_merge_create(const char* name, int dat_
 extern "C" void cmodel_dat_merge_set_inputs(unsigned long long ctx, svBit nmu_tx_dat_valid,
                                             svBitVecVal* nmu_tx_dat_flit, svBit nsu_tx_dat_valid,
                                             svBitVecVal* nsu_tx_dat_flit,
-                                            svBitVecVal* tx_dat_crdvalid, svBit rx_dat_valid,
+                                            svBitVecVal* tx_dat_crdvalid,
+                                            svBitVecVal* nsu_rx_dat_crdvalid, svBit rx_dat_valid,
                                             svBitVecVal* rx_dat_flit) {
     DPI_BOUNDARY_BEGIN(cmodel_dat_merge_set_inputs) {
         REQUIRE_HANDLE(ctx, WrapType::DatMerge, "cmodel_dat_merge_set_inputs");
@@ -371,6 +372,7 @@ extern "C" void cmodel_dat_merge_set_inputs(unsigned long long ctx, svBit nmu_tx
         in.nsu_tx_dat_valid = static_cast<bool>(nsu_tx_dat_valid);
         in.nsu_tx_dat_flit = DatFlitMarshal::unpack(nsu_tx_dat_flit);
         in.tx_dat_crdvalid = unpack_vc_credit<VcCreditVec>(tx_dat_crdvalid, m->num_vc());
+        in.nsu_rx_dat_crdvalid = unpack_vc_credit<VcCreditVec>(nsu_rx_dat_crdvalid, m->num_vc());
         in.rx_dat_valid = static_cast<bool>(rx_dat_valid);
         in.rx_dat_flit = DatFlitMarshal::unpack(rx_dat_flit);
         m->set_inputs(in);
@@ -861,13 +863,16 @@ void dump_one_credit_router(const std::string& name, const char* net,
             std::printf("[FABRIC-DUMP] %s.%s out_fifo[%s]=%zu/%zu\n", name.c_str(), net,
                         kPortName[p], out_occ, r.output_fifo_depth());
         }
-        if (auto lock = r.wormhole_locked_input(p)) {
-            std::printf(
-                "[FABRIC-DUMP] %s.%s wormhole[%s] locked_input=%s locked_input_vc=%u "
-                "locked_output_vc=%u\n",
-                name.c_str(), net, kPortName[p], kPortName[*lock],
-                static_cast<unsigned>(r.wormhole_locked_input_vc(p).value_or(255)),
-                static_cast<unsigned>(r.wormhole_locked_output_vc(p).value_or(255)));
+        for (uint8_t vc = 0; vc < nvc; ++vc) {
+            if (auto lock = r.wormhole_locked_input(p, vc)) {
+                // locked_output_vc always equals the slot's own vc, so it is
+                // not printed.
+                std::printf(
+                    "[FABRIC-DUMP] %s.%s wormhole[%s][vc%u] locked_input=%s "
+                    "locked_input_vc=%u\n",
+                    name.c_str(), net, kPortName[p], vc, kPortName[*lock],
+                    static_cast<unsigned>(r.wormhole_locked_input_vc(p, vc).value_or(255)));
+            }
         }
     }
 }

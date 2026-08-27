@@ -48,6 +48,7 @@ module dat_merge_wrap #(
     output logic [DAT_NUM_VC-1:0]     nsu_tx_dat_crdvalid_o,
     output logic                      nsu_rx_dat_valid_o,
     output logic [DAT_FLIT_WIDTH-1:0] nsu_rx_dat_flit_o,
+    input  logic [DAT_NUM_VC-1:0]     nsu_rx_dat_crdvalid_i,
 
     // Router-facing (this module's own view; connects to router_wrap's DAT
     // LOCAL port, i.e. rx_dat_valid[LOCAL]/tx_dat_valid[LOCAL] etc.).
@@ -70,6 +71,7 @@ module dat_merge_wrap #(
         input  bit                    nsu_tx_dat_valid,
         input  bit [DAT_FLIT_WIDTH-1:0] nsu_tx_dat_flit,
         input  bit [DAT_NUM_VC-1:0]   tx_dat_crdvalid,
+        input  bit [DAT_NUM_VC-1:0]   nsu_rx_dat_crdvalid,
         input  bit                    rx_dat_valid,
         input  bit [DAT_FLIT_WIDTH-1:0] rx_dat_flit
     );
@@ -127,6 +129,7 @@ module dat_merge_wrap #(
                 nmu_tx_dat_valid_i, nmu_tx_dat_flit_i,
                 nsu_tx_dat_valid_i, nsu_tx_dat_flit_i,
                 tx_dat_crdvalid_i,
+                nsu_rx_dat_crdvalid_i,
                 rx_dat_valid_i, rx_dat_flit_i
             );
 

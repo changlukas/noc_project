@@ -180,9 +180,9 @@ TEST(NmuVcAllocatorRoundRobin, DistinctReadIdsSpreadAcrossVcs) {
     EXPECT_EQ(vc_d, 3u);
 }
 
-// No fixed VC yet: same awid, different dst_id -- the streak broke, so
-// round-robin (spread) resumes.
-TEST(NmuVcAllocatorRoundRobin, SameWriteIdDifferentDestRoundRobins) {
+// Same awid, different dst_id: dst_id is half the hash input, so the two
+// streams separate onto their own VCs.
+TEST(NmuVcAllocator, SameWriteIdDifferentDestHashApart) {
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.req_out(), /*num_vc=*/4);
     uint8_t a =
@@ -190,14 +190,32 @@ TEST(NmuVcAllocatorRoundRobin, SameWriteIdDifferentDestRoundRobins) {
     ASSERT_EQ(push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1)), a);
     uint8_t b =
         push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/1, 0, 0, /*id=*/0x04));
-    EXPECT_EQ(a, 0u);
-    EXPECT_EQ(b, 1u) << "different dst_id -- no fixed VC yet, round-robin advances";
+    EXPECT_EQ(a, (0 ^ 0x04) % 4);
+    EXPECT_EQ(b, (1 ^ 0x04) % 4);
 }
 
-// ordering_req=1 (RoB-owned) flits are order-free by construction -- the RoB
-// reorders them, so the fixed VC id logic is skipped and they always
-// round-robin, even with a matching (dst, id).
-TEST(NmuVcAllocatorRoundRobin, RobbedFlitsRoundRobinRegardlessOfDest) {
+// Same (dst, id) always rides the same VC, even with another destination's
+// write in between: per-(output, VC) router locks only keep order within a VC.
+TEST(NmuVcAllocator, SameDstAndIdAlwaysTakeTheSameVc) {
+    constexpr std::size_t num_vc = 4;
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    VcAllocator arb(noc.req_out(), num_vc);
+    // One AW plus its wlast W beat through the allocator; returns the AW's vc_id.
+    auto vc_of_aw = [&](uint8_t dst_id, uint8_t id) {
+        uint8_t vc = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, dst_id, 0, 0, id));
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1));
+        return vc;
+    };
+    const uint8_t vc_first = vc_of_aw(/*dst=*/0x03, /*id=*/1);
+    (void)vc_of_aw(/*dst=*/0x0A, /*id=*/1);
+    EXPECT_EQ(vc_of_aw(/*dst=*/0x03, /*id=*/1), vc_first);
+    EXPECT_EQ(vc_first, static_cast<uint8_t>((0x03 ^ 1) % num_vc));
+}
+
+// The AW hash reads (dst_id, awid) and nothing else, so an ordering_req=1
+// (RoB-owned) AW lands on the same VC as an ordering_req=0 one. Only the
+// fixed_vc stamp distinguishes them (FixedVcClearOnRobbedAwAndAr).
+TEST(NmuVcAllocator, RobbedAwHashesLikeAnOrderedAw) {
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.req_out(), /*num_vc=*/4);
     Flit f1 = make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x04);
@@ -207,8 +225,8 @@ TEST(NmuVcAllocatorRoundRobin, RobbedFlitsRoundRobinRegardlessOfDest) {
     uint8_t a = push_and_vc(arb, noc, f1);
     ASSERT_EQ(push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1)), a);
     uint8_t b = push_and_vc(arb, noc, f2);
-    EXPECT_EQ(a, 0u);
-    EXPECT_EQ(b, 1u) << "ordering_req=1 -- always round-robin, never fixed";
+    EXPECT_EQ(a, (0 ^ 0x04) % 4);
+    EXPECT_EQ(b, a) << "ordering_req is not a hash input";
 }
 
 // NUM_VC==1 short-circuits before the fixed VC id check (select_vc_for_axi_ch's
@@ -224,44 +242,43 @@ TEST(NmuVcAllocatorRoundRobin, NumVc1SameIdSameDestUnaffected) {
     EXPECT_EQ(b, 0u);
 }
 
-// W follows its AW's VC even when that VC came from a fixed VC id reuse, not
-// a fresh round-robin pick -- the second AW's W beat must land on the reused
-// VC (0), not the next round-robin slot (1).
-TEST(NmuVcAllocator, WFollowsAW_ReusedFixedVc) {
+// A W beat takes its AW's VC, not a VC of its own: both AWs of a same-(dst,id)
+// pair hash to VC 0 and each burst's W must land there too.
+TEST(NmuVcAllocator, WFollowsAW_AcrossTwoBursts) {
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.req_out(), /*num_vc=*/4);
+    const uint8_t hashed = (0 ^ 0x04) % 4;
 
-    // AW1 (dst=0, id=0x04): first sighting -> round-robin picks VC 0.
     uint8_t aw1_vc =
         push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x04));
-    EXPECT_EQ(aw1_vc, 0u);
+    EXPECT_EQ(aw1_vc, hashed);
     uint8_t w1_vc = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1));
-    EXPECT_EQ(w1_vc, 0u);
+    EXPECT_EQ(w1_vc, hashed);
     EXPECT_FALSE(arb.has_current_aw());
 
-    // AW2 same (dst,id): fixed VC hit -> reuses VC 0 (round-robin would pick VC 1).
     uint8_t aw2_vc =
         push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x04));
-    EXPECT_EQ(aw2_vc, 0u) << "fixed VC hit must reuse VC0, not round-robin to VC1";
+    EXPECT_EQ(aw2_vc, hashed);
     uint8_t w2_vc = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1));
-    EXPECT_EQ(w2_vc, 0u) << "W must follow AW2's reused VC";
+    EXPECT_EQ(w2_vc, hashed) << "W must follow AW2's VC";
 }
 
-// fixed_vc on an ordering_req=0 AW streak. The FIRST AW of the streak is the
-// hole case: it only records (dst, VC), so leaving it unpinned would let a
-// router restamp it while its successors stay put, inverting same-id write
-// order with nothing downstream to catch it.
-TEST_P(NmuVcAllocatorParam, FixedVcStampedOnOrderedAwStreak) {
+// fixed_vc on every AW of an ordering_req=0 same-(dst,id) write stream.
+// Leaving any of them unstamped would let a router restamp that one while its
+// neighbours stay put, inverting same-id write order with nothing downstream
+// to catch it.
+TEST_P(NmuVcAllocatorParam, FixedVcStampedOnEveryOrderedAw) {
     const std::size_t num_vc = GetParam();
 
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.req_out(), num_vc);
 
-    for (int i = 0; i < 2; ++i) {  // i=0 records the (dst,VC) pair, i=1 reuses it
+    for (int i = 0; i < 2; ++i) {
         Flit aw = push_and_pop(arb, noc,
                                make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0,
                                          /*id=*/0x04));
-        EXPECT_EQ(aw.get_header_field("fixed_vc"), 1u) << "AW #" << i << " of an ordered streak";
+        EXPECT_EQ(aw.get_header_field("fixed_vc"), 1u)
+            << "AW #" << i << " of an ordered write stream";
         Flit w = push_and_pop(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1));
         EXPECT_EQ(w.get_header_field("fixed_vc"), 1u) << "W must carry its AW's fixed_vc";
     }

@@ -301,9 +301,12 @@ static void run_chain(bool* ok_data, uint8_t requester_port_id = 0) {
 // from delivering AW_A,AW_B while DAT delivers W_B,W_A, mis-pairing AW_A
 // with W_B at the slave (the design's counterexample). T6 puts both AW and W
 // of one worm on the SAME network, so the source-side {AW,W} wormhole lock
-// (already atomic per NMU, S3a T4/T5) plus C's own per-output wormhole lock
-// (router::Router, credit DAT class) make that interleave structurally
-// impossible regardless of which worm wins the race.
+// (already atomic per NMU, S3a T4/T5) keeps each worm's AW and W contiguous at
+// its source, and C's Depacketize reassembles each DAT VC's flits into its own
+// burst. The router's lock is per (output, VC), so it keeps worms contiguous
+// only WITHIN a VC -- A's and B's worms may interleave flit by flit on the
+// shared link when they land on different VCs, and the per-VC reassembly is
+// what makes that harmless.
 //
 // Row topology A(0,0) - C(1,0) - B(2,0), mesh_x=3: both masters are one XY
 // hop from the target, so contention lands at C's own inbound arbitration,
