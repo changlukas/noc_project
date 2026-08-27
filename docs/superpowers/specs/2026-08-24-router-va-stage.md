@@ -97,9 +97,9 @@ back single flit packets at one per cycle.
 
 ## Docs
 
-`docs/router-spec.md` 2.4 (stage table, per router head 4 body 3, SA before VA, one pop per
+`docs/router-spec.md` 2.4 (stage table, per router head 4 then one flit per cycle, SA before VA, one pop per
 input VC), 2.5 (VA a cycle before SA, VA rule, VA arbitration pointers), 2.6 (lock at VA, fork
-atomic), R10 (head 4, body 3), SPEC 4, SPEC 10 to 13, SPEC 15 withdrawn, SPEC 16, the worked
-example in 2.9 and the multi pop example in 2.4. SPEC 4 becomes DAT head 4, body 3 at the
+atomic), R10 (head 4, one flit per cycle after), SPEC 4, SPEC 10 to 13, SPEC 15 withdrawn, SPEC 16, the worked
+example in 2.9 and the multi pop example in 2.4. SPEC 4 becomes DAT head 4 then one flit per cycle at the
 wrapper pins. `docs/noc-target-spec.md` 7.4 as built line. `docs/known-limitations.md` multi pop
 row removed.

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** The DAT `router::Router` allocates the output VC in its own stage: head 4 cycles per router, body and tail 3, single flit 4. `SimpleRouter` unchanged.
+**Goal:** The DAT `router::Router` allocates the output VC in its own stage: head 4 cycles per router, each following flit one cycle after the flit ahead of it, single flit 4. `SimpleRouter` unchanged.
 
 **Architecture:** Per input VC state {idle, active} with route and output VC. A tick runs LT, SA+ST, VA, fork pop, BW in that order (reverse pipeline, as today). VA runs on the FIFO front head of every idle input VC and locks `wormhole_[out][out_vc]`. SA serves held VCs only. Details and every ruling: the spec below.
 
@@ -201,8 +201,8 @@ Status: Not Started
 
 ### Task 2: router-spec and target spec
 
-- [ ] Edit `docs/router-spec.md`: 2.4 (stage table gains a VA row, per router head 4 body 3, SA before VA within a cycle, one pop per input VC per cycle, delete the multi pop worked example), 2.5 (VA a cycle before SA, VA rule single flit overflow only, pointer stages), 2.6 (lock at VA, fork per branch at VA), 2.7 (credit round trip one cycle longer), 2.9 worked example redone (head cycle 0 in, VA cycle 1, SA cycle 2, link cycle 3, at B cycle 4), R10 (head 4, body 3), SPEC 4 (DAT head 4 body 3 at the wrapper pins), SPEC 6 (VA rule, cited test kept), SPEC 10 to 14 wording to VA/SA, SPEC 15 withdrawn with one line saying so, SPEC 16 pointer rule. Add one line in 2.4: `dat_merge_wrap` TX 1 cycle is the DPI wrap output register, target RTL folds the merge into the NI with no TX cycle, RX 1 cycle matches the FlooNoC chimney spill register.
-- [ ] `docs/noc-target-spec.md` 7.4 as built line: DAT head 4, body 3 per router.
+- [ ] Edit `docs/router-spec.md`: 2.4 (stage table gains a VA row, per router head 4 then one flit per cycle, SA before VA within a cycle, one pop per input VC per cycle, delete the multi pop worked example), 2.5 (VA a cycle before SA, VA rule single flit overflow only, pointer stages), 2.6 (lock at VA, fork per branch at VA), 2.7 (credit round trip one cycle longer), 2.9 worked example redone (head cycle 0 in, VA cycle 1, SA cycle 2, link cycle 3, at B cycle 4), R10 (head 4, one flit per cycle after), SPEC 4 (DAT head 4 at the wrapper pins, following flits one per cycle), SPEC 6 (VA rule, cited test kept), SPEC 10 to 14 wording to VA/SA, SPEC 15 withdrawn with one line saying so, SPEC 16 pointer rule. Add one line in 2.4: `dat_merge_wrap` TX 1 cycle is the DPI wrap output register, target RTL folds the merge into the NI with no TX cycle, RX 1 cycle matches the FlooNoC chimney spill register.
+- [ ] `docs/noc-target-spec.md` 7.4 as built line: DAT head 4 per router, following flits one per cycle.
 - [ ] `docs/known-limitations.md`: remove the multi pop row.
 - [ ] `grep -rn 'exactly 3 cycles\|3 cycles on DAT\|several pops\|multi-grant' docs/` returns only SimpleRouter statements.
 - [ ] Commit `docs(router): four stage DAT router, VA a cycle before SA`
