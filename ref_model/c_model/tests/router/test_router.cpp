@@ -1399,6 +1399,58 @@ TEST(RouterVaWorkConserving, HeadVaFailAlternateCandidateGrantedSameTick) {
     EXPECT_EQ(static_cast<uint8_t>(east.received[1].get_header_field("vc_id")), 0u);
 }
 
+// Neither VA pointer moves on a failed VA, so the candidate that could not
+// allocate keeps first priority: when the VC frees it wins over a candidate
+// that arrived later on another input.
+TEST(RouterVaWorkConserving, FailedVaLeavesTheArbitrationPointers) {
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto NORTH = static_cast<std::size_t>(RouterPort::NORTH);
+    const auto SOUTH = static_cast<std::size_t>(RouterPort::SOUTH);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+    // dst (3,1) routes EAST here, next hop EAST -> preferred vc1 for every
+    // candidate below. A worm head never overflows, so vc1 is the only VC any
+    // of them can take.
+    const uint8_t dst = make_dst(3, 1);
+
+    // An open worm from (WEST, input vc0) holds (EAST, vc1). Its VA grant left
+    // in_vc_rr_[EAST] = 1 and rr_[EAST] = LOCAL, so input vc1 is scanned first
+    // and NORTH is reached before SOUTH.
+    r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*flit_tail=*/0));
+    r.tick();
+    r.tick();
+    ASSERT_EQ(r.wormhole_locked_input(E, 1), std::optional<std::size_t>(WEST));
+
+    // Candidate A on (NORTH, input vc1): worm head, preferred vc1 held -> VA
+    // fails, and it is the only candidate, so EAST grants nothing this tick.
+    r.input(NORTH).push_flit(make_flit(dst, /*vc=*/1, /*flit_tail=*/0));
+    r.tick();  // stage 1 BW
+    r.tick();  // stage 2 VA: A fails
+    ASSERT_FALSE(r.va_out_vc(NORTH, 1).has_value());
+
+    // Candidate B on (SOUTH, input vc1) arrives later and fails the same way.
+    r.input(SOUTH).push_flit(make_flit(dst, /*vc=*/1, /*flit_tail=*/0));
+    r.tick();  // stage 1 BW
+    r.tick();  // stage 2 VA: both fail, vc1 still held
+    ASSERT_FALSE(r.va_out_vc(NORTH, 1).has_value());
+    ASSERT_FALSE(r.va_out_vc(SOUTH, 1).has_value());
+
+    // Free vc1: the holder's tail passes SA, and VA allocates in the same tick
+    // because SA runs first.
+    r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*flit_tail=*/1));
+    r.tick();  // stage 1 BW files the tail behind the still-held vc1
+    ASSERT_EQ(r.wormhole_locked_input(E, 1), std::optional<std::size_t>(WEST));
+    r.tick();  // stage 3 SA grants the tail and frees vc1; stage 2 VA re-allocates
+
+    EXPECT_EQ(r.va_out_vc(NORTH, 1), std::optional<uint8_t>(1))
+        << "the candidate whose VA failed lost its place in the rotation";
+    EXPECT_FALSE(r.va_out_vc(SOUTH, 1).has_value())
+        << "the later arrival was allocated ahead of it";
+    EXPECT_EQ(r.wormhole_locked_input(E, 1), std::optional<std::size_t>(NORTH));
+}
+
 TEST(RouterVaCredit, ConsumeStampedVcReturnInputVc) {
     RouterConfig cfg = center_cfg();
     cfg.num_vc = 2;
