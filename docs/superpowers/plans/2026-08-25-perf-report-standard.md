@@ -59,43 +59,52 @@ def test_open_latency_adds_source_queue_delay(tmp_path, monkeypatch):
     row = next(csv.DictReader(out.open()))
     assert row["mean_latency_network"] == "50.0"   # (40*100 + 60*100) / 200
     assert row["mean_latency_open"] == "70.0"      # + (10*100 + 30*100) / 200
-    # offered: p = 0.5 AX per cycle per channel, two channels, 33 flits per write (AW + 32 W),
-    # 32 flits per read (R beats), so (0.5*33 + 0.5*32) flits per node per cycle
-    assert row["offered_flits_per_node_cycle"] == "32.5"
-    assert row["offered_bytes_per_node_cycle"] == "2048.0"  # 0.5*32*64 + 0.5*32*64
+    # offered on the DAT plane: p = 0.5 AX per cycle on each of AW and AR. BURST_LEN 32 is
+    # AxLEN 32, 33 beats (gen_test_patterns.py emits axi_len + 1 W beats). A write is
+    # 1 AW header + 33 W = 34 DAT flits, a read is 33 R = 33 DAT flits (AR rides REQ).
+    # flits: 0.5 * 34 + 0.5 * 33 = 33.5. bytes (payload beats only): 0.5 * 33 * 64 * 2 = 2112.
+    assert row["offered_flits_per_node_cycle"] == "33.5"
+    assert row["offered_bytes_per_node_cycle"] == "2112.0"
     assert "mean_latency" not in row
 ```
 
-Adjust the offered load formula to what the generator actually issues per AX (read `sim/tools/gen_test_patterns.py` for beats per transaction and `emit_result_csv.py --burst-len`): the test's numbers must follow from that reading, state the formula in the report docstring.
+Verify the beat count against `sim/tools/gen_test_patterns.py` (`axi_len + 1` W beats per write, same for R) before trusting the numbers above, state the formula in the module docstring. Offered load counts DAT plane network flits only (AW header plus beats), the spec's convention.
 
 - [ ] **Step 2: Run** `cd sim/tools && python3 -m pytest -q test_emit_result_csv.py`. Expected FAIL (no `mean_latency_open`).
 
-- [ ] **Step 3: Implement the tb.** In `user_node_endpoint.sv`, replace the pacing tasks:
+- [ ] **Step 3: Implement the tb.** In `user_node_endpoint.sv`, replace the pacing tasks. The Bernoulli process must keep running every cycle while a send is blocked on ready (booksim `_Inject`, `trafficmanager.cpp:930-941`), so it is its own process that produces slot times into a queue, and the send task consumes the queue:
 
 ```systemverilog
-    // Open loop source queue (booksim2 _qtime, trafficmanager.cpp:922-945):
-    // the injection process advances qtime every cycle regardless of the
-    // network. A send waits for its slot and for the channel, and the wait
-    // past the slot is the source queue delay the packet latency includes.
-    longint unsigned aw_qtime, ar_qtime;
+    // Open loop source queue (booksim2 _qtime, trafficmanager.cpp:922-945).
+    // One Bernoulli trial per cycle per channel, independent of the network:
+    // a hit appends the cycle as a slot. The send task takes the oldest slot
+    // and issues when the channel is ready. handshake minus slot is the source
+    // queue delay the packet latency includes and the monitor does not see.
+    longint unsigned aw_slots[$], ar_slots[$];
     longint unsigned srcq_w_sum, srcq_r_sum;
     int unsigned     srcq_w_n,   srcq_r_n;
 
+    always @(posedge clk_i) begin
+        if (rst_ni && pacing_on) begin
+            if ($urandom_range(0, 99) < injection_rate_pct) aw_slots.push_back(cycle_cnt);
+            if ($urandom_range(0, 99) < injection_rate_pct) ar_slots.push_back(cycle_cnt);
+        end
+    end
+
     task automatic run_aw_paced();
-        aw_qtime = cycle_cnt;
+        longint unsigned slot;
         while (file_master.aw_queue.size() > 0) begin
-            while ($urandom_range(0, 99) >= injection_rate_pct) aw_qtime++;
-            while (cycle_cnt < aw_qtime) @(posedge clk_i);
-            file_master.drv.send_aw(file_master.aw_queue[0]);
-            srcq_w_sum += cycle_cnt - aw_qtime;
+            while (aw_slots.size() == 0) @(posedge clk_i);
+            slot = aw_slots.pop_front();
+            file_master.drv.send_aw(file_master.aw_queue[0]);  // blocks until awready
+            srcq_w_sum += cycle_cnt - slot;
             srcq_w_n++;
-            aw_qtime++;
             void'(file_master.aw_queue.pop_front());
         end
     endtask
 ```
 
-`cycle_cnt` is whatever free running cycle counter the endpoint already has (grep for the `[mst_bp]` accounting or the monitor's `cycle_cnt`; add one if none). `send_aw` returns after the handshake, so `cycle_cnt - aw_qtime` is the delay including the ready wait. Same shape for AR. At end of sim, next to the `[mst_bp]` display, print `[SrcQueue node%0d][Read] mean: %0.2f, N: %0d` and `[Write]` (mean 0.00 with N 0 when nothing was issued). Do not touch mode 0 or mode 2 pacing beyond sharing the task if they already share it (mode 2 uses `run_aw_paced`, keep it working).
+`pacing_on` is set when mode 1 or 2 starts and cleared when the AW and AR queues are both empty, so slots stop accumulating after the last transaction. `cycle_cnt` is the endpoint's free running cycle counter (grep the `[mst_bp]` accounting; add one if none). Same shape for AR. Mode 2 keeps using `run_aw_paced`. At end of sim, next to the `[mst_bp]` display, print `[SrcQueue node%0d][Read] mean: %0.2f, N: %0d` and `[Write]` (mean 0.00 with N 0 when nothing was issued). Do not touch mode 0 or mode 2 pacing beyond sharing the task if they already share it (mode 2 uses `run_aw_paced`, keep it working).
 
 - [ ] **Step 4: Implement the CSV.** `emit_result_csv.py`: parse `[SrcQueue …]` lines, compute sample weighted means for the monitor latency (`mean_latency_network`) and for the source queue delay, `mean_latency_open = network + srcq`. Offered load from `--injection-rate` and `--burst-len` per the formula you derived. Drop `mean_latency`. Update the module docstring.
 
@@ -168,14 +177,14 @@ Status: Not Started
 - Produces: `perf_report.md` sections 1 to 4 and appendices A, B per the spec.
 
 - [ ] **Step 1: Write the failing tests** (fixtures write `result.csv` and `run.log` under `tmp_path/continuous_mesh_4x4_<pattern>_r<rate>_s<seed>`):
-  - `test_curve_marks_3x_and_knee`: 5 rates for uniform_random with `mean_latency_open` 40, 42, 50, 130, 400 and accepted 5, 10, 20, 21, 21: the 3x point is the first rate where open latency is at least 120 (interpolate between neighbours, state the rule), the knee is the rate after which accepted rises less than 5 percent per step.
+  - `test_curve_marks_saturation`: 5 rates for uniform_random with `mean_latency_open` 40, 42, 50, 130, 400 and accepted 5, 10, 20, 21, 21: the saturation offered load is where open latency crosses 3 times the lowest rate's value, linearly interpolated between the two neighbouring rates (here between the third and fourth rate), and the accepted throughput reported for saturation is the interpolated accepted value at that load. No separate knee metric.
   - `test_pattern_summary_percent_of_ideal`: with `pattern_metrics` ideal 1.0 and a measured saturation 0.6, the row shows `60`.
   - `test_seed_spread_column`: two seeds at one rate give mean and max minus min.
   - `test_no_removed_names`: `grep` equivalent in Python over `Makefile`, `sim/`, `docs/`, `README.md` for the removed script names returns no hits (run last, after deletions).
 
 - [ ] **Step 2: Run** pytest. Expected FAIL.
 
-- [ ] **Step 3: Implement** `perf_report.py` (stdlib only, matplotlib optional for a PNG per curve, skipped without it). Group runs by parameter tuple as the old summarizer did (keep that `collect()` logic, moved and trimmed). Section 1 Method text comes from constants in the script and the `[Config]` line. Section 2 uses the zero-load rows (rate 0.005) of the narrow and data probe runs if present under the output dir (`s2zl*` tags) and the per stage table as a static block. Sections 3 and 4 from the curves. Appendix A from `perf.json`. Appendix B from any run whose tuple differs from the default in vc, router depth or NI RX depth.
+- [ ] **Step 3: Implement** `perf_report.py` (stdlib only, matplotlib optional for a PNG per curve, skipped without it). Group runs by parameter tuple as the old summarizer did (keep that `collect()` logic, moved and trimmed). Section 1 Method text comes from constants in the script and the `[Config]` line. Section 2 uses the zero-load rows (rate 0.005) of the narrow and data probe runs if present under the output dir (`s2zl*` tags) and the per stage table as a static block. Sections 3 and 4 from the curves. Saturation is the 3x rule only, no knee heuristic; section 3 also lists accepted throughput at the highest offered load, which is what booksim prints as accepted rate at saturation. Appendix A from `perf.json`. Appendix B from any run whose tuple differs from the default in vc, router depth or NI RX depth.
 
 - [ ] **Step 4: Delete** the files in the list, edit the Makefile target and the docs that mention them, run the grep. Expected: nothing.
 
@@ -193,9 +202,9 @@ Status: Not Started
 ### Task 4: sweeps
 
 - [ ] Archive every existing `continuous_*`, `rxdepth*`, `rvcdepth*`, `sweep/` under `sim/verilator/output/archive/pre_open_loop/` (they carry `mean_latency`, not `plat`). Keep `s2zl*` and `s2_*` probe dirs, rerun the zero-load pair at rate 0.005 with the new tb so `plat` exists for section 2.
-- [ ] `make build-verilator`. For each of uniform_random, tornado, shuffle, bit_complement, bit_reverse, transpose: `make sim-injection-sweep CONFIG=mesh_4x4 PATTERN=<p> SEED=1 BURST_LEN=32` (9 rates). Then for each pattern find the knee from a first `perf_report.py` pass and rerun the two rates around it with `SEED=2` and `SEED=3`. About 6 x 9 + 6 x 4 = 78 runs.
+- [ ] `make build-verilator`. Transaction count scales with rate so the offered window is at least 1000 cycles per node: `INJECTION_COUNT = max(200, round(rate * 1000))` (0.005 to 0.2 give 200, 0.5 gives 500, 1.0 gives 1000). Put that rule in the `sim-injection-sweep` target (Task 3) and in the Method section. For each of uniform_random, tornado, shuffle, bit_complement, bit_reverse, transpose: `make sim-injection-sweep CONFIG=mesh_4x4 PATTERN=<p> SEED=1 BURST_LEN=32` (9 rates). Then for each pattern find the 3x saturation load from a first `perf_report.py` pass and rerun the two rates around it with `SEED=2` and `SEED=3`. About 6 x 9 + 6 x 4 = 78 runs.
 - [ ] The other four patterns: one run each at rate 0.9, seed 1 2 3 (12 runs), so section 4 has their rows with a note that they are single points.
 - [ ] Appendix B single points: vc8 uniform_random and neighbor seed 1 at rate 0.9 (2 runs, yaml edit and restore, `codegen.py --check` clean).
-- [ ] Render: `python3 sim/tools/perf_report.py sim/verilator/output`. Read it once as a reviewer would: every table populated, no `?`, the 3x point and knee agree within one rate step for uniform_random or the discrepancy is stated.
+- [ ] Render: `python3 sim/tools/perf_report.py sim/verilator/output`. Read it once as a reviewer would: every table populated, no `?`, the 3x saturation point falls where accepted throughput flattens for uniform_random or the discrepancy is stated.
 - [ ] `docs/backlog.md` "Last round": the report rebuilt, where the numbers moved versus the old closed-loop report, the saturation table.
 - [ ] Commit `docs(backlog): standard performance report rendered`

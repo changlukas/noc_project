@@ -14,12 +14,14 @@ Codex survey 2026-08-25. No DUT change.
 | Packet latency `plat` | intended issue time (open loop source queue) to last response beat, `plat = nlat + source queue delay` | cycles |
 | Zero-load latency | `plat` at offered load 0.005 | cycles |
 | Saturation throughput | offered load at which `plat` reaches 3 times zero-load (textbook rule) | flits per node per cycle |
-| Accepted knee | offered load beyond which accepted throughput stops rising, reported beside the 3x point, labelled closed-loop knee | flits per node per cycle |
+| Accepted at max load | accepted throughput at the highest offered load, booksim's accepted rate at saturation | flits per node per cycle |
 | Ideal throughput | 1 / max channel load for the pattern under XY on the mesh, analytic | flits per node per cycle |
 | Avg hops | mean XY hop count of the pattern, analytic | hops |
 
 Flit counting: two bases, never mixed in one column. Network flits count every flit on DAT
-(AW header, W beats, R beats). Payload flits count W and R beats only. Ideal throughput and link
+(AW header, W beats, R beats): at AxLEN 32 a write is 34 flits, a read 33. Payload flits count
+W and R beats only. all_to_all excludes self traffic and uniform_random permits it, per the
+generator; the analytic script follows the generator. Ideal throughput and link
 utilization use network flits. Accepted throughput in bytes is payload by construction.
 
 ## Open loop injection
@@ -35,7 +37,7 @@ from that stamp and `nlat` from the actual injection (`:731-732`). The testbench
 | Source queue delay | AX handshake cycle minus the slot's `qtime`, recorded per transaction |
 | Report | per node at end of sim: `[SrcQueue nodeN][Read] mean=<cyc> n=<count>` and `[Write]` |
 | Outstanding | unchanged, NMU `max_txns_per_id` 32 is the network's backpressure, it becomes queue delay |
-| Run length | fixed transaction count as today, stated in Method. Above saturation `plat` grows with run length, which is the expected signature |
+| Run length | fixed transaction count per node, scaled with rate so the offered window is at least 1000 cycles (`max(200, rate x 1000)`), stated in Method. Above saturation `plat` grows with run length, which is the expected signature |
 
 `sim/dv/floonoc-test/axi_bw_monitor.sv` is not modified. `emit_result_csv.py` adds the source
 queue delay to the monitor mean, sample weighted, into `mean_latency_open`, and keeps the monitor
@@ -58,9 +60,9 @@ One generator, `sim/tools/perf_report.py <output dir>`, writes `sim/verilator/ou
 |---|---|
 | 1 Method | topology, router pipeline (REQ/RSP 2 cycles, DAT head 4 then one per cycle), flow control, NI parameters, injection model (open loop, Bernoulli, fixed count), seeds, latency definitions, flit bases |
 | 2 Zero-load latency | narrow and data read and write: measured `plat`, per stage decomposition, ideal fabric `H t_wire + L/b`, gap |
-| 3 Latency vs offered load | per pattern table (and a plot if matplotlib is present): offered load, accepted, `nlat`, `plat`, seed spread; the 3x point and the knee marked |
-| 4 Pattern summary | per pattern: avg hops, ideal throughput, saturation throughput (3x), knee, percent of ideal, zero-load `plat` |
-| Appendix A | link utilization avg min max per pattern at the knee |
+| 3 Latency vs offered load | per pattern table (and a plot if matplotlib is present): offered load, accepted, `nlat`, `plat`, seed spread; the 3x point marked |
+| 4 Pattern summary | per pattern: avg hops, ideal throughput, saturation throughput (3x), accepted at max load, percent of ideal, zero-load `plat` |
+| Appendix A | link utilization avg min max per pattern at the highest offered load |
 | Appendix B | parameter sensitivity single points: vc8, router VC depth 16 and 32, NI RX depth |
 
 Runs are grouped by their parameter tuple from `result.csv` as today. Patterns with a full
