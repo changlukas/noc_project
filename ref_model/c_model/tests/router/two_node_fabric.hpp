@@ -43,6 +43,9 @@ class TwoNodeFabric {
             c.mesh_y_dim = 1;
             c.num_vc = num_vc;
             c.vc_depth = vc_depth;
+            // The stand-in NI behind LOCAL is the EjectAdapter wire_local sizes
+            // from the same vc_depth, so its receive depth is vc_depth too.
+            c.local_vc_depth = vc_depth;
             c.output_fifo_depth = out_fifo_depth;
             req_routers_.push_back(std::make_unique<Router>(c));
             rsp_routers_.push_back(std::make_unique<Router>(c));

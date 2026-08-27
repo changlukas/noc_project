@@ -240,9 +240,10 @@ TEST(LinkAdapterConservation, StalledCreditDrainsOutputAndConservesFlits) {
     const auto LOCAL = static_cast<std::size_t>(RouterPort::LOCAL);
     const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
 
-    // LOCAL output buffer must cover the aggregate output credit = num_vc*vc_depth.
+    // LOCAL output buffer must cover the aggregate output credit = num_vc*out_seed
+    // (LOCAL seeds from local_vc_depth, not vc_depth -- router-spec §2.7 rule 1).
     const std::size_t out_seed = r.credit(LOCAL, 0);
-    LinkEjectAdapter local_out(static_cast<std::size_t>(c.num_vc) * c.vc_depth);
+    LinkEjectAdapter local_out(static_cast<std::size_t>(c.num_vc) * out_seed);
     LinkCreditOut link_credit(c.num_vc);
     r.set_downstream(LOCAL, local_out);
     r.set_upstream_credit(WEST, link_credit);

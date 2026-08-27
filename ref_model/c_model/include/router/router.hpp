@@ -137,7 +137,8 @@ class Router {
             assert(false && "Router: num_vc out of range (1 .. 2^VC_ID_WIDTH)");
             std::abort();
         }
-        if (cfg_.vc_depth < 2 || !is_power_of_two(cfg_.vc_depth)) {
+        if (cfg_.vc_depth < 2 || !is_power_of_two(cfg_.vc_depth) || cfg_.local_vc_depth < 2 ||
+            !is_power_of_two(cfg_.local_vc_depth)) {
             assert(false && "Router: vc_depth must be a power of two and at least 2");
             std::abort();
         }
@@ -151,7 +152,7 @@ class Router {
         }
         for (std::size_t p = 0; p < ROUTER_PORT_COUNT; ++p) {
             input_fifo_[p].resize(cfg_.num_vc);
-            credit_[p].assign(cfg_.num_vc, cfg_.vc_depth);
+            credit_[p].assign(cfg_.num_vc, out_credit_seed(p));
             fork_done_[p].assign(cfg_.num_vc, 0);
             wormhole_[p].assign(cfg_.num_vc, WormholeState{});
             input_adapters_.emplace_back(this, p);
@@ -170,10 +171,17 @@ class Router {
     void set_upstream_credit(std::size_t port, RouterCreditSink& sink) {
         upstream_credit_[port] = &sink;
     }
+    // Seed of `port`'s output credit counters = the receive-VC FIFO depth
+    // behind that output (router-spec §2.7 rule 1: the NI's on LOCAL, this
+    // router's own on N/E/S/W).
+    std::size_t out_credit_seed(std::size_t port) const {
+        return port == static_cast<std::size_t>(RouterPort::LOCAL) ? cfg_.local_vc_depth
+                                                                   : cfg_.vc_depth;
+    }
     // Credit pulse from the downstream node attached to `port`'s output.
     void receive_credit(std::size_t port, uint8_t vc_id) {
         assert(port < ROUTER_PORT_COUNT && vc_id < cfg_.num_vc);
-        if (credit_[port][vc_id] >= cfg_.vc_depth) {
+        if (credit_[port][vc_id] >= out_credit_seed(port)) {
             assert(false && "Router: credit counter overflow");
             std::abort();
         }

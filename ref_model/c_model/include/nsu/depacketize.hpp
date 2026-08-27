@@ -96,7 +96,7 @@ class Depacketize : public RequestDepacketizer {
     // stage_occupancy probe. axi_ch uses ni::AXI_CH_* constants. Narrow AW/W
     // and AR are 0/1 register probes. DataAw / DataW count flits of that
     // channel across all VC queues, so they range 0 to
-    // dat_num_vc * NOC_ROUTER_VC_DEPTH, not 0/1.
+    // dat_num_vc * NOC_NI_DAT_RX_VC_DEPTH, not 0/1.
     std::size_t s1_occupancy(uint8_t axi_ch) const noexcept {
         switch (axi_ch) {
             case ni::AXI_CH_NarrowAw:
@@ -160,8 +160,8 @@ class Depacketize : public RequestDepacketizer {
     // registers, floo_nw_chimney.sv:276-311). One register per data channel is
     // no longer enough: the router holds a wormhole lock per (output, VC), so
     // worms of different VCs arrive interleaved flit by flit and each VC has to
-    // reassemble its own burst. Depth = NOC_ROUTER_VC_DEPTH, the router's LOCAL
-    // credit seed: the sender never has more than that many unacknowledged
+    // reassemble its own burst. Depth = NOC_NI_DAT_RX_VC_DEPTH, the router's
+    // LOCAL credit seed: the sender never has more than that many unacknowledged
     // flits per VC, so push cannot overflow. A slot is returned
     // (dat_credit_pending_) when pop_aw / pop_w consume the flit. Both
     // ingresses deposit data-class flits here (DAT in co-sim, REQ in the ctest
@@ -339,7 +339,7 @@ inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Fli
                 const auto vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
                 assert(vc < dat_q_.size() &&
                        "nsu::Depacketize: data flit names a VC beyond dat_num_vc");
-                assert(dat_q_[vc].size() < static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH) &&
+                assert(dat_q_[vc].size() < static_cast<std::size_t>(::ni::NOC_NI_DAT_RX_VC_DEPTH) &&
                        "nsu::Depacketize: per-VC ingress overflow -- sender credit discipline "
                        "broken");
                 dat_q_[vc].push_back(f);
