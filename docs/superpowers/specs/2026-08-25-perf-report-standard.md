@@ -68,7 +68,7 @@ One generator, `sim/tools/perf_report.py <output dir>`, writes `sim/verilator/ou
 Runs are grouped by their parameter tuple from `result.csv` as today. Patterns with a full
 curve: uniform_random, tornado, shuffle, bit_complement, bit_reverse, transpose (textbook Table
 7.2 set). Rates 0.005 0.05 0.1 0.2 0.3 0.4 0.5 0.7 1.0, seed 1, plus seeds 2 and 3 at the two
-rates around the knee. The other four patterns (neighbor, bit_rotation, all_to_all, hotspot)
+rates around the 3x saturation point. The other four patterns (neighbor, bit_rotation, all_to_all, hotspot)
 appear in section 4 from their rate 0.9 runs with a note.
 
 ## Removed
