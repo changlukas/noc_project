@@ -157,7 +157,7 @@ scoreboard.
 | S1-RSP-02 | provide DataB and DataR together | DataB uses RSP and DataR uses DAT; both physical outputs may transfer in the same `noc_clk` cycle |
 | S1-RSP-03 | stall RSP while DAT has credit, then exhaust DAT credit while RSP is ready | one physical network's stall does not stop the other; backpressure reaches only the source/class queue that has exhausted capacity |
 | S1-RSP-04 | interleave NarrowR and DataR bursts from different IDs, including concurrent B traffic | every response uses the saved class and original ID; beats of each AXI read burst remain ordered and RLAST retires exactly once |
-| S1-BUF-01 | fill REQ, RSP, DAT Write, and DAT Read class FIFOs one at a time | each FIFO provides its approved `NOC_FIFO_DEPTH`; full in one class cannot consume another class's storage |
+| S1-BUF-01 | fill REQ/RSP class FIFOs and each DAT receive VC FIFO one at a time | REQ/RSP provide `NOC_FIFO_DEPTH`; each DAT receive VC provides `NOC_NI_DAT_RX_VC_DEPTH`; full in one storage class cannot consume another's slots |
 
 “Independent” permits pressure to propagate through a genuinely shared bounded resource, such as a
 full AXI CDC FIFO or the one downstream W channel. It does not permit a control dependency that
@@ -212,6 +212,7 @@ A timeout or unrelated compile error is not a passing guard test.
 | `AXI_FIFO_DEPTH` | 2, default, 32 | 0 and a positive non-power-of-two value |
 | `NOC_FIFO_DEPTH` | 1, default, 32 | 0 and a positive non-power-of-two value |
 | `NOC_ROUTER_VC_DEPTH` | 2, default, 32 | 0, 1, and a positive non-power-of-two value |
+| `NOC_NI_DAT_RX_VC_DEPTH` | 2, default, 32 | 0, 1, and a positive non-power-of-two value |
 | generated SAM | deterministic 2x2/4x4 packages, legal overlap, explicit collective true/false/absent, canonical field-width derivation | empty/invalid range or membership, overflow, incomplete required coverage, unrepresentable requested collective layout, or a field/type width mismatch; overlap is not negative |
 
 The test records the instance path and expected diagnostic for each guard. This prevents an
@@ -239,7 +240,7 @@ requires it. Every checker must have a fault-injection or illegal-stimulus test 
 | NSU-A11 | multicast SAM | lookup enable implies an accepted/present multicast AW; hit must be valid and collective-enabled before coordinate replacement; overlap resolves authored-first; miss has no default; unicast AW, W, and AR never enable lookup |
 
 In addition to temporal assertions, build/source-list review checks that production NSU source
-lists contain no verification adapter and that the NSU owns no per-VC pending FIFO. The latter is
+lists contain no verification adapter and that the NSU owns no transmit-side per-VC pending FIFO. Receive per-VC FIFOs are required. The former is
 an ownership check, not an assertion about an internal signal name.
 
 ## 8. Functional coverage and behavior-focused scenarios
@@ -284,7 +285,7 @@ FIFO internals or an arbitrary production pipeline.
 | Downstream ID width | current beat types and collapse/pass-through tests assume the fixed model ID width and only two `max_unique_ids` modes | parameterize the compared downstream ID behavior after the canonical Response Queue parameters are approved; add collision, fallback, reuse, full-table, and legal/illegal-width tests |
 | Narrow/Data request scheduler | current depacketizer has independent ingress, round-robin AW selection, `w_order_`, and blocked-head W behavior, but `Depacketize::pop_aw` rotates `aw_prefer_data_` before rejecting a full write pool | preserve the accepted scheduling policy, but advance round-robin state only on an accepted simultaneous-class AW; add direct simultaneous-AW fairness under admission stalls, sole-eligible work conservation, multiple-AW outstanding, and blocked-head W tests before differential S0 scheduling claims |
 | B/R and RSP/DAT scheduling | current packetizer has separate B/R staging and class selection; current tests prove selected fields but not all simultaneous pressure cases | expose accepted events to the checker and add concurrent B/R plus independent RSP/DAT pressure tests; compare order/content, not internal tick count |
-| Target NI buffering | current `VcAllocator` owns per-VC pending queues and DAT receive uses model-side credit | for target-conformance comparison, model four bounded class FIFOs and head-only credit gating with no NI per-VC storage; keep the F0 adapter for the model/target DAT receive mismatch |
+| Target NI buffering | current `VcAllocator` owns transmit-side per-VC pending queues and DAT receive uses model-side credit | for target conformance, model REQ/RSP class FIFOs plus DAT receive per-VC FIFOs; compare accepted sequence and credit conservation without requiring internal queue timing |
 | CDC/reset | model is single-clock | do not emulate pointer synchronizers or compare CDC latency in C++; use RTL primitive and NSU integration assertions/scoreboards |
 
 Until an alignment row closes, tests use an independent behavioral predictor for that row and may

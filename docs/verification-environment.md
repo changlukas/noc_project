@@ -105,7 +105,7 @@ same functional ports and has no DPI handle.
 
 The NI hybrid tests use a zero-hop test link. RTL NMU connects to the reference NSU, and reference
 NMU connects to RTL NSU. REQ and RSP use their ready/valid contracts directly. Where the current
-model's symmetric DAT credit port differs from the target Router-to-NI ready/valid contract, a
+model's symmetric DAT credit port matches the target link protocol but not the target receive-FIFO timing, so a
 verification-only adapter translates flow control without changing the flit, adding routing, or
 modeling a Router pipeline. This verifies AXI-to-flit, flit-to-AXI, ordering, backpressure and
 response behavior without requiring any Router or mesh.
@@ -224,7 +224,7 @@ third-party source-license delta. This issue performs no adaptation or RTL imple
 | P3-F09 | `hw/floo_vc_arbiter.sv` | rewrite | valid/ready VC interface differs from DAT credit candidates | arbitration modes and ready-dependent selection do not implement exact two-level target order | no copied source; no source-license delta |
 | P3-F10 | `hw/floo_output_arbiter.sv` | rewrite | combined generic output/reduction interface conflicts with child ownership | target join qualification, strict priority, worm-boundary hold, and DAT VA differ | no copied source; no source-license delta |
 | P3-F11 | `hw/floo_reduction_unit.sv` | rewrite/out of scope | arithmetic/offload ports have no target interface | non-CollectB operations and sequential reduction dependencies are unapproved | no copied source; no source-license delta |
-| P3-F12 | `hw/floo_router.sv` | rewrite | top ports, packet records, and generic VC topology differ | target has asymmetric DAT flow control, fixed package ownership, and exact pipeline/collective behavior | no copied source; no source-license delta |
+| P3-F12 | `hw/floo_router.sv` | rewrite | top ports, packet records, and generic VC topology differ | target has symmetric per-VC DAT credit, fixed package ownership, and exact pipeline/collective behavior | no copied source; no source-license delta |
 | P3-F13 | `hw/floo_nw_router.sv` | rewrite | wrapper records and network composition differ | target has exactly three independently owned networks and generated project types | no copied source; no source-license delta |
 | P3-F14 | `hw/floo_axi_router.sv` | rewrite | wrapper exposes an incompatible aggregate interface | offload/configuration behavior and dependency closure exceed the frozen top | no copied source; no source-license delta |
 | P3-F15 | `hw/deprecated/floo_vc_router.sv` | rewrite | heterogeneous VC/look-ahead/scalar-credit interface differs | pipeline, VC ownership, output protocol, and collective behavior conflict | no copied source; no source-license delta; deprecated notice untouched |
@@ -573,7 +573,7 @@ supplied to each rather than drawn once and shared.
 | VCS flow | build-only; no directed run target, never executed on a real VCS install. |
 | Deferred header fields | QoS, route parity, and flit ECC are unbuilt and have no header field at all: the 48 b header is fully assigned (`PADDING_FIELDS_COUNT` = 0) and carries no width-0 placeholder for them. |
 | Conformity exclusions | exclusive access is unit-level only; SLVERR unexercised; single-clock CDC approximation (see Conformity scope). |
-| Target NI ingress backpressure unmodelled | current model ties ready true or self-credits through the DAT merge, so LOCAL stall metrics remain 0 by construction. Target Router-to-NI DAT ejection instead uses ready/valid into separate DAT Write and DAT Read class FIFOs; NI-to-Router DAT injection remains per-VC credit-controlled by Router input FIFO capacity. The model therefore cannot verify target LOCAL stalls, asymmetric DAT flow control, or Router-only VC FIFO ownership. |
+| Target NI ingress credit/storage unmodelled | The current model does not reproduce the target NI-owned per-VC DAT receive FIFOs. Target Router-to-NI and NI-to-Router DAT links are both credit-controlled, with sender counters seeded from the receiver's configured per-VC depth. The model therefore cannot yet verify NI receive-FIFO occupancy, symmetric LOCAL DAT credit conservation, or full-state pop-and-replacement acceptance. |
 | SimpleRouter multi-read ruling (S3b) | grants up to one flit per OUTPUT per tick from the same input FIFO, matching the credit `Router`. Mainline `floo_router.sv` has one FIFO read port, a resource limit, not a protocol requirement. Kept as a deliberate c_model-optimistic divergence: multi-output fan-out from one input in a single tick that RTL would need more than one cycle for. |
 | `almost_full_offset` calibration (S3b, closed 2026-08-21) | `SimpleRouterConfig::almost_full_offset` default (2) measured in co-sim: worst input-FIFO occupancy 7 of depth 8 across hotspot mode-1 (single-beat and 33-beat) and narrow uniform_random 33-beat -- one entry of overrun past the deassert threshold; the sender's single-entry egress hold register absorbs the second in-flight flit, so 2 keeps one entry of margin. |
 | vc{2,4,8} re-baseline (S3b) | the VA stage reassigns the downstream VC per hop for `fixed_vc=0` traffic. Co-sim/perf numbers on vc{2,4,8} topologies shift by construction versus pre-S3b. Matrix green after S3b means re-baselined, not bit-identical to the earlier numbers. |

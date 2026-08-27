@@ -106,8 +106,6 @@ SRAM is needed.
   remains. This is the recurring cost of the small RoB.
 - No sweep exists for `max_txns_per_id` (default 32, `[TBD]`) or `r_rob_depth`
   (default 32, expressible to 256 via `R_ROB_DEPTH`).
-- The approved Disabled-mode counter/key policy and the `dst_port_id` term in Enabled-mode bypass
-  are not yet implemented in the C++ reference model.
 
 ## SAM destination decode
 
@@ -312,18 +310,24 @@ is their common entry count. Separate per-class depth parameters are not introdu
 | NI to Router REQ/RSP | NI class FIFO, then Router input FIFO | ready/valid |
 | NI to Router DAT | NI class FIFO, then Router LOCAL per-VC input FIFO | NI sender counter per VC, seeded by `NOC_ROUTER_VC_DEPTH` |
 | Router to NI REQ/RSP | Router output, then NI class FIFO | ready/valid |
-| Router to NI DAT | Router output, then NI DAT Write or DAT Read class FIFO | ready/valid |
+| Router to NI DAT | Router output, then NI per-VC DAT receive FIFO | per-VC credit |
 | Router to Router DAT | downstream Router per-VC input FIFO | per-VC credit in both directions |
 
 The AXI-to-NoC assigner owns DAT VC selection. It reads the sender-side per-VC credit counters,
 applies `NOC_DAT_VC_MODE`, stamps the selected `vc_id`, and decrements that counter on send.
 `DataW` inherits its owning `DataAw` VC through WLAST. The credit state is not a FIFO: the credited
-slots reside in the Router LOCAL input VC FIFOs. The NI has no per-VC pending or ingress queue.
+transmit slots reside in the Router LOCAL input VC FIFOs. Receive slots reside in NI per-VC ingress
+FIFOs of `NOC_NI_DAT_RX_VC_DEPTH`; the receive side does not add a second deep shared DAT FIFO.
 
-Router-to-NI DAT ejection uses ready/valid because the NI receiver has shared class storage, not a
-separately provisioned FIFO per VC. Combining per-VC credit and ready on this direction is rejected:
-two authorities would define one transfer. Keeping per-VC receive credit would instead require
-partitioned NI VC storage, which is outside the adopted ownership boundary.
+The NMU request packetizer and channel assigner are one physical RTL leaf while retaining separate
+REQ and DAT queue, arbitration, lock, and output state. A module boundary between them would either
+add a second complete-flit queue or expose the same internal queue heads across hierarchy; neither
+improves throughput, and the former adds 633-bit DAT storage. The fused leaf keeps AW/W association
+beside the class queues and still permits one REQ and one DAT transfer in the same cycle.
+
+Router-to-NI DAT ejection uses per-VC credit because the NI receiver owns matching per-VC storage.
+The NMU DataR merge drains at beat granularity without an RLAST lock; the NSU DataAw/DataW merge
+retains its AW-to-WLAST packet lock. Neither path adds a second deep shared DAT FIFO after the merge.
 
 | CDC partition | Benefit | Decision |
 |---|---|---|
@@ -493,6 +497,41 @@ collapse onto VC0 and waste the remaining VCs. `READ_WRITE_SPLIT` partitions by 
 QoS, and does not change this decision. The C++ model and generated wrappers now take the approved
 `NOC_DAT_NUM_VC = 2` default; model implementation of the non-default split mode remains separate
 from QoS.
+
+## NMU response reorder storage and retirement
+
+The NMU ordering subsystem keeps B and R ordering state independent.  B responses store only
+metadata in registers.  Enabled-mode R responses use a data-bearing slot pool; disabled mode keeps
+only the per-ID ordering-domain table and counters.  `NMU_ROB_B_DEPTH` and `NMU_ROB_R_DEPTH`
+therefore remain independent sizing parameters, while `NMU_MAX_TXNS_PER_ID` sizes the per-ID issue
+lists rather than either response pool.
+
+The retirement design does not copy FlooNoC's mutually exclusive `RoBRead` / `RoBWrite` FSM.
+Separate fill and retire paths allow an out-of-order response to fill one slot while another ID
+retires a completed slot.  A ready-ID bitmap and independent B/R round-robin pointers prevent a
+blocked ID from becoming a global head-of-line blocker.  Expected head responses retain a direct
+forward path, and buffered R bursts can retire one beat per cycle after their head becomes ready.
+
+The first implementation retains the FlooNoC-style high-water contiguous allocator.  It makes an
+AR reservation of `arlen + 1` slots atomic and keeps the ordering tag equal to the range base, but
+holes below the highest live range cannot be reused.  A first-fit contiguous bitmap allocator would
+recover those holes at the cost of a depth-wide run finder on request acceptance.  That alternative
+is deferred until workload counters show capacity stalls with unused lower slots or synthesis shows
+that the current leading-priority path is not the limiting path.
+
+| Choice | Throughput/latency benefit | Area/timing cost | Decision |
+|---|---|---|---|
+| Independent fill and retire | permits simultaneous response arrival and retirement | separate storage access paths | adopted |
+| Ready-ID round robin | cross-ID progress and bounded scheduler fairness | one ready bit per ID plus small arbiter | adopted |
+| Direct-forward expected head | avoids a storage round trip | response/output arbitration | adopted |
+| B metadata registers | cheap random access at fixed three-bit NoC ID space | flip-flops scale with B depth | adopted |
+| Enabled R data slot pool | restores same-ID order for interleaved fabric responses | dominant data-storage area | adopted when `READ_ROB_ENABLED=1` |
+| RoB-less R ordering-domain interlock | removes R data storage | different-domain same-ID requests may stall | adopted when `READ_ROB_ENABLED=0` |
+| First-fit hole reuse | improves effective capacity under fragmented retirement | wide contiguous-run search | deferred pending measurement |
+
+Signoff must sweep B/R depths and both read modes.  The minimum useful evidence is accepted
+requests per cycle, response fill and retirement overlap, capacity-stall cycles, maximum slot
+occupancy, area, and worst request-acceptance timing.
 
 ## Production shared primitive policy
 
