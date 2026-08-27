@@ -82,9 +82,19 @@ def test_pattern_summary_percent_of_ideal(tmp_path):
     # the served share is the whole pattern. 0.6 accepted flits per node per
     # cycle is 0.6 * 64 * 66 / 67 B, the inverse of the 34/33 flit conversion.
     _point(tmp_path, "neighbor", 0.9, 0.6 * 64 * 66 / 67, 90.0)
-    cells = _row(pr.report(tmp_path), "## 4 Pattern summary", "neighbor")
+    # transpose maps the four diagonal nodes to themselves, so a quarter of the
+    # offered traffic is answered in the tile crossbar and reaches no monitor:
+    # served is 0.750 against an ideal of 0.333. 0.250 accepted flits is exactly
+    # 100.0 percent of `served * ideal`, and 75.0 percent of the ideal alone, so
+    # a `served` factor dropped to 1 fails here where neighbor cannot see it.
+    _point(tmp_path, "transpose", 0.9, 0.25 * 64 * 66 / 67, 90.0)
+    text = pr.report(tmp_path)
+    cells = _row(text, "## 4 Pattern summary", "neighbor")
     assert cells[5] == "0.600"   # accepted flits at the highest offered load
     assert cells[6] == "60.0"    # 0.600 / (1.000 served * 1.000 ideal)
+    cells = _row(text, "## 4 Pattern summary", "transpose")
+    assert cells[3] == "0.750"   # served
+    assert cells[5] == "0.250" and cells[6] == "100.0"
 
 
 def test_seed_spread_column(tmp_path):

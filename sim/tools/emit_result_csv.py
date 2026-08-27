@@ -34,7 +34,7 @@ never reaches a monitor) counts as a zero rather than shrinking the divisor.
 The node count comes from a mesh_<x>x<y> topology name. Any other name leaves
 the per-node column empty rather than inventing a divisor.
 
-Both latency columns are weighted by each monitor's sample count. A plain
+Every latency column is weighted by each monitor's sample count. A plain
 average of the printed means is wrong: each is already a mean over that
 monitor's own transaction count, and those counts differ.
 
@@ -42,7 +42,14 @@ mean_latency_network is the monitor value, measured from the AX handshake.
 mean_latency_open adds the source queue delay the tb prints per node
 ([SrcQueue ...]), so it runs from the cycle the open-loop injection process
 intended to issue, booksim2's packet latency. Under backpressure the two
-diverge; below saturation they agree.
+diverge, below saturation they agree.
+
+Each of the two also comes per channel, `_read` and `_write`. Read and write are
+not the same measurement: axi_bw_monitor.sv timestamps a read at its first R
+beat and a write at B, after the whole worm has landed, and the two return on
+different planes (DAT for R, RSP for B). One mean over both compares against
+neither, so the report's analytic read decomposition needs the read column. A
+channel that reported no sample leaves its cells empty rather than zero.
 
 Offered load is analytic, from the injection rate and the burst length, on the
 DAT plane (the spec's convention):
@@ -71,13 +78,13 @@ BEAT_BYTES = 64
 
 # [Monitor node0.master][Read] Latency: 98.30 +- 4.10, N: 200, BW: 107.02 Bits/cycle, Util: 41.80%
 _MON = re.compile(
-    r"\[Monitor[^\]]*\]\[(?:Read|Write)\]\s+Latency:\s*([\d.]+)\s*\+-\s*[\d.]+,\s*"
+    r"\[Monitor[^\]]*\]\[(Read|Write)\]\s+Latency:\s*([\d.]+)\s*\+-\s*[\d.]+,\s*"
     r"N:\s*(\d+),\s*BW:\s*([\d.]+)\s*Bits/cycle",
     re.I,
 )
 # [SrcQueue node0][Read] mean: 10.00, N: 100
 _SRCQ = re.compile(
-    r"\[SrcQueue[^\]]*\]\[(?:Read|Write)\]\s+mean:\s*([\d.]+),\s*N:\s*(\d+)",
+    r"\[SrcQueue[^\]]*\]\[(Read|Write)\]\s+mean:\s*([\d.]+),\s*N:\s*(\d+)",
     re.I,
 )
 _CONFIG = re.compile(
@@ -86,19 +93,31 @@ _CONFIG = re.compile(
     r"(?:\s+ni_dat_rx_vc_depth=(\d+))?")
 
 
+def _channel_means(samples):
+    """{"read": mean, "write": mean, "all": mean} from (channel, mean, count)
+    triples, each mean weighted by its own sample count. A channel that reported
+    no sample is absent from the result, and so is "all" on an empty input."""
+    weighted = {}
+    counts = {}
+    for channel, mean, count in samples:
+        channel = channel.lower()
+        counts[channel] = counts.get(channel, 0) + int(count)
+        weighted[channel] = weighted.get(channel, 0.0) + float(mean) * int(count)
+    out = {c: weighted[c] / counts[c] for c in counts if counts[c]}
+    total = sum(counts.values())
+    if total:
+        out["all"] = sum(weighted.values()) / total
+    return out
+
+
 def parse_monitors(log_text):
-    """Return (summed BW, sample-weighted mean latency, total sample count)."""
-    total_bw = 0.0
-    weighted_latency = 0.0
-    total_samples = 0
-    for mean, count, bw in _MON.findall(log_text):
-        count = int(count)
-        total_bw += float(bw)
-        weighted_latency += float(mean) * count
-        total_samples += count
+    """Return (summed BW, {channel: mean latency}, total sample count)."""
+    rows = _MON.findall(log_text)
+    total_samples = sum(int(n) for _c, _m, n, _bw in rows)
     if total_samples == 0:
         sys.exit("emit_result_csv: no monitor line reported a sample; the run injected nothing")
-    return total_bw, weighted_latency / total_samples, total_samples
+    latency = _channel_means((c, m, n) for c, m, n, _bw in rows)
+    return sum(float(bw) for _c, _m, _n, bw in rows), latency, total_samples
 
 
 def run_window(log_path):
@@ -114,18 +133,12 @@ def run_window(log_path):
 
 
 def parse_source_queue(log_text):
-    """Sample-weighted mean source queue delay over every node and channel.
+    """{channel: sample-weighted mean source queue delay} over every node.
 
-    Zero when the log has no [SrcQueue] line (a run from before the open-loop
+    Empty when the log has no [SrcQueue] line (a run from before the open-loop
     tb) or when nothing was paced, which makes mean_latency_open fall back to
     mean_latency_network rather than to a hole in the row."""
-    weighted = 0.0
-    samples = 0
-    for mean, count in _SRCQ.findall(log_text):
-        count = int(count)
-        weighted += float(mean) * count
-        samples += count
-    return weighted / samples if samples else 0.0
+    return _channel_means(_SRCQ.findall(log_text))
 
 
 def mesh_nodes(topology):
@@ -199,6 +212,13 @@ def main():
     accepted_bytes = bw / 8 / nodes if nodes else None
     (max_unique_ids, max_outstanding, dat_num_vc, router_vc_depth, mst_stall_random,
      ni_dat_rx_vc_depth) = parse_config(log_text, a.max_unique_ids, a.max_outstanding)
+
+    def lat(channel, open_loop):
+        mean = latency.get(channel)
+        if mean is None:
+            return ""
+        return f"{mean + (srcq.get(channel, 0.0) if open_loop else 0.0):.1f}"
+
     row = {
         "topology": a.topology,
         "vc": dat_num_vc,
@@ -222,15 +242,19 @@ def main():
         "accepted_bytes_per_node_cycle": "" if accepted_bytes is None else str(
             round(accepted_bytes, 6)),
         "window_source": window_source,
-        "mean_latency_network": f"{latency:.1f}",
-        "mean_latency_open": f"{latency + srcq:.1f}",
+        "mean_latency_network": lat("all", False),
+        "mean_latency_network_read": lat("read", False),
+        "mean_latency_network_write": lat("write", False),
+        "mean_latency_open": lat("all", True),
+        "mean_latency_open_read": lat("read", True),
+        "mean_latency_open_write": lat("write", True),
     }
     with open(a.out, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(row))
         writer.writeheader()
         writer.writerow(row)
-    print(f"wrote {a.out}: {bw:.1f} bits/cyc, nlat {latency:.1f}, plat {latency + srcq:.1f}, "
-          f"offered {offered_flits:g} flits/node/cyc")
+    print(f"wrote {a.out}: {bw:.1f} bits/cyc, nlat {row['mean_latency_network']}, "
+          f"plat {row['mean_latency_open']}, offered {offered_flits:g} flits/node/cyc")
 
 
 if __name__ == "__main__":

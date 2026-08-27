@@ -58,11 +58,8 @@ PATTERNS = list(g._DETERMINISTIC_PATTERNS) + ["uniform_random", "all_to_all", "h
 # sim/verilator/Makefile:291 HOTSPOT ?= 5
 _DEFAULT_HOTSPOTS = (5,)
 
-# Flit share of one AX pair, at the AxLEN 32 the sweep runs (33 beats). The
-# write worm is AW plus 33 W = 34 DAT flits on the request path, the read reply
-# is 33 R flits on the reverse path, 67 per pair.
-_FORWARD_SHARE = 34 / 67
-_REVERSE_SHARE = 33 / 67
+# Beats per AXI transaction, AxLEN + 1, at the AxLEN 32 the sweep runs.
+_DEFAULT_BEATS = 33
 
 
 def _flows(pattern, x_dim, y_dim, hotspots):
@@ -107,8 +104,15 @@ def _xy_links(src, dst):
     return links
 
 
-def metrics(pattern, x_dim, y_dim, hotspots=None):
-    """avg_hops, max_channel_load and ideal_flits_per_node_cycle for one pattern."""
+def metrics(pattern, x_dim, y_dim, hotspots=None, beats=_DEFAULT_BEATS):
+    """avg_hops, max_channel_load and ideal_flits_per_node_cycle for one pattern.
+
+    `beats` is AxLEN + 1, which sets how one AX pair splits over the two
+    directions: the write worm is AW plus its `beats` W flits on the request
+    path and the read reply is `beats` R flits on the reverse path, so the pair
+    is 2 * beats + 1 flits and the forward share is (beats + 1) of them."""
+    forward_share = (beats + 1) / (2 * beats + 1)
+    reverse_share = beats / (2 * beats + 1)
     if pattern == "transpose":
         g._check_transpose_guard(x_dim, y_dim)
     if pattern in ("bit_complement", "bit_reverse", "shuffle", "bit_rotation"):
@@ -131,10 +135,10 @@ def metrics(pattern, x_dim, y_dim, hotspots=None):
         if src == dst:
             self_weight += weight
         for link in links:
-            load[link] = load.get(link, 0.0) + weight * _FORWARD_SHARE
+            load[link] = load.get(link, 0.0) + weight * forward_share
         # The read reply walks back XY from the destination, x first from d.
         for link in _xy_links(dst, src):
-            load[link] = load.get(link, 0.0) + weight * _REVERSE_SHARE
+            load[link] = load.get(link, 0.0) + weight * reverse_share
     max_load = max(load.values()) if load else 0.0
     return {
         "avg_hops": hops / total_weight,

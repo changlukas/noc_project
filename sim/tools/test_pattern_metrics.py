@@ -88,7 +88,18 @@ def test_transpose_busiest_link_matches_the_measured_flit_count():
     assert n_fwd * 200 * 34 + n_rev * 200 * 33 == 40200
     # Same link, same split, expressed as the model's own weights.
     assert abs(pm.metrics("transpose", 4, 4)["max_channel_load"]
-               - (n_fwd * pm._FORWARD_SHARE + n_rev * pm._REVERSE_SHARE)) < 1e-9
+               - (n_fwd * 34 + n_rev * 33) / 67) < 1e-9
+
+
+def test_beats_sets_the_forward_reverse_split():
+    """`beats` is AxLEN + 1 and sets how one AX pair splits over the two
+    directions. At AxLEN 0 the pair is 1 AW + 1 W forward and 1 R back, a 2/3
+    forward share against 34/67, which moves the busiest link of an asymmetric
+    pattern. A symmetric one cannot move, by the identity below."""
+    assert (pm.metrics("shuffle", 4, 4, beats=1)["max_channel_load"]
+            != pm.metrics("shuffle", 4, 4)["max_channel_load"])
+    assert abs(pm.metrics("transpose", 4, 4, beats=1)["max_channel_load"]
+               - pm.metrics("transpose", 4, 4)["max_channel_load"]) < 1e-9
 
 
 def test_asymmetric_patterns_spread_the_load_over_two_directions():

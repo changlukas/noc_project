@@ -114,6 +114,9 @@ def collect(out_root, stale=None):
                 stale.append(run_dir.name)
             continue
         accepted = row.get("accepted_bytes_per_node_cycle") or ""
+        # Per channel latency, empty on a row written before the columns existed
+        # and on a channel that retired nothing. `-` in the table, never a zero.
+        chan = lambda col: float(row[col]) if row.get(col) else None
         key = (row["topology"], row["vc"], row.get("router_vc_depth") or "?",
                row.get("ni_dat_rx_vc_depth") or "?", row["max_outstanding"],
                row.get("max_txns_per_id", "32"), row.get("ids_per_initiator", "1"),
@@ -126,6 +129,10 @@ def collect(out_root, stale=None):
             "accepted_bytes": float(accepted) if accepted else None,
             "nlat": float(row["mean_latency_network"]),
             "plat": float(row["mean_latency_open"]),
+            "nlat_read": chan("mean_latency_network_read"),
+            "nlat_write": chan("mean_latency_network_write"),
+            "plat_read": chan("mean_latency_open_read"),
+            "plat_write": chan("mean_latency_open_write"),
             "dat_util": dat_link_util(run_dir / "perf.json"),
         })
     return groups
@@ -181,7 +188,13 @@ def curve(points):
             "accepted_bytes": _mean(p["accepted_bytes"] for p in seeds),
             "nlat": _mean(p["nlat"] for p in seeds),
             "plat": sum(plats) / len(plats),
-            "spread": max(plats) - min(plats),
+            "nlat_read": _mean(p["nlat_read"] for p in seeds),
+            "nlat_write": _mean(p["nlat_write"] for p in seeds),
+            "plat_read": _mean(p["plat_read"] for p in seeds),
+            "plat_write": _mean(p["plat_write"] for p in seeds),
+            # One seed is one sample, and a spread of zero would read as three
+            # seeds that happened to agree.
+            "spread": None if len(plats) == 1 else max(plats) - min(plats),
             "seeds": len(seeds),
             "dat_util": _mean(p["dat_util"][0] for p in seeds if p["dat_util"]),
             "dat_util_max": max((p["dat_util"][1] for p in seeds if p["dat_util"]),
@@ -256,6 +269,31 @@ def group_label(key):
     return ", ".join(diffs) if diffs else "default"
 
 
+def _seeds_rule(patterns):
+    """Which offered points carry more than one seed, read off the runs."""
+    repeated = {}
+    for pattern in sorted(patterns):
+        for r in curve(patterns[pattern]):
+            if r["seeds"] > 1:
+                repeated.setdefault((round(r["offered"], 3), r["seeds"]), []).append(pattern)
+    extra = [f"{', '.join(pats)} carry {n} seeds at offered {offered:.3f}"
+             for (offered, n), pats in sorted(repeated.items())]
+    return "seed 1 on every point. " + (". ".join(extra) if extra
+                                        else "No point carries a second seed")
+
+
+def _batch_note(patterns):
+    """The accepted against offered shortfall at the two lowest offered points of
+    a curve, so the accepted row states the batch overhang from the runs."""
+    for pattern in ["bit_complement"] + sorted(patterns):
+        rows = curve(patterns.get(pattern, []))
+        if len(rows) >= 3 and all(r["accepted_bytes"] for r in rows[:2]):
+            return pattern + " accepts " + " and ".join(
+                f"{100 * r['accepted_bytes'] / r['offered_bytes']:.0f} percent of "
+                f"offered at {r['offered']:.3f}" for r in rows[:2])
+    return "no curve here carries an accepted column"
+
+
 def section_method(key, patterns):
     topology, vc, router_depth, ni_rx_depth, outstanding, txns_per_id, ids, burst, \
         count, mst_stall = key
@@ -292,14 +330,15 @@ def section_method(key, patterns):
                     "`awready` or `arready`"],
         ["source queue delay", "AX handshake cycle minus the slot's `qtime`"],
         ["run length", f"{count} transactions per node, fixed. {window}"],
-        ["seeds", "seed 1 on every point, seeds 2 and 3 around the 3x crossing"],
+        ["seeds", _seeds_rule(patterns)],
         ["backpressure", "ideal master face, ideal memory: the curve measures "
                          "the fabric, not a consumer that stalls first"],
     ]))
     out.append("\n### Latency and flits\n")
     out.append(table(["term", "definition"], [
-        ["`nlat`", "AX handshake at the master to the last response beat, the "
-                   "monitor value"],
+        ["`nlat`", "the monitor value, from the AX handshake at the master. A "
+                   "read ends at its first R beat, a write at B, so the two are "
+                   "different measurements and section 2 keeps them apart"],
         ["`plat`", "`nlat` plus the source queue delay, booksim2's packet latency"],
         ["zero load", "`plat` at the lowest offered point"],
         ["saturation", "offered load where `plat` reaches 3x zero load, linearly "
@@ -310,6 +349,13 @@ def section_method(key, patterns):
                     "per cycle"],
         ["accepted", f"measured bytes per node per cycle / {BEAT_BYTES} * "
                      f"(2 * {beats} + 1) / (2 * {beats}) flits, the same convention"],
+        ["accepted window", f"one whole run batch throughput, total delivered over "
+                            f"the `perf.json` window. Below saturation that window "
+                            f"outlives the offered traffic by the overhang of the "
+                            f"slowest node finishing its fixed {count} transaction "
+                            f"batch, so accepted sits under offered: "
+                            f"{_batch_note(patterns)}. Only once congestion sets "
+                            f"the run length do the two meet"],
         ["percent of ideal", "accepted flits / ((1 - self fraction) * ideal). Self "
                              "addressed traffic is answered by the tile crossbar "
                              "and reaches no monitor"],
@@ -362,8 +408,6 @@ def _probe_block(probes):
 
 
 def section_zero_load(key, patterns, probes=()):
-    burst = key[7]
-    beats = int(burst) + 1 if burst.isdigit() else 1
     out = ["## 2 Zero-load latency\n",
            "Measured at the lowest offered point of each curve, where the source "
            "queue is empty and `plat` equals `nlat`. A pattern measured at a "
@@ -376,20 +420,28 @@ def section_zero_load(key, patterns, probes=()):
             continue
         m = analytic(pattern, key[0])
         hops = m["avg_hops"] if m else None
-        ideal = (_DATA_READ_FIXED + 4 * (hops + 1) + beats - 1) if hops is not None else None
+        ideal = None if hops is None else _DATA_READ_FIXED + 4 * (hops + 1)
         first = rows_c[0]
-        rows.append([pattern, fmt(first["offered"], 3), fmt(first["nlat"]),
-                     fmt(first["plat"]), fmt(hops, 2), fmt(ideal, 0),
-                     fmt(None if ideal is None else first["plat"] - ideal)])
-    out.append(table(["pattern", "offered", "nlat", "plat", "avg hops",
-                      "ideal fabric", "gap"], rows))
+        gap = (None if ideal is None or first["plat_read"] is None
+               else first["plat_read"] - ideal)
+        rows.append([pattern, fmt(first["offered"], 3), fmt(hops, 2),
+                     fmt(first["nlat_read"]), fmt(first["plat_read"]),
+                     fmt(ideal, 0), fmt(gap),
+                     fmt(first["nlat_write"]), fmt(first["plat_write"])])
+    out.append(table(["pattern", "offered", "avg hops", "read nlat", "read plat",
+                      "read ideal", "read gap", "write nlat", "write plat"], rows))
     out.append(
-        "\n`ideal fabric` is the static decomposition below generalized to the "
-        "measured hop count and burst length: the fixed NI, slave and merge cost "
-        f"of a data read ({_DATA_READ_FIXED} cycles), plus 4 cycles in each of the "
-        "`avg hops` + 1 response routers a DAT head passes, plus `beats` - 1 "
-        "cycles for the rest of the worm. It charges no queueing, so the gap is "
-        "contention plus the cost of a mean over a hop distribution.\n")
+        "\n`read ideal` is the static decomposition below generalized to the "
+        "measured hop count: the fixed NI, slave and merge cost of a data read "
+        f"({_DATA_READ_FIXED} cycles), plus 4 cycles in each of the `avg hops` + 1 "
+        "response routers a DAT head passes. It carries no burst term because "
+        "`axi_bw_monitor.sv` timestamps a read at its first R beat rather than at "
+        "`rlast`, so the rest of the worm falls outside the measurement. "
+        "`read gap` is `read plat` minus `read ideal`, which is queueing plus the "
+        "cost of a mean over a hop distribution.\n"
+        "\nThe write columns carry no analytic. A write is timestamped at B, "
+        "after every W beat has landed, and its response returns on RSP rather "
+        "than DAT, so the read decomposition is not an account of it.\n")
     out.append(_probe_block(probes))
     out.append(
         "\nPer stage, single beat, three hops, from `docs/router-spec.md` 2.4 and "
@@ -423,12 +475,43 @@ def _curve_rows(rows, sat, burst):
     return out
 
 
+def _throughput_note(rows, sat, burst):
+    """Where throughput stops climbing, against where latency runs away.
+
+    The 3x rule reads latency alone, so it can fire while the network is still
+    taking more work. The knee stated here is the first offered load whose
+    accepted throughput is within 5 percent of the curve's maximum, which is
+    what the throughput side of the same curve calls saturated."""
+    acc = [(r["offered"], accepted_flits(r["accepted_bytes"], burst))
+           for r in rows if r["accepted_bytes"] is not None]
+    if not acc:
+        return ""
+    peak = max(a for _offered, a in acc)
+    knee = next(offered for offered, a in acc if a >= 0.95 * peak)
+    head = (f"Accepted peaks at {peak:.3f} flits per node per cycle and first "
+            f"reaches 95 percent of that ({0.95 * peak:.3f}) at offered {knee:.3f}")
+    if sat is None:
+        return head + ". The curve never reaches 3x zero load, so it carries no " \
+                      "latency saturation point.\n"
+    rel, tail = (
+        ("above", "so latency runs away while throughput is still climbing")
+        if knee > sat["offered"] else
+        ("below", "so throughput flattens before latency runs away")
+        if knee < sat["offered"] else ("at", "so the two sides of the curve agree"))
+    return f"{head}, {rel} the 3x point at offered {sat['offered']:.3f}, {tail}.\n"
+
+
 def section_curves(key, patterns, out_root):
     out = ["## 3 Latency vs offered load\n",
            "One table per pattern with a full curve. `*` marks the first point at "
            "or above the 3x crossing. Offered and accepted are per node per cycle, "
            "flits on the DAT plane and bytes at the AXI master. `spread` is max "
-           "minus min of `plat` across the seeds of that point.\n"]
+           "minus min of `plat` across the seeds of that point, `-` at a point "
+           "with one seed.\n"
+           "\n`offered` is per node and counts the traffic a node addresses to "
+           "itself. `accepted` averages over all nodes and excludes that traffic, "
+           "which the tile crossbar answers where no monitor sees it. The `served` "
+           "factor in section 4 reconciles the two.\n"]
     curves = [p for p in sorted(patterns) if len(curve(patterns[p])) >= 3]
     if not curves:
         return "".join(out) + ("\nNo pattern under this output dir carries three or "
@@ -457,6 +540,7 @@ def section_curves(key, patterns, out_root):
             f"{accepted_flits(last['accepted_bytes'], key[7]):.3f} flits "
             f"({last['accepted_bytes']:.1f} B) per node per cycle.\n"
             if last["accepted_bytes"] is not None else "")
+        out.append(_throughput_note(rows, sat, key[7]))
         png = plot(pattern, rows, out_root)
         if png:
             out.append(f"\n![{pattern} latency vs offered load]({png})\n")
@@ -492,8 +576,13 @@ def section_summary(key, patterns):
            "reaches the NoC at all. `% ideal` charges the accepted flits at the "
            "highest offered load against `served * ideal`. A pattern with fewer "
            "than three offered points contributes its single operating point and "
-           "no saturation or zero-load figure.\n\n"]
+           "no saturation or zero-load figure.\n"
+           "\n`pattern_metrics` counts inter router links only, never the LOCAL "
+           "injection and ejection ports. For hotspot and neighbor the real "
+           "limiter is the terminal ejection port of the node every flow lands "
+           "on, so `% ideal` understates what the fabric delivered.\n\n"]
     rows = []
+    notes = {}
     for pattern in sorted(patterns):
         rows_c = curve(patterns[pattern])
         is_curve = len(rows_c) >= 3
@@ -518,8 +607,17 @@ def section_summary(key, patterns):
             fmt(pct, 1),
             fmt(rows_c[0]["plat"]) if is_curve else "-",
         ])
+        notes[pattern] = (pct, last["dat_util_max"])
     out.append(table(["pattern", "avg hops", "ideal", "served", "saturation (3x)",
                       "accepted at max", "% ideal", "zero-load plat"], rows))
+    pct, busiest = notes.get("uniform_random", (None, None))
+    if pct is not None and busiest is not None:
+        out.append(
+            f"\nEvery row but one reads `% ideal` within a decimal of its busiest "
+            f"measured DAT link in Appendix A, because model and measurement are "
+            f"then the same link. uniform_random is the exception, {pct:.1f} "
+            f"against {100 * busiest:.1f}: its bound comes from the bisection, "
+            f"while the busiest link the run actually loaded sits elsewhere.\n")
     return "".join(out)
 
 
@@ -575,9 +673,13 @@ def report(out_root):
     main_key = max(groups, key=lambda k: (group_label(k) == "default",
                                           sum(len(v) for v in groups[k].values())))
     patterns = groups[main_key]
+    curves = [p for p in sorted(patterns) if len(curve(patterns[p])) >= 3]
+    singles = [p for p in sorted(patterns) if len(curve(patterns[p])) < 3]
     body = [f"# Performance report: {main_key[0]}\n",
             f"\nGenerated by `sim/tools/perf_report.py` from `{out_root}`. "
-            f"Parameter set: {group_label(main_key)}.\n\n",
+            f"Parameter set: {group_label(main_key)}.\n",
+            f"\nCurve patterns: {', '.join(curves) or 'none'}. Single operating "
+            f"point: {', '.join(singles) or 'none'}.\n\n",
             section_method(main_key, patterns), "\n",
             section_zero_load(main_key, patterns, zero_load_probes(out_root)), "\n",
             section_curves(main_key, patterns, out_root), "\n",
@@ -585,9 +687,9 @@ def report(out_root):
             section_links(main_key, patterns), "\n",
             section_sensitivity(groups, main_key)]
     if plt is None:
-        body.insert(2, "matplotlib is not installed, so the curves are tables only.\n\n")
+        body.insert(3, "matplotlib is not installed, so the curves are tables only.\n\n")
     if stale:
-        body.insert(2, f"{len(stale)} run directories are left out: their `result.csv` "
+        body.insert(3, f"{len(stale)} run directories are left out: their `result.csv` "
                        f"predates the offered load and open-loop latency columns, so they "
                        f"carry no point on any curve. First: `{stale[0]}`.\n\n")
     return "".join(body)
@@ -603,7 +705,7 @@ def main(argv=None):
     out_root = pathlib.Path(a.out_dir)
     text = report(out_root)
     dest = pathlib.Path(a.out) if a.out else out_root / "perf_report.md"
-    dest.write_text(text, encoding="utf-8")
+    dest.write_text(text, encoding="utf-8", newline="\n")
     print(f"wrote {dest} ({len(text.splitlines())} lines)")
 
 

@@ -51,6 +51,34 @@ def test_open_latency_adds_source_queue_delay(tmp_path, monkeypatch):
     assert "mean_latency" not in row
 
 
+def test_latency_columns_split_read_from_write(tmp_path, monkeypatch):
+    """Read and write are separate measurements and get separate columns.
+
+    The monitor timestamps a read at its first R beat and a write at B, and the
+    two return on different planes, so the combined mean compares against
+    neither analytic. Here the read leg is 40 network and 50 open, the write leg
+    60 and 90, and the combined columns stay the sample weighted mean of both."""
+    row = _run(tmp_path, monkeypatch, LOG)
+    assert row["mean_latency_network_read"] == "40.0"
+    assert row["mean_latency_network_write"] == "60.0"
+    assert row["mean_latency_open_read"] == "50.0"     # + 10.0 source queue
+    assert row["mean_latency_open_write"] == "90.0"    # + 30.0 source queue
+    assert row["mean_latency_network"] == "45.0" and row["mean_latency_open"] == "60.0"
+
+
+def test_a_channel_with_no_sample_leaves_its_cells_empty(tmp_path, monkeypatch):
+    """A run whose writes never retired must not report a write latency of zero.
+
+    Zero is a measurement, empty is the absence of one, and section 2 of the
+    report prints the second as `-`."""
+    read_only = "\n".join(l for l in LOG.splitlines() if "[Write]" not in l) + "\n"
+    row = _run(tmp_path, monkeypatch, read_only)
+    assert row["mean_latency_network_read"] == "40.0"
+    assert row["mean_latency_network_write"] == ""
+    assert row["mean_latency_open_write"] == ""
+    assert row["mean_latency_network"] == "40.0"
+
+
 def test_accepted_uses_the_common_window_not_each_monitor_span(tmp_path, monkeypatch):
     """Two nodes retire the same work, one over half the run, and the row must
     describe the run rather than the sum of two private rates.
