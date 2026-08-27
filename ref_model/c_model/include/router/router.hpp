@@ -6,9 +6,11 @@
 // port, vc) FIFO, stage 2 RC + VA route-computes the head at a FIFO front and
 // grants it one output VC, stage 3 SA + ST arbitrates each output across the
 // VCs held on it and moves one flit into the output FIFO, stage 4 LT drives
-// the link. A head pays all four stages (4 cycles per router); a body or tail
-// flit skips RC + VA and inherits the route and output VC its head obtained
-// (3 cycles). Within one tick SA runs before VA, so a VC a tail frees in SA is
+// the link. A head pays all four stages (4 cycles per router). A body or tail
+// flit skips RC + VA and inherits the route and output VC its head obtained.
+// Each following flit leaves one cycle after the flit ahead of it, 3 cycles
+// only for a body that enters an empty FIFO after its head's SA grant. Within
+// one tick SA runs before VA, so a VC a tail frees in SA is
 // allocatable by VA the same cycle — back-to-back single-flit packets on one
 // input VC leave at one per cycle.
 // Credit-based flow control; credit is consumed at output-FIFO admission (the

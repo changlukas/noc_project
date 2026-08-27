@@ -799,7 +799,7 @@ SPEC 7 (credit decrement point, DAT). The per-(output, VC) counter is seeded to
 `NOC_ROUTER_VC_DEPTH` and decremented exactly at the grant event (admission into the
 output FIFO), not at link traversal. Verified by ctest
 `RouterDatapath.CreditDecrementAtGrantAndPulseAfterDequeue` (counter reads the seed after
-stage 1, one less after the stage-2 grant). Failure: counter value
+stage 1, one less after the stage 3 SA grant). Failure: counter value
 wrong at either observation point, or the model underflow assert (`router.hpp:262`).
 
 SPEC 8 (credit pulse discipline). Each credit output bit pulses for exactly 1 cycle

@@ -881,7 +881,7 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
     relay.target = &a;
     relay.port = static_cast<std::size_t>(RouterPort::EAST);
 
-    // A's stage-3 push lands in B's WEST input register; it becomes FIFO-visible
+    // A's stage 4 LT push lands in B's WEST input register. It becomes FIFO-visible
     // only after B's next stage-1. `wire_inflight` counts flits A has pushed but B
     // has not yet absorbed into its WEST FIFO. We increment here and decrement once
     // per b.tick() (stage 1 always drains a present input register). Since A pushes <=1
@@ -1328,6 +1328,7 @@ TEST(RouterVa, HeldPreferredVcSingleFlitOverflowsWormHeadWaits) {
 
     r.input(W).push_flit(make_tagged_flit(dst, 0, 0, 0x30));  // worm head
     for (int t = 0; t < 4; ++t) r.tick();
+    EXPECT_EQ(r.input_fifo_size(W, 0), 1u) << "worm head still parked, waiting on VA";
     EXPECT_FALSE(r.va_out_vc(W, 0).has_value()) << "worm head overflowed off its preferred VC";
     EXPECT_FALSE(r.wormhole_locked_input(E, 1).has_value());
 }
