@@ -720,8 +720,11 @@ module user_node_endpoint #(
     // clock stopped while a send was blocked: closed loop, and offered load
     // could never exceed what the network accepted.
     //
-    // Basis points, not percent: the report sweeps down to rate 0.005, and
-    // int'(0.005 * 100.0) is 0, which paced nothing at all.
+    // Basis points, not percent. A real-to-int cast rounds to nearest (LRM
+    // 6.12.2), so percent did not stall at the report's lowest rate -- it
+    // silently doubled it: int'(0.005 * 100.0) is 1, one percent. The floor is
+    // where percent breaks outright, int'(0.001 * 100.0) being 0. Basis points
+    // carry both cases.
     real injection_rate;
     int  unsigned injection_rate_bp;
 
@@ -766,6 +769,11 @@ module user_node_endpoint #(
             wait (aw_slots.size() > 0);
             slot = aw_slots.pop_front();
             file_master.drv.send_aw(file_master.aw_queue[0]);
+            // Both are unsigned: a handshake before its own slot would wrap to
+            // a huge delay and quietly poison the mean, so abort instead.
+            assert (cycle_cnt >= slot)
+                else $fatal(1, "[SrcQueue] node%0d: AW handshake at %0d precedes slot %0d",
+                            NODE_ID, cycle_cnt, slot);
             srcq_w_sum += cycle_cnt - slot;
             srcq_w_n++;
             void'(file_master.aw_queue.pop_front());
@@ -780,6 +788,9 @@ module user_node_endpoint #(
             wait (ar_slots.size() > 0);
             slot = ar_slots.pop_front();
             file_master.drv.send_ar(file_master.ar_queue[0]);
+            assert (cycle_cnt >= slot)
+                else $fatal(1, "[SrcQueue] node%0d: AR handshake at %0d precedes slot %0d",
+                            NODE_ID, cycle_cnt, slot);
             srcq_r_sum += cycle_cnt - slot;
             srcq_r_n++;
             void'(file_master.ar_queue.pop_front());

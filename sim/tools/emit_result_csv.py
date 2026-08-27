@@ -4,8 +4,18 @@ Parses the axi_bw_monitor lines out of one run.log and writes result.csv beside
 it. The row carries every parameter that bounds the measurement, so a number is
 never separated from the configuration that produced it.
 
+Per node or whole mesh, never guess from the name:
+
+    accepted_bits_per_cycle        whole mesh, summed over every node monitor
+    accepted_bytes_per_node_cycle  per node, the above / 8 / node count
+    offered_*_per_node_cycle       per node, analytic
+    mean_latency_*                 a mean, so neither
+
 accepted_bits_per_cycle sums BW across all monitors, which is correct because
-every monitor shares one cycle_cnt window.
+every monitor shares one cycle_cnt window. Only its per-node twin is
+comparable to the offered columns. The node count comes from a mesh_<x>x<y>
+topology name; any other name leaves the per-node column empty rather than
+inventing a divisor.
 
 Both latency columns are weighted by each monitor's sample count. A plain
 average of the printed means is wrong: each is already a mean over that
@@ -88,6 +98,12 @@ def parse_source_queue(log_text):
     return weighted / samples if samples else 0.0
 
 
+def mesh_nodes(topology):
+    """Node count named by a mesh_<x>x<y> topology, None for other names."""
+    m = re.match(r"mesh_(\d+)x(\d+)$", topology)
+    return int(m.group(1)) * int(m.group(2)) if m else None
+
+
 def offered_load(injection_rate, burst_len):
     """(flits, bytes) offered per node per cycle on DAT. See the module docstring."""
     rate = float(injection_rate)
@@ -143,6 +159,8 @@ def main():
     bw, latency = parse_monitors(log_text)
     srcq = parse_source_queue(log_text)
     offered_flits, offered_bytes = offered_load(a.injection_rate, a.burst_len)
+    nodes = mesh_nodes(a.topology)
+    accepted_bytes = bw / 8 / nodes if nodes else None
     (max_unique_ids, max_outstanding, dat_num_vc, router_vc_depth, mst_stall_random,
      ni_dat_rx_vc_depth) = parse_config(log_text, a.max_unique_ids, a.max_outstanding)
     row = {
@@ -165,6 +183,8 @@ def main():
         "offered_flits_per_node_cycle": str(round(offered_flits, 6)),
         "offered_bytes_per_node_cycle": str(round(offered_bytes, 6)),
         "accepted_bits_per_cycle": f"{bw:.1f}",
+        "accepted_bytes_per_node_cycle": "" if accepted_bytes is None else str(
+            round(accepted_bytes, 6)),
         "mean_latency_network": f"{latency:.1f}",
         "mean_latency_open": f"{latency + srcq:.1f}",
     }

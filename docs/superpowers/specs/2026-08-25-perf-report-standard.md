@@ -22,7 +22,9 @@ Flit counting: two bases, never mixed in one column. Network flits count every f
 (AW header, W beats, R beats): at AxLEN 32 a write is 34 flits, a read 33. Payload flits count
 W and R beats only. all_to_all excludes self traffic and uniform_random permits it, per the
 generator; the analytic script follows the generator. Ideal throughput and link
-utilization use network flits. Accepted throughput in bytes is payload by construction.
+utilization use network flits. Accepted bytes count the full 64 B bus per beat, as the third
+party monitor does (`$bits(r.data)` in `axi_bw_monitor.sv`), so at AxSIZE 5 they equal payload
+and at narrower sizes they overstate it. Offered bytes charge the same, so the two compare.
 
 ## Open loop injection
 
@@ -35,7 +37,7 @@ from that stamp and `nlat` from the actual injection (`:731-732`). The testbench
 | `qtime` | per node, per channel (AW, AR), advanced every cycle by the Bernoulli trial at `injection_rate`, never blocked by `awready` or `arready` |
 | Issue | the next AX is sent when `qtime` has passed its slot and the channel is ready |
 | Source queue delay | AX handshake cycle minus the slot's `qtime`, recorded per transaction |
-| Report | per node at end of sim: `[SrcQueue nodeN][Read] mean=<cyc> n=<count>` and `[Write]` |
+| Report | per node at end of sim: `[SrcQueue nodeN][Read] mean: <float>, N: <int>` and `[Write]` |
 | Outstanding | unchanged, NMU `max_txns_per_id` 32 is the network's backpressure, it becomes queue delay |
 | Run length | fixed 200 transactions per node. At AxLEN 32 the sweep rates are at most `p` = 0.018, so the offered window is at least 11000 cycles, stated in Method. Above saturation `plat` grows with run length, which is the expected signature |
 
