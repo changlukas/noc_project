@@ -215,13 +215,20 @@ with the monitor's bandwidth and latency numbers; mode 2 prints
 `CHECKED PASS: <run-tag> scoreboard clean, non-vacuous` with run tag
 `checked_<config>_<pattern>_r<rate>_s<seed>`.
 
-`make sim-injection-sweep PATTERN=<p>` sweeps the injection rate — nine rates
-by default, overridable via `SWEEP_RATES` — then merges every `result.csv` and
-plots `sim/tools/injection_sweep.png`. It sweeps rate only, at whatever VC
-count `constants.yaml` holds: the VC count is a tracked file, so a sweep across
-it would have to edit that file mid-run. Each row records the VC count it ran
-at and the plotter globs every result, so four curves is four edits and four
-sweeps, accumulating into one figure. Expect a long run.
+`make sim-injection-sweep` sweeps offered load — twelve points in DAT network
+flits per node per cycle, overridable via `SWEEP_OFFERED`, converted per point
+to the Bernoulli injection rate the tb takes — over `SWEEP_PATTERNS` and
+`SWEEP_SEEDS`. It sweeps load only, at whatever VC count `constants.yaml`
+holds: the VC count is a tracked file, so a sweep across it would have to edit
+that file mid-run. Each row records the VC count it ran at, so four curves is
+four edits and four sweeps. Expect a long run.
+
+`python3 sim/tools/perf_report.py sim/verilator/output` renders every
+`result.csv` under that directory into `perf_report.md`: method, zero-load
+latency, latency against offered load per pattern with the 3x saturation point
+marked, and a pattern summary against the analytic ideal from
+`sim/tools/pattern_metrics.py`. Curves get a PNG each when matplotlib is
+installed.
 
 ### DMA endpoint
 

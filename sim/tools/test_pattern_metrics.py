@@ -42,6 +42,17 @@ def test_self_traffic_costs_no_hop_and_no_link():
     assert m["avg_hops"] == sum(2 * abs(i % 4 - i // 4) for i in range(16)) / 16
 
 
+def test_self_fraction_is_the_share_that_never_enters_the_noc():
+    # uniform_random and hotspot both permit self (1 of 16 sources addresses
+    # itself); transpose maps its 4 diagonal nodes to themselves; all_to_all
+    # excludes self by construction. The tile crossbar answers that share, so
+    # no monitor ever sees it.
+    assert pm.metrics("uniform_random", 4, 4)["self_fraction"] == 1 / 16
+    assert pm.metrics("hotspot", 4, 4)["self_fraction"] == 1 / 16
+    assert pm.metrics("transpose", 4, 4)["self_fraction"] == 4 / 16
+    assert pm.metrics("all_to_all", 4, 4)["self_fraction"] == 0.0
+
+
 def test_every_pattern_reports_a_finite_ideal():
     for p in pm.PATTERNS:
         m = pm.metrics(p, 4, 4)

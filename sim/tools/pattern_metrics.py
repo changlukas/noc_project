@@ -14,6 +14,7 @@ weight. The reported numbers are then
     avg hops         weighted mean of the Manhattan distance
     max channel load max over links of the accumulated weight
     ideal            1 / max channel load, in flits per node per cycle
+    self fraction    share of the weight whose destination is its own node
 
 which is the standard channel load bound (On-Chip Networks 2e ch 7): with every
 node injecting one flit per cycle the busiest channel carries `max channel
@@ -107,16 +108,23 @@ def metrics(pattern, x_dim, y_dim, hotspots=None):
     load = {}
     hops = 0.0
     total_weight = 0.0
+    self_weight = 0.0
     for src, dst, weight in _flows(pattern, x_dim, y_dim, hotspots):
         links = _xy_links(src, dst)
         hops += weight * len(links)
         total_weight += weight
+        if src == dst:
+            self_weight += weight
         for link in links:
             load[link] = load.get(link, 0.0) + weight
     max_load = max(load.values()) if load else 0.0
     return {
         "avg_hops": hops / total_weight,
         "max_channel_load": max_load,
+        # Share of the offered traffic whose destination is its own node. The
+        # tile crossbar answers it, so it reaches neither the NoC nor a
+        # monitor: a measurement compares against `1 - self_fraction` of ideal.
+        "self_fraction": self_weight / total_weight,
         # All self traffic (a 1x1 mesh is illegal, so only a degenerate hotspot
         # set can reach this) never loads a channel and has no bound.
         "ideal_flits_per_node_cycle": float("inf") if max_load == 0 else 1.0 / max_load,

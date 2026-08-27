@@ -78,7 +78,9 @@ help:
 	@echo "  region matches its source. Vars: DMA_JOBS_PER_NODE= DMA_LENGTH= DMA_RW=read|write"
 	@echo "  (all three feed the job files AND the top's compare) DECERR_FAULT=1 DECERR_FAULT_WR=1"
 	@echo ""
-	@echo "  make sim-injection-sweep PATTERN=<p>         saturation sweep, long"
+	@echo "  make sim-injection-sweep                     saturation sweep, long"
+	@echo "  Vars: SWEEP_OFFERED= (DAT flits per node per cycle) SWEEP_PATTERNS= SWEEP_SEEDS="
+	@echo "  Render the curves with: tools/perf_report.py sim/verilator/output"
 	@echo ""
 	@echo "Build and test gates stay at the repo root: make build / make test / make pytest"
 
@@ -458,34 +460,46 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 # Injection Sweep  #
 ####################
 
-# Nine rates, one point per `make sim`, at whatever VC count
-# specgen/source/constants.yaml currently holds. The VC dimension is not swept
-# here -- noc.DAT_NUM_VC is a tracked file, and a sweep would have to edit it
-# mid-run. Four curves is four edits and four sweeps; each run writes its own
-# result.csv and plot_injection_sweep.py globs them.
-# MAX_UNIQUE_IDS and MAX_OUTSTANDING are inherited, not forced. Both are shipped
-# NI parameters, and the figure's subject is the machine as built. The bring-up
-# step measures what other settings would buy, and reports it as a number.
-SWEEP_RATES ?= 0.05 0.1 0.2 0.3 0.4 0.5 0.7 0.85 1.0
+# The sweep axis is offered load in DAT network flits per node per cycle, the
+# unit the report and the analytic ideal are stated in. At AxLEN 32 one AX per
+# channel per cycle offers 2 * 33 + 1 = 67 flits (a write is 34, a read 33), so
+# the Bernoulli rate per channel is offered / 67 and the retired 0.05 to 1.0
+# rate grid sat entirely above saturation.
+SWEEP_OFFERED  ?= 0.067 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.2
+
+# One curve per pattern per seed. The VC dimension is not swept here --
+# NOC_DAT_NUM_VC lives in specgen/source/constants.yaml, a tracked file, and a
+# sweep would have to edit it mid-run.
+SWEEP_PATTERNS ?= uniform_random
+SWEEP_SEEDS    ?= 1
 
 # INJECTION_MODE=1 selects the continuous run class, whose binary carries the
 # ideal master-face backpressure profile, so the curve measures the fabric and
 # not a consumer that stalls first (tools/gen_tb_top.py's _MST_BACKPRESSURE
 # governs the DMA top only). Same reason _MEM_LATENCY stays "ideal".
-# Generate once, up front: every point in the loop below runs the same
-# configuration, so one generation covers all of them.
+# Stimulus depends on the pattern and the seed, so `gen` runs once per curve.
+# MAX_UNIQUE_IDS and MAX_OUTSTANDING are inherited, not forced. Both are shipped
+# NI parameters, and the figure's subject is the machine as built.
+# INJECTION_COUNT is left at its default: the run length is a stated constant of
+# the method, not a per-point knob.
+# The rate is rounded to basis points, the resolution of the tb's Bernoulli
+# comparison against a 10000-wide draw.
 .PHONY: sim-injection-sweep
 sim-injection-sweep:
-	$(MAKE) gen CONFIG=$(CONFIG) PATTERN=$(PATTERN) SEED=$(SEED) \
-	    INJECTION_MODE=1 $(if $(INJECTION_COUNT),INJECTION_COUNT=$(INJECTION_COUNT))
-	@for r in $(SWEEP_RATES); do \
-	    echo ">>> sweep rate $$r"; \
-	    $(MAKE) sim CONFIG=$(CONFIG) PATTERN=$(PATTERN) SEED=$(SEED) \
-	        INJECTION_MODE=1 INJECTION_RATE=$$r \
-	        $(if $(MAX_UNIQUE_IDS),MAX_UNIQUE_IDS=$(MAX_UNIQUE_IDS)) \
-	        $(if $(MAX_OUTSTANDING),MAX_OUTSTANDING=$(MAX_OUTSTANDING)) || exit 1; \
+	@for p in $(SWEEP_PATTERNS); do \
+	    for s in $(SWEEP_SEEDS); do \
+	        $(MAKE) gen CONFIG=$(CONFIG) PATTERN=$$p SEED=$$s INJECTION_MODE=1 \
+	            $(if $(INJECTION_COUNT),INJECTION_COUNT=$(INJECTION_COUNT)) || exit 1; \
+	        for o in $(SWEEP_OFFERED); do \
+	            r=$$($(PYTHON3) -c "print('%.4f' % ($$o / (2 * ($(BURST_LEN) + 1) + 1)))"); \
+	            echo ">>> sweep $$p seed $$s offered $$o flits/node/cyc, INJECTION_RATE=$$r"; \
+	            $(MAKE) sim CONFIG=$(CONFIG) PATTERN=$$p SEED=$$s \
+	                INJECTION_MODE=1 INJECTION_RATE=$$r \
+	                $(if $(MAX_UNIQUE_IDS),MAX_UNIQUE_IDS=$(MAX_UNIQUE_IDS)) \
+	                $(if $(MAX_OUTSTANDING),MAX_OUTSTANDING=$(MAX_OUTSTANDING)) || exit 1; \
+	        done; \
+	    done; \
 	done
-	$(PYTHON3) $(SIM_ROOT)/tools/plot_injection_sweep.py $(PATTERN)
 
 #################
 # Phony targets #
