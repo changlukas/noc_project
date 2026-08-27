@@ -721,7 +721,7 @@ module user_node_endpoint #(
     // could never exceed what the network accepted.
     //
     // Basis points, not percent. A real-to-int cast rounds to nearest (LRM
-    // 6.12.2), so percent did not stall at the report's lowest rate -- it
+    // 6.12.2), so percent did not stall at the report's lowest rate, it
     // silently doubled it: int'(0.005 * 100.0) is 1, one percent. The floor is
     // where percent breaks outright, int'(0.001 * 100.0) being 0. Basis points
     // carry both cases.

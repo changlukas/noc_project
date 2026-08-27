@@ -14,7 +14,7 @@ Per node or whole mesh, never guess from the name:
 accepted_bits_per_cycle sums BW across all monitors, which is correct because
 every monitor shares one cycle_cnt window. Only its per-node twin is
 comparable to the offered columns. The node count comes from a mesh_<x>x<y>
-topology name; any other name leaves the per-node column empty rather than
+topology name. Any other name leaves the per-node column empty rather than
 inventing a divisor.
 
 Both latency columns are weighted by each monitor's sample count. A plain
