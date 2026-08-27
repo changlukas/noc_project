@@ -25,7 +25,8 @@ _MON = re.compile(
 )
 _CONFIG = re.compile(
     r"\[Config\]\s+max_unique_ids=(\d+)\s+max_outstanding=(\d+)\s+dat_num_vc=(\d+)"
-    r"(?:\s+router_vc_depth=(\d+))?(?:\s+mst_stall_random=(\d+))?")
+    r"(?:\s+router_vc_depth=(\d+))?(?:\s+mst_stall_random=(\d+))?"
+    r"(?:\s+ni_dat_rx_vc_depth=(\d+))?")
 
 
 def parse_monitors(log_text):
@@ -63,6 +64,7 @@ def parse_config(log_text, cli_max_unique_ids, cli_max_outstanding):
         int(m.group(3)),
         int(m.group(4)) if m.group(4) else None,
         int(m.group(5)) if m.group(5) else None,
+        int(m.group(6)) if m.group(6) else None,
     )
 
 
@@ -88,13 +90,13 @@ def main():
 
     log_text = pathlib.Path(a.log).read_text()
     bw, latency = parse_monitors(log_text)
-    max_unique_ids, max_outstanding, dat_num_vc, router_vc_depth, mst_stall_random = parse_config(
-        log_text, a.max_unique_ids, a.max_outstanding
-    )
+    (max_unique_ids, max_outstanding, dat_num_vc, router_vc_depth, mst_stall_random,
+     ni_dat_rx_vc_depth) = parse_config(log_text, a.max_unique_ids, a.max_outstanding)
     row = {
         "topology": a.topology,
         "vc": dat_num_vc,
         "router_vc_depth": router_vc_depth,
+        "ni_dat_rx_vc_depth": ni_dat_rx_vc_depth,
         "pattern": a.pattern,
         "injection_mode": a.injection_mode,
         "injection_rate": a.injection_rate,

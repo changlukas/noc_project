@@ -25,11 +25,13 @@ _TAG = re.compile(
     r")(?P<narrow>_narrow)?_(?:r(?P<rate>[\d.]+)_)?s(?P<seed>\d+)$")
 _CONFIG = re.compile(
     r"\[Config\]\s+max_unique_ids=(\d+)\s+max_outstanding=(\d+)\s+dat_num_vc=(\d+)"
-    r"(?:\s+router_vc_depth=(\d+))?(?:\s+mst_stall_random=(\d+))?")
+    r"(?:\s+router_vc_depth=(\d+))?(?:\s+mst_stall_random=(\d+))?"
+    r"(?:\s+ni_dat_rx_vc_depth=(\d+))?")
 _PASS = re.compile(r"PASS: all (\d+) nodes done, non-vacuous")
 
-_PARAM_COLS = ("topology", "vc", "router_depth", "outstanding", "txns_per_id",
-               "ids/init", "burst_len", "mode", "rate", "txns/node", "mst_stall")
+_PARAM_COLS = ("topology", "vc", "router_depth", "ni_rx_depth", "outstanding",
+               "txns_per_id", "ids/init", "burst_len", "mode", "rate",
+               "txns/node", "mst_stall")
 
 
 def emit_table(header, rows, groups=None):
@@ -113,8 +115,9 @@ def collect(out_root):
                     continue
                 cfg = _CONFIG.search(log_path.read_text())
                 key = (m.group("config"), cfg.group(3), cfg.group(4) or "?",
-                       cfg.group(2), "?", "?", "?", "continuous",
-                       m.group("rate") or "?", "?", cfg.group(5) or "?")
+                       cfg.group(6) or "?", cfg.group(2), "?", "?", "?",
+                       "continuous", m.group("rate") or "?", "?",
+                       cfg.group(5) or "?")
                 groups[key][m.group("pattern")].append({
                     "status": "FAIL",
                     "space": "config" if m.group("narrow") else "memory"})
@@ -125,6 +128,7 @@ def collect(out_root):
             dat_util = dat_link_util(run_dir / "perf.json")
             key = (row["topology"], row["vc"],
                    row.get("router_vc_depth") or "?",
+                   row.get("ni_dat_rx_vc_depth") or "?",
                    row["max_outstanding"], row.get("max_txns_per_id", "32"),
                    row.get("ids_per_initiator", "1"), row.get("burst_len", "0"),
                    mode, row["injection_rate"], row["injection_count"],
@@ -147,8 +151,9 @@ def collect(out_root):
             text = log_path.read_text()
             cfg = _CONFIG.search(text)
             key = (m.group("config"), cfg.group(3), cfg.group(4) or "?",
-                   cfg.group(2), "-", "-", "-", m.group(1),
-                   m.group("rate") or "-", "-", cfg.group(5) or "-")
+                   cfg.group(6) or "-", cfg.group(2), "-", "-", "-",
+                   m.group(1), m.group("rate") or "-", "-",
+                   cfg.group(5) or "-")
             groups[key][m.group("pattern")].append({
                 "status": "PASS (scoreboard)" if _PASS.search(text) else "FAIL",
                 "space": "config" if m.group("narrow") else "memory",
@@ -158,8 +163,9 @@ def collect(out_root):
 
 # Shipped defaults, mirroring specgen/source/constants.yaml (DAT_NUM_VC,
 # NSU_META_BUFFER_*, NMU_MAX_TXNS_PER_ID) and the generator defaults.
-_DEFAULTS = {"vc": "2", "router_depth": "8", "outstanding": "32",
-             "txns_per_id": "32", "ids/init": "1", "burst_len": "0"}
+_DEFAULTS = {"vc": "2", "router_depth": "8", "ni_rx_depth": "8",
+             "outstanding": "32", "txns_per_id": "32", "ids/init": "1",
+             "burst_len": "0"}
 
 
 def group_label(key):
@@ -168,8 +174,8 @@ def group_label(key):
     diffs = [f"{col}={val}" for col, val in zip(_PARAM_COLS, key)
              if col in _DEFAULTS and val not in ("?", "-")
              and val != _DEFAULTS[col]]
-    if key[7] != "continuous":
-        diffs.append(f"mode={key[7]}")
+    if key[8] != "continuous":
+        diffs.append(f"mode={key[8]}")
     if any(v == "?" for v in key):
         diffs.append("aborted before reporting, unrecorded fields ?")
     return ", ".join(diffs) if diffs else "default"
@@ -179,8 +185,8 @@ def param_bullets(key):
     """The parameter set as nested bullets: the AXI-side stimulus and NI
     settings, then what the NoC is built with. `-` = not applicable, `?` =
     unrecorded (aborted run)."""
-    (topology, vc, depth, outstanding, txns_per_id, ids, burst, mode, rate,
-     count, mst_stall) = key
+    (topology, vc, depth, ni_rx_depth, outstanding, txns_per_id, ids, burst,
+     mode, rate, count, mst_stall) = key
     beats = f"AxLEN {burst} ({int(burst) + 1} beats)" if burst.isdigit() else f"AxLEN {burst}"
     profile = {"0": "ideal", "1": "random"}.get(mst_stall, mst_stall)
     lines = [
@@ -196,6 +202,7 @@ def param_bullets(key):
         f"  - topology: {topology}",
         f"  - DAT VCs: {vc}",
         f"  - router input VC FIFO depth: {depth} (credit window)",
+        f"  - NI DAT receive FIFO depth per VC: {ni_rx_depth} (LOCAL credit window)",
     ]
     return chr(10).join(lines) + chr(10)
 
@@ -206,7 +213,7 @@ def main():
     groups = collect(out_root)
     labeled = sorted(
         ((group_label(k), k) for k in groups),
-        key=lambda lk: (lk[1][7] != "continuous", "?" in lk[1],
+        key=lambda lk: (lk[1][8] != "continuous", "?" in lk[1],
                         lk[0] != "default", lk[0]))
 
     print("# Continuous-mode parameter sweep\n")

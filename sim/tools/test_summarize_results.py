@@ -6,11 +6,12 @@ import summarize_results as s
 def _write_csv(run_dir, pattern, seed, space="memory", vc="2", burst="0",
                bw="100.0", lat="50.0"):
     run_dir.mkdir(parents=True)
-    header = ("topology,vc,router_vc_depth,pattern,injection_mode,"
-              "injection_rate,injection_count,seed,max_unique_ids,"
-              "max_outstanding,max_txns_per_id,ids_per_initiator,burst_len,"
-              "space,accepted_bits_per_cycle,mean_latency")
-    row = (f"mesh_2x2,{vc},8,{pattern},1,0.9,200,{seed},1,32,32,1,{burst},"
+    header = ("topology,vc,router_vc_depth,ni_dat_rx_vc_depth,pattern,"
+              "injection_mode,injection_rate,injection_count,seed,"
+              "max_unique_ids,max_outstanding,max_txns_per_id,"
+              "ids_per_initiator,burst_len,space,accepted_bits_per_cycle,"
+              "mean_latency")
+    row = (f"mesh_2x2,{vc},8,8,{pattern},1,0.9,200,{seed},1,32,32,1,{burst},"
            f"{space},{bw},{lat}")
     (run_dir / "result.csv").write_text(header + "\n" + row + "\n")
 
