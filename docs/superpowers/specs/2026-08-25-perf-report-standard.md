@@ -11,7 +11,7 @@ Codex survey 2026-08-25. No DUT change.
 | Offered load | injection probability per node per cycle times packet size | flits per node per cycle, and B per node per cycle |
 | Accepted throughput | bytes the AXI master handshakes per cycle, per node, read plus write | B per node per cycle, and flits |
 | Network latency `nlat` | AX handshake at the master to the response, per channel: a read ends at its first R beat and a write at B (today's monitor value, `axi_bw_monitor.sv`) | cycles |
-| Packet latency `plat` | intended issue time (open loop source queue) to last response beat, `plat = nlat + source queue delay` | cycles |
+| Packet latency `plat` | intended issue time (open loop source queue) to the same response event as `nlat`, `plat = nlat + source queue delay` | cycles |
 | Zero-load latency | `plat` at the lowest sweep point, offered 0.067 flits per node per cycle (`p` = 0.001 per channel) | cycles |
 | Saturation throughput | offered load at which `plat` reaches 3 times zero-load (textbook rule) | flits per node per cycle |
 | Accepted at max load | accepted throughput at the highest offered load, booksim's accepted rate at saturation | flits per node per cycle |
