@@ -96,6 +96,20 @@ def test_seed_spread_column(tmp_path):
     assert cells[5] == "55.0" and cells[6] == "10.0" and cells[7] == "2"
 
 
+def test_single_point_pattern_is_not_a_zero_load_row(tmp_path):
+    """A pattern measured at one saturated operating point carries no unloaded
+    latency. It stays out of the section 2 table and its section 4 zero-load
+    cell is blank, rather than presenting a congested plat as zero load."""
+    _curve(tmp_path)
+    _point(tmp_path, "hotspot", 0.9, 10.0, 45266.0, nlat=7472.0)
+    text = pr.report(tmp_path)
+    section2 = text.split("## 2 Zero-load latency", 1)[1].split("## 3", 1)[0]
+    assert "hotspot" not in section2
+    assert "uniform_random" in section2
+    assert _row(text, "## 4 Pattern summary", "hotspot")[7] == "-"
+    assert _row(text, "## 4 Pattern summary", "uniform_random")[7] == "40.0"
+
+
 def test_no_removed_names():
     """The clean cut: no tracked file under Makefile, sim/, docs/ or README.md
     still names a removed script or the old report.

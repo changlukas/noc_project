@@ -366,10 +366,14 @@ def section_zero_load(key, patterns, probes=()):
     beats = int(burst) + 1 if burst.isdigit() else 1
     out = ["## 2 Zero-load latency\n",
            "Measured at the lowest offered point of each curve, where the source "
-           "queue is empty and `plat` equals `nlat`.\n\n"]
+           "queue is empty and `plat` equals `nlat`. A pattern measured at a "
+           "single operating point is not listed: its one point is saturated, "
+           "not unloaded.\n\n"]
     rows = []
     for pattern in sorted(patterns):
         rows_c = curve(patterns[pattern])
+        if len(rows_c) < 3:
+            continue
         m = analytic(pattern, key[0])
         hops = m["avg_hops"] if m else None
         ideal = (_DATA_READ_FIXED + 4 * (hops + 1) + beats - 1) if hops is not None else None
@@ -485,7 +489,7 @@ def section_summary(key, patterns):
            "reaches the NoC at all. `% ideal` charges the accepted flits at the "
            "highest offered load against `served * ideal`. A pattern with fewer "
            "than three offered points contributes its single operating point and "
-           "no saturation figure.\n\n"]
+           "no saturation or zero-load figure.\n\n"]
     rows = []
     for pattern in sorted(patterns):
         rows_c = curve(patterns[pattern])
@@ -506,7 +510,7 @@ def section_summary(key, patterns):
             (f"> {last['offered']:.3f}" if is_curve else "-"),
             fmt(acc, 3),
             fmt(pct, 0),
-            fmt(rows_c[0]["plat"]),
+            fmt(rows_c[0]["plat"]) if is_curve else "-",
         ])
     out.append(table(["pattern", "avg hops", "ideal", "served", "saturation (3x)",
                       "accepted at max", "% ideal", "zero-load plat"], rows))
