@@ -29,8 +29,8 @@ constexpr auto E = static_cast<std::size_t>(RouterPort::EAST);
 constexpr auto S = static_cast<std::size_t>(RouterPort::SOUTH);
 constexpr auto W = static_cast<std::size_t>(RouterPort::WEST);
 
-// Router zero-load pipeline depth (see test_router.cpp).
-constexpr int kPipelineDepth = 3;
+// Router zero-load pipeline depth for a head flit (see test_router.cpp).
+constexpr int kPipelineDepth = 4;
 
 uint8_t make_id(uint8_t x, uint8_t y) {
     return static_cast<uint8_t>((y << ni::width::X_WIDTH) | x);
@@ -402,6 +402,65 @@ TEST(RouterFork, PerBranchVaAssignsEachBranchItsOwnPreferredVc) {
     }
 }
 
+// Fork branches allocate at VA independently: with NORTH's VC held by another
+// worm the EAST branch locks and waits, NORTH locks the cycle the holder's tail
+// frees it, and the head pops only once both branches have granted it.
+TEST(RouterFork, BranchesLockAtVaIndependently) {
+    Router r(center_cfg());  // num_vc 2
+    FlitSink north, east;
+    r.set_downstream(N, north);
+    r.set_downstream(E, east);
+
+    // A pinned worm from SOUTH holds (NORTH, vc0): dst (1,3) routes NORTH here.
+    auto holder = [](uint64_t flit_tail, uint8_t tag) {
+        Flit f = make_unicast_flit(make_id(1, 3), make_id(1, 0), /*vc=*/0, flit_tail, tag);
+        f.set_header_field("fixed_vc", 1);
+        return f;
+    };
+    r.input(S).push_flit(holder(/*flit_tail=*/0, 0));
+    r.tick();  // BW
+    r.tick();  // VA: (NORTH, vc0) locked by SOUTH
+    ASSERT_EQ(r.wormhole_locked_input(N, 0), std::optional<std::size_t>(S));
+
+    // {E,N} fork from WEST, pinned to vc0 so both branches want the same VC.
+    constexpr int kFlits = 2;
+    const auto worm = make_mc_worm(make_id(1, 3), make_id(0, 1), make_id(2, 0), /*vc=*/0,
+                                   /*fixed_vc=*/1, kFlits);
+    r.input(W).push_flit(worm[0]);
+    r.tick();  // SA grants the holder's head; BW files the fork head
+    r.tick();  // VA: EAST takes vc0, NORTH is held so that branch retries
+    EXPECT_EQ(r.wormhole_locked_input(E, 0), std::optional<std::size_t>(W));
+    EXPECT_EQ(r.wormhole_locked_input(N, 0), std::optional<std::size_t>(S))
+        << "the NORTH branch took a held VC";
+    EXPECT_EQ(r.input_fifo_size(W, 0), 1u) << "the head must stay parked until every branch grants";
+
+    // Close the holder: its tail frees (NORTH, vc0) in SA and the parked fork
+    // head takes it in VA of the same cycle.
+    r.input(S).push_flit(holder(/*flit_tail=*/1, 1));
+    r.tick();  // BW
+    r.tick();  // SA releases (NORTH, vc0); VA hands it to the fork head
+    EXPECT_EQ(r.wormhole_locked_input(N, 0), std::optional<std::size_t>(W));
+
+    // Both branches now hold a VC: the head pops and the worm completes.
+    std::size_t fed = 1;
+    for (int t = 0; t < 24; ++t) {
+        feed_worm(r, worm, fed, W, 0);
+        const std::size_t bn = north.received.size(), be = east.received.size();
+        r.tick();
+        return_credit(r, north, N, bn);
+        return_credit(r, east, E, be);
+    }
+    expect_worm_in_order(east, kFlits, "EAST");
+    // NORTH also carried the holder's two flits, so count the fork's.
+    std::vector<uint64_t> north_fork_tags;
+    for (const auto& f : north.received) {
+        if (f.get_header_field("collective_op") == ni::COLLECTIVE_OP_MULTICAST)
+            north_fork_tags.push_back(f.get_header_field("ordering_tag"));
+    }
+    EXPECT_EQ(north_fork_tags, (std::vector<uint64_t>{0, 1})) << "NORTH branch";
+    EXPECT_EQ(r.fork_done_mask(W, 0), 0u);
+}
+
 class RouterForkPinnedVc : public ::testing::TestWithParam<int> {};
 
 TEST_P(RouterForkPinnedVc, PinnedVcRidesEveryBranchAcrossNumVc) {
@@ -452,7 +511,7 @@ struct CreditRelay : ni::cmodel::router::RouterCreditSink {
     void receive_credit(uint8_t vc) override { target->receive_credit(out_port, vc); }
 };
 
-// Sink that returns the credit inline at delivery (stage 3 runs first in
+// Sink that returns the credit inline at delivery (stage 4 LT runs first in
 // tick(), so the credit is usable the same tick — the EjectSink pattern of
 // test_router.cpp). Models a freely absorbing submesh row.
 struct DrainingSink : ni::cmodel::router::RouterLink {
@@ -528,11 +587,11 @@ TEST(RouterForkWedge, OverlappingTreesOppositeOrderWedgeDetectedWithinBound) {
     // FIFO-room feed gate). Past this bound every reachable advance has
     // happened; anything still moving would disprove the wedge.
     constexpr int kWedgeBound =
-        2 * kWormFlits * 2 * (kPipelineDepth + 1) + 2 * kWormFlits;  // = 144
+        2 * kWormFlits * 2 * (kPipelineDepth + 1) + 2 * kWormFlits;  // = 176
     // A live system shows an observable state change at least once per
     // grant -> stage-3 push -> registered credit pulse -> re-grant round
     // trip, < 2 x (kPipelineDepth + 1) ticks.
-    constexpr int kQuiescentWindow = 2 * (kPipelineDepth + 1);  // = 8
+    constexpr int kQuiescentWindow = 2 * (kPipelineDepth + 1);  // = 10
 
     auto snapshot = [&]() {
         return std::vector<std::size_t>{

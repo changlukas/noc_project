@@ -16,9 +16,12 @@ using ni::cmodel::router::RouterPort;
 
 namespace {
 
-// Router zero-load latency: a flit pushed at tick T is delivered at T+3
-// (3-stage reverse-order pipeline; verified by RouterDatapath.ZeroLoadLatencyIsThreeTicks).
-constexpr int kPipelineDepth = 3;
+// Router zero-load latency for a HEAD flit (a single-flit packet is one): a
+// flit pushed at tick T is delivered at T+4 (4-stage reverse-order pipeline;
+// verified by RouterDatapath.ZeroLoadLatencyIsFourTicks). A body or tail flit
+// skips RC+VA and follows its head one cycle apart
+// (RouterDatapath.BodyFlitsFollowHeadOneCycleApart).
+constexpr int kPipelineDepth = 4;
 
 RouterConfig center_cfg() {
     RouterConfig cfg;
@@ -184,18 +187,60 @@ TEST(RouterConstruction, DefaultDatVcCountMatchesGeneratedContract) {
     EXPECT_EQ(cfg.num_vc, 2u);
 }
 
-TEST(RouterDatapath, ZeroLoadLatencyIsThreeTicks) {
+TEST(RouterDatapath, ZeroLoadLatencyIsFourTicks) {
     Router r(center_cfg());
     FlitSink east;
-    r.set_downstream(static_cast<std::size_t>(RouterPort::EAST), east);
-    auto f = make_flit(make_dst(3, 1), /*vc=*/0, /*flit_tail=*/1);
-    r.input(static_cast<std::size_t>(RouterPort::WEST)).push_flit(f);  // T
-    r.tick();
-    EXPECT_TRUE(east.received.empty());  // T+1: stage 1
-    r.tick();
-    EXPECT_TRUE(east.received.empty());  // T+2: stage 2
-    r.tick();
-    ASSERT_EQ(east.received.size(), 1u);  // T+3: stage 3
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+    r.input(W).push_flit(make_flit(make_dst(3, 1), 0, /*flit_tail=*/1));
+    for (int t = 0; t < 3; ++t) {  // T+1 BW, T+2 RC+VA, T+3 SA+ST
+        r.tick();
+        EXPECT_TRUE(east.received.empty()) << "tick " << t;
+    }
+    r.tick();  // T+4 LT
+    ASSERT_EQ(east.received.size(), 1u);
+}
+
+// Head pays VA, body and tail do not: a 3-flit worm delivers at ticks 4, 5, 6.
+TEST(RouterDatapath, BodyFlitsFollowHeadOneCycleApart) {
+    Router r(center_cfg());
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);
+    std::vector<std::size_t> arrivals;
+    for (int t = 1; t <= 8; ++t) {
+        if (t <= 3) r.input(W).push_flit(make_flit(dst, 0, t == 3 ? 1 : 0));
+        const std::size_t before = east.received.size();
+        r.tick();
+        if (east.received.size() > before) arrivals.push_back(static_cast<std::size_t>(t));
+    }
+    EXPECT_EQ(arrivals, (std::vector<std::size_t>{4, 5, 6}));
+}
+
+// A tail frees its VC in SA and the next head takes it in VA of the same
+// cycle: eight single-flit packets on one input VC arrive one per cycle.
+TEST(RouterDatapath, BackToBackSingleFlitsOnePerCycle) {
+    Router r(center_cfg());
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);
+    std::vector<std::size_t> arrivals;
+    for (int t = 1; t <= 14; ++t) {
+        if (t <= 8) r.input(W).push_flit(make_flit(dst, 0, 1));
+        const std::size_t before = east.received.size();
+        r.tick();
+        for (std::size_t i = before; i < east.received.size(); ++i) {
+            r.receive_credit(E, static_cast<uint8_t>(east.received[i].get_header_field("vc_id")));
+            arrivals.push_back(static_cast<std::size_t>(t));
+        }
+    }
+    ASSERT_EQ(arrivals.size(), 8u);
+    for (std::size_t i = 1; i < arrivals.size(); ++i) EXPECT_EQ(arrivals[i], arrivals[i - 1] + 1);
 }
 
 TEST(RouterDatapath, HeaderTransparency) {
@@ -207,9 +252,7 @@ TEST(RouterDatapath, HeaderTransparency) {
     f.set_header_field("ordering_tag", 7);
     f.set_header_field("src_id", make_dst(0, 2));
     r.input(static_cast<std::size_t>(RouterPort::WEST)).push_flit(f);
-    r.tick();
-    r.tick();
-    r.tick();
+    for (int t = 0; t < kPipelineDepth; ++t) r.tick();
     ASSERT_EQ(east.received.size(), 1u);
     EXPECT_EQ(east.received[0].raw(), f.raw());  // byte-for-byte, whole flit
 }
@@ -221,14 +264,18 @@ TEST(RouterDatapath, CreditDecrementAtGrantAndPulseAfterDequeue) {
     r.set_downstream(static_cast<std::size_t>(RouterPort::EAST), east);
     r.set_upstream_credit(static_cast<std::size_t>(RouterPort::WEST), west_up);
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
     EXPECT_EQ(r.credit(E, 0), NOC_ROUTER_VC_DEPTH);  // seeded
-    r.input(static_cast<std::size_t>(RouterPort::WEST)).push_flit(make_flit(make_dst(3, 1), 0, 1));
-    r.tick();  // stage 1
+    r.input(W).push_flit(make_flit(make_dst(3, 1), 0, 1));
+    r.tick();  // stage 1 BW
     EXPECT_EQ(r.credit(E, 0), NOC_ROUTER_VC_DEPTH);
-    r.tick();  // stage 2: grant
+    r.tick();  // stage 2 VA: the VC is held, its credit is NOT reserved
+    ASSERT_EQ(r.va_out_vc(W, 0), std::optional<uint8_t>(0));
+    EXPECT_EQ(r.credit(E, 0), NOC_ROUTER_VC_DEPTH);
+    r.tick();  // stage 3 SA: grant
     EXPECT_EQ(r.credit(E, 0), NOC_ROUTER_VC_DEPTH - 1);
     EXPECT_TRUE(west_up.pulses.empty());  // registered
-    r.tick();                             // pulse delivered
+    r.tick();                             // stage 4 LT + pulse delivered
     ASSERT_EQ(west_up.pulses.size(), 1u);
     EXPECT_EQ(west_up.pulses[0], 0);
     r.receive_credit(E, 0);  // downstream returns
@@ -718,7 +765,9 @@ TEST(RouterVcArbitration, BlockedVcDoesNotStallOthers) {
     // credit on delivery. vc1 has full, fresh credit, so it must flow despite vc0
     // being permanently blocked on the same input/output ports.
     int vc1_received = 0;
-    for (int t = 0; t < 12 && vc1_received < 4; ++t) {
+    // Each packet is a head, so each costs one more tick than the pre-VA-stage
+    // pipeline: 4 packets, bound 12 -> 16. The real exit is vc1_received.
+    for (int t = 0; t < 16 && vc1_received < 4; ++t) {
         if (r.input_fifo_size(WEST, 1) == 0)
             r.input(WEST).push_flit(make_pinned_flit(dst, /*vc=*/1, /*flit_tail=*/1, 0x20));
         const std::size_t before = east.received.size();
@@ -782,7 +831,7 @@ TEST(RouterVcArbitration, SameCycleOutputFifoEnqueueDequeue) {
     const uint8_t dst = make_dst(3, 1);
 
     // Fill the EAST output FIFO to its depth (NOC_ROUTER_OUTPUT_FIFO_DEPTH)
-    // WITHOUT a downstream attached, so stage 3 cannot drain it. Keep a backlog queued
+    // WITHOUT a downstream attached, so stage 4 LT cannot drain it. Keep a backlog queued
     // in the input FIFO so a grant is available on every later tick. Feed one vc0 flit/tick.
     for (int t = 0; t < 12; ++t) {
         if (r.input_fifo_size(WEST, 0) < NOC_ROUTER_OUTPUT_FIFO_DEPTH + 1)
@@ -796,19 +845,19 @@ TEST(RouterVcArbitration, SameCycleOutputFifoEnqueueDequeue) {
         << "output FIFO not filled to depth";
     ASSERT_GE(r.input_fifo_size(WEST, 0), 1u) << "no input backlog to supply a same-tick grant";
 
-    // Attach the downstream now: stage 3 can drain one flit this tick, and stage 2
-    // (running after stage 3 in the same tick) can grant one from the input
-    // backlog. Net output-FIFO occupancy stays at NOC_ROUTER_OUTPUT_FIFO_DEPTH;
-    // the sink gains exactly one.
+    // Attach the downstream now: stage 4 LT can drain one flit this tick, and
+    // stage 3 SA (running after LT in the same tick) can grant one from the
+    // input backlog. Net output-FIFO occupancy stays at
+    // NOC_ROUTER_OUTPUT_FIFO_DEPTH; the sink gains exactly one.
     r.set_downstream(E, east);
     ASSERT_TRUE(east.received.empty());
     const std::size_t backlog_before = r.input_fifo_size(WEST, 0);
     r.tick();
     EXPECT_EQ(r.output_fifo_size(E), static_cast<std::size_t>(NOC_ROUTER_OUTPUT_FIFO_DEPTH))
         << "deq+enq in the same tick did not hold occupancy at the FIFO depth";
-    EXPECT_EQ(east.received.size(), 1u) << "stage 3 did not drain one flit";
+    EXPECT_EQ(east.received.size(), 1u) << "stage 4 LT did not drain one flit";
     EXPECT_EQ(r.input_fifo_size(WEST, 0), backlog_before - 1)
-        << "stage 2 did not grant one from the backlog the same tick";
+        << "stage 3 SA did not grant one from the backlog the same tick";
 }
 
 // --- Credit conservation + error behaviors ---------------------------------
@@ -1252,43 +1301,101 @@ TEST(RouterVaWorm, PinnedWormRidesNonPreferredVcNoAssert) {
         << "pinned worm consumed the preferred VC's credit";
 }
 
-TEST(RouterVaWorkConserving, HeadVaFailAlternateCandidateGrantedSameTick) {
+// VA needs a free AND credited VC. Preferred VC held by another worm: a
+// single-flit packet takes the highest-index other free credited VC; a worm
+// head stays idle and takes nothing.
+TEST(RouterVa, HeldPreferredVcSingleFlitOverflowsWormHeadWaits) {
     RouterConfig cfg = center_cfg();
     cfg.num_vc = 2;
-    cfg.vc_depth = 2;
     Router r(cfg);
     FlitSink east;
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
-    const auto LOCAL = static_cast<std::size_t>(RouterPort::LOCAL);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    const auto S = static_cast<std::size_t>(RouterPort::SOUTH);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(2, 3);  // EAST here, next hop NORTH -> preferred vc0
+    r.input(S).push_flit(make_tagged_flit(dst, 0, /*flit_tail=*/0, 0x20));  // open worm holds vc0
+    r.tick();
+    r.tick();
+    ASSERT_EQ(r.wormhole_locked_input(E, 0), std::optional<std::size_t>(S));
+
+    r.input(W).push_flit(make_tagged_flit(dst, 0, 1, 0x10));  // single-flit packet
+    r.tick();                                                 // stage 1 BW
+    r.tick();                                                 // stage 2 VA
+    EXPECT_EQ(r.va_out_vc(W, 0), std::optional<uint8_t>(1)) << "overflowed to vc1";
+    for (int t = 0; t < 4; ++t) r.tick();  // it departs and frees vc1 again
+
+    r.input(W).push_flit(make_tagged_flit(dst, 0, 0, 0x30));  // worm head
+    for (int t = 0; t < 4; ++t) r.tick();
+    EXPECT_FALSE(r.va_out_vc(W, 0).has_value()) << "worm head overflowed off its preferred VC";
+    EXPECT_FALSE(r.wormhole_locked_input(E, 1).has_value());
+}
+
+// A free VC with credit 0 is never held: the head stays idle until credit
+// returns, then allocates and departs.
+TEST(RouterVa, ZeroCreditVcIsNeverHeld) {
+    Router r(center_cfg());  // num_vc 1
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);
+    for (std::size_t i = 0; i < NOC_ROUTER_VC_DEPTH; ++i) {
+        r.input(W).push_flit(make_flit(dst, 0, 1));
+        r.tick();
+    }
+    for (int t = 0; t < 8; ++t) r.tick();  // credit_[E][0] is now 0, no returns
+    ASSERT_EQ(r.credit(E, 0), 0u);
+    ASSERT_EQ(east.received.size(), static_cast<std::size_t>(NOC_ROUTER_VC_DEPTH));
+
+    r.input(W).push_flit(make_flit(dst, 0, 1));
+    for (int t = 0; t < 4; ++t) r.tick();
+    EXPECT_FALSE(r.va_out_vc(W, 0).has_value());
+    EXPECT_FALSE(r.wormhole_locked_input(E, 0).has_value());
+    r.receive_credit(E, 0);
+    for (int t = 0; t < 4; ++t) r.tick();
+    EXPECT_EQ(east.received.size(), NOC_ROUTER_VC_DEPTH + 1);
+}
+
+TEST(RouterVaWorkConserving, HeadVaFailAlternateCandidateGrantedSameTick) {
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
     const auto NORTH = static_cast<std::size_t>(RouterPort::NORTH);
     const auto SOUTH = static_cast<std::size_t>(RouterPort::SOUTH);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
     r.set_downstream(E, east);
 
-    // Drain EAST vc1 with pinned single-flit packets so it is dry when A
-    // arrives; vc0 (candidate B's preferred VC) is untouched.
-    for (std::size_t k = 0; k < cfg.vc_depth; ++k) {
-        r.input(LOCAL).push_flit(make_pinned_flit(make_dst(3, 1), /*vc=*/1, /*flit_tail=*/1));
-        for (int t = 0; t < kPipelineDepth + 1 && east.received.size() < k + 1; ++t) r.tick();
-    }
-    ASSERT_EQ(east.received.size(), 2u);
-    ASSERT_EQ(r.credit(E, 1), 0u);
-    ASSERT_GT(r.credit(E, 0), 0u);
+    // An open worm from WEST holds (EAST, vc1) -- dst (3,1) routes EAST here,
+    // next hop EAST -> preferred vc1. vc0 stays free.
+    r.input(WEST).push_flit(make_flit(make_dst(3, 1), /*vc=*/0, /*flit_tail=*/0));
+    r.tick();
+    r.tick();
+    ASSERT_EQ(r.wormhole_locked_input(E, 1), std::optional<std::size_t>(WEST));
 
-    // Candidate A: worm head, dst (3,1) -> out EAST, next hop EAST -> preferred vc1 (dry).
+    // Candidate A: worm head, preferred vc1 -> held, and a worm head never
+    // overflows, so its VA fails.
     r.input(NORTH).push_flit(make_flit(make_dst(3, 1), /*vc=*/0, /*flit_tail=*/0));
     // Candidate B: single-flit packet, dst (2,3) -> out EAST, next hop NORTH ->
-    // preferred vc0 (has credit).
+    // preferred vc0 (free and credited).
     r.input(SOUTH).push_flit(make_flit(make_dst(2, 3), /*vc=*/0, /*flit_tail=*/1));
     r.tick();  // stage 1: both land in their input-side vc0 FIFOs
-    r.tick();  // stage 2: A scanned first, fails VA; scan continues and grants B (D7)
-    EXPECT_EQ(r.input_fifo_size(NORTH, 0), 1u) << "candidate A must not be granted";
-    EXPECT_EQ(r.output_fifo_size(E), 1u) << "candidate B must be granted this SAME tick";
-    EXPECT_EQ(r.credit(E, 0), 1u) << "B's preferred VC credit not consumed";
+    r.tick();  // stage 2 VA: A scanned first, fails; the scan continues to B (D7)
+    EXPECT_FALSE(r.va_out_vc(NORTH, 0).has_value()) << "candidate A must not be allocated";
+    EXPECT_EQ(r.va_out_vc(SOUTH, 0), std::optional<uint8_t>(0))
+        << "candidate B must be allocated this SAME tick";
+    EXPECT_EQ(r.wormhole_locked_input(E, 0), std::optional<std::size_t>(SOUTH));
 
-    r.tick();                             // stage 3: B reaches the sink
-    ASSERT_EQ(east.received.size(), 3u);  // drain flits + B
-    EXPECT_EQ(static_cast<uint8_t>(east.received[2].get_header_field("dst_id")), make_dst(2, 3));
-    EXPECT_EQ(static_cast<uint8_t>(east.received[2].get_header_field("vc_id")), 0u);
+    r.tick();  // stage 3 SA: B granted
+    EXPECT_EQ(r.input_fifo_size(NORTH, 0), 1u) << "candidate A must not be granted";
+    EXPECT_EQ(r.credit(E, 0), static_cast<std::size_t>(NOC_ROUTER_VC_DEPTH) - 1)
+        << "B's preferred VC credit not consumed";
+    r.tick();                             // stage 4 LT: B reaches the sink
+    ASSERT_EQ(east.received.size(), 2u);  // the holder's head + B
+    EXPECT_EQ(static_cast<uint8_t>(east.received[1].get_header_field("dst_id")), make_dst(2, 3));
+    EXPECT_EQ(static_cast<uint8_t>(east.received[1].get_header_field("vc_id")), 0u);
 }
 
 TEST(RouterVaCredit, ConsumeStampedVcReturnInputVc) {
@@ -1303,13 +1410,15 @@ TEST(RouterVaCredit, ConsumeStampedVcReturnInputVc) {
     r.set_upstream_credit(WEST, west_up);
     // fixed_vc=0, input vc0, dst next-hop EAST -> assigned output vc1.
     r.input(WEST).push_flit(make_flit(make_dst(3, 1), /*vc=*/0, /*flit_tail=*/1));
-    r.tick();  // stage 1
-    r.tick();  // stage 2: grant
+    r.tick();  // stage 1 BW
+    r.tick();  // stage 2 VA: output vc1 assigned
+    ASSERT_EQ(r.va_out_vc(WEST, 0), std::optional<uint8_t>(1));
+    r.tick();  // stage 3 SA: grant
     EXPECT_EQ(r.credit(E, 1), static_cast<std::size_t>(NOC_ROUTER_VC_DEPTH) - 1)
         << "credit not consumed on the assigned VC";
     EXPECT_EQ(r.credit(E, 0), static_cast<std::size_t>(NOC_ROUTER_VC_DEPTH))
         << "credit consumed on the input VC";
-    r.tick();  // stage 3 + registered pulse
+    r.tick();  // stage 4 LT + registered pulse
     ASSERT_EQ(east.received.size(), 1u);
     EXPECT_EQ(static_cast<uint8_t>(east.received[0].get_header_field("vc_id")), 1u)
         << "header not restamped with the assigned VC";
