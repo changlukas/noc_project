@@ -484,7 +484,10 @@ def plot(pattern, rows, out_root):
 
 def section_summary(key, patterns):
     out = ["## 4 Pattern summary\n",
-           "`ideal` is the analytic channel load bound (`pattern_metrics.py`). "
+           "`ideal` is the analytic channel load bound (`pattern_metrics.py`). It "
+           "counts both directions, the write worm on the request path and the "
+           "read reply on the reverse path, because `accepted at max` counts both "
+           "too. "
            "`served` is `1 - self fraction`, the share of the offered traffic that "
            "reaches the NoC at all. `% ideal` charges the accepted flits at the "
            "highest offered load against `served * ideal`. A pattern with fewer "

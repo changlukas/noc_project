@@ -495,17 +495,24 @@ SWEEP_SEEDS    ?= 1
 # do not reach a recursive make on their own.
 .PHONY: sim-injection-sweep
 sim-injection-sweep: BURST_LEN = 32
+# INJECTION_COUNT reaches the sub-makes only when the user set it on the command
+# line. A plain `$(if $(INJECTION_COUNT),...)` is always true, because the ?= at
+# the top of this file already gave it a value, and that value is the mode 0
+# default of 64 (the parent make has no INJECTION_MODE set). Forwarding it would
+# generate 64 transactions while the sim sub-make, which does run under
+# INJECTION_MODE=1, expects the 200 the same ?= gives it.
+_SWEEP_COUNT = $(if $(filter command line,$(origin INJECTION_COUNT)),INJECTION_COUNT=$(INJECTION_COUNT))
 sim-injection-sweep:
 	@for p in $(SWEEP_PATTERNS); do \
 	    for s in $(SWEEP_SEEDS); do \
 	        $(MAKE) gen CONFIG=$(CONFIG) PATTERN=$$p SEED=$$s INJECTION_MODE=1 \
-	            BURST_LEN=$(BURST_LEN) \
-	            $(if $(INJECTION_COUNT),INJECTION_COUNT=$(INJECTION_COUNT)) || exit 1; \
+	            BURST_LEN=$(BURST_LEN) $(_SWEEP_COUNT) || exit 1; \
 	        for o in $(SWEEP_OFFERED); do \
 	            r=$$($(PYTHON3) -c "print('%.4f' % ($$o / (2 * ($(BURST_LEN) + 1) + 1)))"); \
 	            echo ">>> sweep $$p seed $$s offered $$o flits/node/cyc, INJECTION_RATE=$$r"; \
 	            $(MAKE) sim CONFIG=$(CONFIG) PATTERN=$$p SEED=$$s \
 	                INJECTION_MODE=1 INJECTION_RATE=$$r BURST_LEN=$(BURST_LEN) \
+	                $(_SWEEP_COUNT) \
 	                $(if $(MAX_UNIQUE_IDS),MAX_UNIQUE_IDS=$(MAX_UNIQUE_IDS)) \
 	                $(if $(MAX_OUTSTANDING),MAX_OUTSTANDING=$(MAX_OUTSTANDING)) || exit 1; \
 	        done; \

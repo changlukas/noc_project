@@ -47,6 +47,28 @@ def test_open_latency_adds_source_queue_delay(tmp_path, monkeypatch):
     assert "mean_latency" not in row
 
 
+def test_self_traffic_nodes_report_zero_and_add_nothing(tmp_path, monkeypatch):
+    """A node whose destination is itself never reaches a monitor.
+
+    Measured, `output/continuous_mesh_4x4_transpose_r0.0179_s1/run.log`: transpose
+    fixes the four diagonal nodes 0, 5, 10 and 15, and all four print `N: 0, BW:
+    0.00`. So `accepted_bits_per_cycle` is a sum over the active nodes only, and
+    its per node twin still divides by the full 16, which makes the per node
+    column the fabric share diluted by `served`. Per active node is
+    `accepted / served`, which is what `perf_report` compares against `ideal`.
+    """
+    log = LOG + "".join(
+        f"[Monitor node{n}.master][{d}] Latency: 0.00 +- 0.00, N: 0, "
+        f"BW: 0.00 Bits/cycle, Util: 0.00%\n"
+        for n in (5, 10, 15) for d in ("Read", "Write"))
+    row = _run(tmp_path, monkeypatch, log, **{"--pattern": "transpose"})
+    # Unchanged from the single active node case above: three silent nodes add
+    # no bandwidth, and they do not shrink the divisor either.
+    assert row["accepted_bits_per_cycle"] == "128.0"
+    assert row["accepted_bytes_per_node_cycle"] == "1.0"
+    assert row["mean_latency_network"] == "45.0"
+
+
 def test_open_equals_network_when_no_source_queue_line(tmp_path, monkeypatch):
     """A log from before the open-loop tb has no [SrcQueue] line: open == network,
     rather than a crash or a silently dropped column."""

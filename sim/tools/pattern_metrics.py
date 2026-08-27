@@ -8,19 +8,28 @@ Usage:
 For each source node the destinations come from gen_test_patterns.py (the same
 functions the stimulus generator calls, so the metric and the traffic cannot
 drift apart). Every route is walked XY, x first then y, matching
-router.hpp route_compute, and each directed link it crosses takes the flow's
-weight. The reported numbers are then
+router.hpp route_compute. The reported numbers are then
 
-    avg hops         weighted mean of the Manhattan distance
+    avg hops         weighted mean of the Manhattan distance, request path
     max channel load max over links of the accumulated weight
     ideal            1 / max channel load, in flits per node per cycle
     self fraction    share of the weight whose destination is its own node
 
 which is the standard channel load bound (On-Chip Networks 2e ch 7): with every
 node injecting one flit per cycle the busiest channel carries `max channel
-load` flits per cycle, so the network saturates at its reciprocal. Cross
-checked against the textbook mesh rule, max injection = 4 / k for uniform
-random on a k by k mesh.
+load` flits per cycle, so the network saturates at its reciprocal.
+
+Both directions count. A flow s to d is an AXI read/write mix, so it puts a
+write worm (AW plus its W beats) on the request path s to d and a read reply
+(the R beats) on the reverse path d to s, which booksim2 models the same way:
+under `_use_read_write` its `_GeneratePacket` injects the reply packet at the
+destination (trafficmanager.cpp). The channel load matrix therefore takes both,
+split by flit share, because what a measurement compares against is the
+accepted throughput at the AXI master, and that counts write payload delivered
+forward and read payload delivered back. Charging only the request direction
+halves the load on a symmetric permutation, where the reverse path of A to B is
+another flow's forward path, so every loaded link carries both and a run at the
+true bound would report 200 percent of ideal.
 
 Link set. Only the directed inter-router links count, not the LOCAL
 injection and ejection links, matching the textbook definition of channel
@@ -48,6 +57,12 @@ PATTERNS = list(g._DETERMINISTIC_PATTERNS) + ["uniform_random", "all_to_all", "h
 
 # sim/verilator/Makefile:291 HOTSPOT ?= 5
 _DEFAULT_HOTSPOTS = (5,)
+
+# Flit share of one AX pair, at the AxLEN 32 the sweep runs (33 beats). The
+# write worm is AW plus 33 W = 34 DAT flits on the request path, the read reply
+# is 33 R flits on the reverse path, 67 per pair.
+_FORWARD_SHARE = 34 / 67
+_REVERSE_SHARE = 33 / 67
 
 
 def _flows(pattern, x_dim, y_dim, hotspots):
@@ -116,7 +131,10 @@ def metrics(pattern, x_dim, y_dim, hotspots=None):
         if src == dst:
             self_weight += weight
         for link in links:
-            load[link] = load.get(link, 0.0) + weight
+            load[link] = load.get(link, 0.0) + weight * _FORWARD_SHARE
+        # The read reply walks back XY from the destination, x first from d.
+        for link in _xy_links(dst, src):
+            load[link] = load.get(link, 0.0) + weight * _REVERSE_SHARE
     max_load = max(load.values()) if load else 0.0
     return {
         "avg_hops": hops / total_weight,
