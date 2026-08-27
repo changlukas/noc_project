@@ -43,7 +43,7 @@ def main():
         by_vc[int(row["vc"])].append(
             (float(row["injection_rate"]),
              float(row["accepted_bits_per_cycle"]),
-             float(row["mean_latency"])))
+             float(row["mean_latency_open"])))
     for vc in by_vc:
         by_vc[vc].sort()
 
@@ -60,7 +60,7 @@ def main():
             hit = [p for p in by_vc[vc] if p[0] == rate]
             cells.append(f"{hit[0][1]:8.0f}/{hit[0][2]:<9.0f}" if hit else f"{'-':>18}")
         print(f"{rate:>6} " + " ".join(cells))
-    print("\n(cells are accepted_bits_per_cycle / mean_latency)")
+    print("\n(cells are accepted_bits_per_cycle / mean_latency_open)")
 
     try:
         import matplotlib

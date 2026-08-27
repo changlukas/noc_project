@@ -706,26 +706,95 @@ module user_node_endpoint #(
     // the case dispatch in the stimulus initial below). Pacing uses
     // $urandom_range (PRNG, no constraint solver => no z3): one Bernoulli
     // trial per cycle at p = injection_rate (booksim2 injection process).
-    // Paced copies of run_aw/run_ar: same body as axi_test.sv:2540-2565 plus a
-    // per-cycle idle before each send.
+    // Paced copies of run_aw/run_ar: same body as axi_test.sv:2540-2565 driven
+    // by the open-loop source queue below instead of by an inline idle.
+    //
+    // Open loop, per booksim2's _qtime (trafficmanager.cpp:922-945). The trial
+    // runs every cycle whether or not a send is blocked on awready/arready, so
+    // the intended issue time survives backpressure: a hit appends the current
+    // cycle to the channel's slot queue, and the send task takes the oldest
+    // slot and issues when the channel is ready. Handshake cycle minus slot is
+    // the source queue delay -- the part of packet latency the third-party
+    // axi_bw_monitor cannot see, because it starts its clock at the AX
+    // handshake. The earlier form put the trial inside the send loop, so the
+    // clock stopped while a send was blocked: closed loop, and offered load
+    // could never exceed what the network accepted.
+    //
+    // Basis points, not percent: the report sweeps down to rate 0.005, and
+    // int'(0.005 * 100.0) is 0, which paced nothing at all.
     real injection_rate;
-    int  unsigned injection_rate_pct;
+    int  unsigned injection_rate_bp;
+
+    // Free-running cycle counter. Read in the Active region (before the
+    // nonblocking update lands) both by the slot producer and by the send
+    // tasks resuming from @(posedge clk_i), so the two share one numbering.
+    longint unsigned cycle_cnt;
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) cycle_cnt <= '0;
+        else         cycle_cnt <= cycle_cnt + 1;
+    end
+
+    // Set by the paced task that owns each channel, so a mode that does not
+    // pace a channel (mode 2 gates AR on the paired B, not on a rate) produces
+    // no slots for it and reports N: 0.
+    bit pacing_aw, pacing_ar;
+    longint unsigned aw_slots[$], ar_slots[$];
+    longint unsigned srcq_w_sum, srcq_r_sum;
+    int      unsigned srcq_w_n,  srcq_r_n;
+
+    always_ff @(posedge clk_i) begin
+        if (rst_ni) begin
+            // cycle_cnt + 1 names the cycle beginning at this edge, the first
+            // one in which the slot can be issued: a send that starts right
+            // away drives AxVALID after this edge and is sampled at the next,
+            // so it occupies exactly this cycle and scores 0. The consumers
+            // take the slot with a level-sensitive wait rather than a clocked
+            // one, so a slot produced at this edge is visible in this same time
+            // step; polling on @(posedge clk_i) instead lost the race against
+            // this block and charged every transaction a flat extra cycle.
+            if (pacing_aw && $urandom_range(0, 9999) < injection_rate_bp)
+                aw_slots.push_back(cycle_cnt + 1);
+            if (pacing_ar && $urandom_range(0, 9999) < injection_rate_bp)
+                ar_slots.push_back(cycle_cnt + 1);
+        end
+    end
 
     task automatic run_aw_paced();
+        longint unsigned slot;
+        pacing_aw = 1'b1;
         while (file_master.aw_queue.size() > 0) begin
-            while ($urandom_range(0, 99) >= injection_rate_pct) @(posedge clk_i);
+            wait (aw_slots.size() > 0);
+            slot = aw_slots.pop_front();
             file_master.drv.send_aw(file_master.aw_queue[0]);
+            srcq_w_sum += cycle_cnt - slot;
+            srcq_w_n++;
             void'(file_master.aw_queue.pop_front());
         end
+        pacing_aw = 1'b0;
     endtask
 
     task automatic run_ar_paced();
+        longint unsigned slot;
+        pacing_ar = 1'b1;
         while (file_master.ar_queue.size() > 0) begin
-            while ($urandom_range(0, 99) >= injection_rate_pct) @(posedge clk_i);
+            wait (ar_slots.size() > 0);
+            slot = ar_slots.pop_front();
             file_master.drv.send_ar(file_master.ar_queue[0]);
+            srcq_r_sum += cycle_cnt - slot;
+            srcq_r_n++;
             void'(file_master.ar_queue.pop_front());
         end
+        pacing_ar = 1'b0;
     endtask
+
+    // End of sim, beside the [mst_bp] line above. emit_result_csv.py adds this
+    // mean to the monitor's to get packet latency (mean_latency_open).
+    final begin
+        $display("[SrcQueue node%0d][Read] mean: %0.2f, N: %0d", NODE_ID,
+                 (srcq_r_n == 0) ? 0.0 : real'(srcq_r_sum) / real'(srcq_r_n), srcq_r_n);
+        $display("[SrcQueue node%0d][Write] mean: %0.2f, N: %0d", NODE_ID,
+                 (srcq_w_n == 0) ? 0.0 : real'(srcq_w_sum) / real'(srcq_w_n), srcq_w_n);
+    end
 
     // Mode-2 interlock state: B responses returned per AXI id, snooped off the
     // flat wires (same sampling pattern as txn_cnt_o). Per-id, not total: with
@@ -970,7 +1039,7 @@ module user_node_endpoint #(
         file_master.load_files(read_path, write_path);
         injection_rate = 1.0;
         void'($value$plusargs("injection_rate=%f", injection_rate));
-        injection_rate_pct = int'(injection_rate * 100.0);
+        injection_rate_bp = int'(injection_rate * 10000.0);
         @(posedge rst_ni);
         case (get_injection_mode())
             0: begin
