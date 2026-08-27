@@ -33,9 +33,12 @@ and inherits the route and output VC its head obtained. Head 4 cycles per router
 | 3 SA + ST | front flit of every input VC in state `active` | `credit_[out][out_vc]`, `fork_done_`, output FIFO | per output, output FIFO below depth: round robin from `vc_rr_[out]` over its VCs whose holder has a front flit and `credit_[out][vc] > 0`, grant one, decrement credit, stamp `vc_id`, push the output FIFO, schedule the upstream credit pulse. Unicast pops now. Fork marks `fork_done_` and the fork pop pass pops when every branch granted, as today. Tail grant clears `wormhole_[out][out_vc]` for that branch and, when every branch has granted the tail, the input VC returns to `idle` |
 | 4 LT | output FIFO front | link | one flit per output per cycle |
 
-Per input VC state is the textbook G, R, O, C set: G in {idle, active}, R = route (branch set), O
-= output VC per branch, C per output VC in `credit_` as today. The textbook waiting VC and waiting
-credit states are the idle retry and the SA wait.
+Per input VC state is the textbook G, R, O, C set: G in {idle, active} plus `head_parked`, true
+from the VA grant until that flit leaves the input FIFO; R = route (branch set), recomputed from
+the parked flit's header rather than stored; O = output VC per branch; C per output VC in
+`credit_` as today. While the head is parked, SA skips its continuation checks and a fork's
+remaining branches may still allocate their own VC off that same head. The textbook waiting VC
+and waiting credit states are the idle retry and the SA wait.
 
 An `active` input VC whose FIFO is empty keeps its VCs and waits, as the lock does today. The
 `fixed_vc = 0` continuation check (locked `out_vc` equals the recomputed preferred VC) stays in

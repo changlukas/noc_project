@@ -87,7 +87,7 @@ full-RTL mesh run; a mesh result cannot waive an R0, R1, or R2 failure.
 | SPEC 12, arbitration order | R0-ARB-01/04, R1-TOP-04, RTR-A07 |
 | SPEC 13, VC independence | R0-DAT-05/06, R1-TOP-03, RTR-A14/RTR-A19 |
 | SPEC 14, output FIFO | R0-DAT-08, RTR-A17 |
-| SPEC 15, multi-output evaluation | R1-TOP-14 and RTR-A26 enforce one flit per output and concurrent independent outputs; the model-only same-FIFO multi-read cycle is R2-X02 |
+| SPEC 15, withdrawn | the DAT `Router` pops at most one flit per input VC FIFO per cycle, so nothing remains to verify. R1-TOP-14 and RTR-A26 still enforce one flit per output and concurrent independent outputs; R2-X02 now covers the `SimpleRouter` same-FIFO multi-read alone (`docs/verification-environment.md`, S3b ruling) |
 | SPEC 16, fairness | R0-ARB-05, R1-TOP-04, RTR-A08 |
 | SPEC 17, boundary silence | R1-TOP-13, RTR-A27 |
 | SPEC 18, network independence | R1-TOP-10 through R1-TOP-12, RTR-A23 |
@@ -349,7 +349,7 @@ specific tests used as oracle evidence must pass at the pinned revision.
 | Existing model evidence | Obligation before R2 |
 |---|---|
 | `RouterRouteCompute.*` and `RouteMask*` | retain exhaustive direction/range and fork/join member-set checks |
-| `RouterDatapath.ZeroLoadLatencyIsThreeTicks` and `SimpleRouterDatapath.*Latency*` | retain core timing checks and separately prove the held-output wrapper cycle |
+| `RouterDatapath.ZeroLoadLatencyIsFourTicks`, `RouterDatapath.BodyFlitsFollowHeadOneCycleApart` and `SimpleRouterDatapath.*Latency*` | retain core timing checks and separately prove the held-output wrapper cycle |
 | `RouterWormhole.*`, `SimpleRouterWormhole.*`, and `NocWormholeArbiter.*` | retain lock, gap, tail, frozen-winner, and malformed-worm checks |
 | `RouterVcArbitration.*`, `RouterFairness.*`, and `RouterVa*` | retain exact RR/VA/fixed/overflow/credit cases for the aligned SHARED instance |
 | `RouterCredit.*`, `RouterDatapath.CreditDecrementAtGrantAndPulseAfterDequeue`, and adapter tests | retain per-VC counter and chained conservation checks |

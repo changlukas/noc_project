@@ -579,10 +579,11 @@ TEST(RouterWormhole, SingleFlitPacketLocksAndReleasesSameCycle) {
     // Tick 0: WEST single-flit (flit_tail=1) lands; SOUTH single-flit lands too.
     r.input(WEST).push_flit(make_tagged_flit(dst, 0, /*flit_tail=*/1, 0x10));
     r.input(SOUTH).push_flit(make_tagged_flit(dst, 0, /*flit_tail=*/1, 0x20));
-    // S1 latch (tick 1) -> two back-to-back grants (ticks 2,3) since each
-    // single-flit packet releases the lock the cycle it is granted. The later
-    // grant (tick 3) lands at the sink kPipelineDepth ticks afterward, so 3 +
-    // kPipelineDepth ticks suffice to settle both single-flit packets.
+    // S1 latch (tick 1), then one VA grant per output per tick: one input
+    // allocates (EAST, vc) at tick 2 and is granted at tick 3, releasing the VC
+    // on that same grant; the other allocates at tick 3 and is granted at
+    // tick 4. Stage 4 pushes each to the sink the tick after its grant, so
+    // 3 + kPipelineDepth ticks settle both single-flit packets.
     for (int t = 0; t < 3 + kPipelineDepth; ++t) tick_and_return_credit(r, east, E);
     // Both single-flit packets must have been delivered; the second did not wait
     // for a stale lock to clear.
@@ -930,7 +931,7 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
     // returns only after B grants the flit onward. The full accounting of slots
     // that the DEPTH credits map to, at any sampling instant, is:
     //   credit(A.E,0)                         available
-    // + a.output_fifo_size(A.EAST)            granted, awaiting A's stage-3 push
+    // + a.output_fifo_size(A.EAST)            granted, awaiting A's stage-4 push
     // + wire_inflight                         pushed by A, not yet in B's WEST FIFO
     // + b.input_fifo_size(B.WEST,0)           buffered at B, awaiting B's grant
     // + in-flight B->A return pulse           B granted, credit not yet home

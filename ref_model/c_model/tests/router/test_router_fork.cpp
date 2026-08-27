@@ -589,7 +589,7 @@ TEST(RouterForkWedge, OverlappingTreesOppositeOrderWedgeDetectedWithinBound) {
     constexpr int kWedgeBound =
         2 * kWormFlits * 2 * (kPipelineDepth + 1) + 2 * kWormFlits;  // = 176
     // A live system shows an observable state change at least once per
-    // grant -> stage-3 push -> registered credit pulse -> re-grant round
+    // grant -> stage-4 push -> registered credit pulse -> re-grant round
     // trip, < 2 x (kPipelineDepth + 1) ticks.
     constexpr int kQuiescentWindow = 2 * (kPipelineDepth + 1);  // = 10
 
