@@ -158,10 +158,12 @@ if it ever does (`route_compute`, `router.hpp:65-68`).
 ### 2.4 Pipeline: three stages, one stage per cycle (DAT)
 
 The DAT `Router` is a 3-stage pipeline. A flit advances exactly one stage per cycle.
-The REQ/RSP `SimpleRouter` core runs the same stages 1 and 2 but with `output_fifo_depth` = 0,
-so stage 2 produces its output strobe directly and there is no core stage 3 — 2 core ticks
-(`SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`). The model-facing spill register adds
-one verification-only wire cycle, for 3 cycles per hop at the wrapper pins.
+The REQ/RSP `SimpleRouter` runs stages 1 and 2 with `output_fifo_depth` = 0. Stage 2 drives
+the link and there is no stage 3. Per router: REQ/RSP 2 cycles, DAT 3 cycles
+(`SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`,
+`RouterDatapath.ZeroLoadLatencyIsThreeTicks`). The wrapper egress hold register loads on the
+edge the model emits, so it adds no cycle at zero load. It adds cycles only while the downstream
+ready is low.
 
 | Stage | Storage | Action per cycle |
 |---|---|---|
@@ -193,12 +195,10 @@ The model evaluates stages in reverse order (3, then 2, then 1) within one tick
   most one per (port, VC) per cycle. The surplus pulse is delivered on the following
   cycle (drained one per VC per cycle by the wrap, `router_adapters.hpp` `LinkCreditOut`).
 
-Zero-load model-facing wire latency is exactly 3 cycles per hop on all three networks: a flit
-handshaken from the input wire at posedge N is handshaken on an always-ready output at posedge
-N+3. DAT obtains those cycles from the core and existing DPI output register. REQ/RSP have 2 core
-ticks plus the verification-only spill register. The core halves are verified by
-`RouterDatapath.ZeroLoadLatencyIsThreeTicks` and
-`SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`.
+Zero-load latency per router, input wire handshake at posedge N to output wire handshake at
+posedge N+k with output ready high: k = 2 on REQ and RSP, k = 3 on DAT. A path of H hops passes
+H + 1 routers. Measured on the mesh_4x4 zero-load probe (`docs/backlog.md`, Scenario 2 recipe):
+3 hops, 4 routers, 8 cycles on REQ/RSP and 12 on DAT.
 
 ### 2.5 Arbitration: output-VC scan, then two-level round-robin per output VC
 
@@ -395,9 +395,9 @@ start at 8.
 | 7 | 6->7 | stage 3: F2 | F1 to NSU. Credit pulse (F1) |
 | 8 | 7->8 (fully replenished) | idle | F2 to NSU. Credit pulse (F2) |
 
-Head latency: injected cycle 0, at the destination NI cycle 6 = 2 hops x 3 cycles.
+Head latency: injected cycle 0, at the destination NI cycle 6 = 2 routers x 3 cycles.
 Tail: cycle 2 -> cycle 8. A's `credit_[EAST][0]` bottoms at 5 (three flits in flight)
-and returns to 8 by cycle 8. The same packet on model-facing REQ would take 3 cycles a hop and
+and returns to 8 by cycle 8. The same packet on REQ would take 2 cycles a router and
 transfer with `tx_req_valid && tx_req_ready` instead of consuming a counter.
 
 ### 2.10 Collectives: multicast fork and CollectB join
@@ -589,7 +589,9 @@ directions use receiver-owned per-VC credits.
 
 The current model's LOCAL DAT port is shared through `dat_merge_wrap`. Target integration keeps
 the same class merge/demux function and terminates Router-to-NI credits in NMU DataR or NSU
-DataAw/DataW receive-VC FIFOs.
+DataAw/DataW receive-VC FIFOs. `dat_merge_wrap` adds 1 cycle on injection (NI DAT pins to
+router LOCAL ingress) and 1 cycle on ejection (router LOCAL egress to NI DAT pins). REQ and RSP
+have no merge stage.
 
 Fabric wiring between nodes pairs opposite ports: node i's `rx_*_valid/flit[NORTH]` comes
 from its north peer's `tx_*_valid/flit[SOUTH]`, and node i's `tx_dat_crdvalid[NORTH]`
@@ -660,11 +662,10 @@ beginning of simulation, before `cmodel_router_create` and before any traffic. W
 is created after reset deassertion). Mid-simulation reset does not occur and is not
 modeled.
 
-R10 (latency definition). Per-hop latency is measured from the posedge of the input transfer to the
-posedge of the corresponding output transfer, with output ready high. At zero load (no contention,
-nonzero DAT credit, output FIFO below depth) the model-facing wrapper latency is exactly 3 cycles
-per hop on DAT and REQ/RSP. The REQ/RSP C++ core remains 2 ticks; the verification-only spill
-register contributes the third wire cycle (section 2.4).
+R10 (latency definition). Per-router latency is measured from the posedge of the input transfer
+to the posedge of the corresponding output transfer, with output ready high. At zero load (no
+contention, nonzero DAT credit, output FIFO below depth) it is exactly 2 cycles on REQ and RSP and
+exactly 3 cycles on DAT (section 2.4).
 
 R11 (output uniqueness). At most one flit per output port per network per cycle: each
 bit of `tx_req_valid` / `tx_rsp_valid` / `tx_dat_valid` covers exactly one flit bus.

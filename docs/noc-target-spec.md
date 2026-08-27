@@ -812,6 +812,10 @@ router. Each network has its own router, so `t_router` is per network:
 - `DAT`: standard-mode router, multi-VC credit-based flow control, **3 to 5** pipeline stages
   per hop
 
+As built in the C++ model: REQ and RSP 2 cycles per router, DAT 3 cycles per router, and on DAT
+1 cycle at the source NI merge on injection plus 1 cycle at the destination NI merge on ejection.
+REQ and RSP have no merge stage.
+
 ![Zero-load latency formula](image/perf_zero_load.png)
 
 ### 7.5 Sustained bandwidth
