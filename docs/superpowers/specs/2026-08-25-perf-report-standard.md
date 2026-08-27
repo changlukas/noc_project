@@ -10,7 +10,7 @@ Codex survey 2026-08-25. No DUT change.
 |---|---|---|
 | Offered load | injection probability per node per cycle times packet size | flits per node per cycle, and B per node per cycle |
 | Accepted throughput | bytes the AXI master handshakes per cycle, per node, read plus write | B per node per cycle, and flits |
-| Network latency `nlat` | AX handshake at the master to last response beat (today's monitor value) | cycles |
+| Network latency `nlat` | AX handshake at the master to the response, per channel: a read ends at its first R beat and a write at B (today's monitor value, `axi_bw_monitor.sv`) | cycles |
 | Packet latency `plat` | intended issue time (open loop source queue) to last response beat, `plat = nlat + source queue delay` | cycles |
 | Zero-load latency | `plat` at the lowest sweep point, offered 0.067 flits per node per cycle (`p` = 0.001 per channel) | cycles |
 | Saturation throughput | offered load at which `plat` reaches 3 times zero-load (textbook rule) | flits per node per cycle |
@@ -61,17 +61,19 @@ One generator, `sim/tools/perf_report.py <output dir>`, writes `sim/verilator/ou
 | Section | Content |
 |---|---|
 | 1 Method | topology, router pipeline (REQ/RSP 2 cycles, DAT head 4 then one per cycle), flow control, NI parameters, injection model (open loop, Bernoulli, fixed count), seeds, latency definitions, flit bases |
-| 2 Zero-load latency | narrow and data read and write: measured `plat`, per stage decomposition, ideal fabric `H t_wire + L/b`, gap |
+| 2 Zero-load latency | read and write measured separately, `nlat` and `plat` per channel. The analytic column is a data read decomposition and is charged against the read column only: the monitor timestamps a read at its first R beat, so the ideal carries no burst term, and a write is timestamped at B on RSP and gets no analytic |
 | 3 Latency vs offered load | per pattern table (and a plot if matplotlib is present): offered load, accepted, `nlat`, `plat`, seed spread; the 3x point marked |
 | 4 Pattern summary | per pattern: avg hops, ideal throughput, saturation throughput (3x), accepted at max load, percent of ideal, zero-load `plat` |
 | Appendix A | link utilization avg min max per pattern at the highest offered load |
-| Appendix B | parameter sensitivity single points: vc8, router VC depth 16 and 32, NI RX depth |
+| Appendix B | parameter sensitivity, deferred. It would hold vc8, router VC depth 16 and 32, and NI RX depth against the default group at the same offered loads. No run under `sim/verilator/output` departs from the shipped defaults, so the section renders its empty case and no sweep of those three is scheduled |
 
 Runs are grouped by their parameter tuple from `result.csv` as today. Patterns with a full
-curve: uniform_random, tornado, shuffle, bit_complement, bit_reverse, transpose (textbook Table
-7.2 set). Offered load 0.067 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.2 flits per node per cycle (the Bernoulli rate per channel is offered / 67 at AxLEN 32), seed 1, plus seeds 2 and 3 at the two
-rates around the 3x saturation point. The other four patterns (neighbor, bit_rotation, all_to_all, hotspot)
-appear in section 4 from their rate 0.9 runs with a note.
+curve: uniform_random, bit_complement, transpose, tornado. Offered load 0.067 0.2 0.4 0.6 0.8 1.0
+1.2 flits per node per cycle (the Bernoulli rate per channel is offered / 67 at AxLEN 32), seed 1,
+plus seeds 2 and 3 at 0.402, the rate around the 3x saturation point. The other six patterns
+(shuffle, bit_reverse, neighbor, bit_rotation, all_to_all, hotspot) are single operating points and
+appear in section 4 from their rate 0.9 runs with a note. The report names both sets under its
+title, read off the runs it found.
 
 ## Removed
 

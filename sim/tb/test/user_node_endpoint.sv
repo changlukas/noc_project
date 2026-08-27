@@ -1075,6 +1075,9 @@ module user_node_endpoint #(
                 // Checked-continuous: AW paced as mode 1; each read waits for
                 // its paired write's B, so the armed scoreboard checks exact
                 // data under continuous write load.
+                // run_aw_paced is mode 1's open loop AW pacing, shared as is, so
+                // the write side is unpaced only at the default injection_rate
+                // 1.0. Any lower rate paces mode 2's AWs exactly as mode 1.
                 fork
                     run_aw_paced();
                     file_master.run_w();
