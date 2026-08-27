@@ -12,7 +12,7 @@ Codex survey 2026-08-25. No DUT change.
 | Accepted throughput | bytes the AXI master handshakes per cycle, per node, read plus write | B per node per cycle, and flits |
 | Network latency `nlat` | AX handshake at the master to last response beat (today's monitor value) | cycles |
 | Packet latency `plat` | intended issue time (open loop source queue) to last response beat, `plat = nlat + source queue delay` | cycles |
-| Zero-load latency | `plat` at offered load 0.005 | cycles |
+| Zero-load latency | `plat` at the lowest sweep point, offered 0.067 flits per node per cycle (`p` = 0.001 per channel) | cycles |
 | Saturation throughput | offered load at which `plat` reaches 3 times zero-load (textbook rule) | flits per node per cycle |
 | Accepted at max load | accepted throughput at the highest offered load, booksim's accepted rate at saturation | flits per node per cycle |
 | Ideal throughput | 1 / max channel load for the pattern under XY on the mesh, analytic | flits per node per cycle |
@@ -37,7 +37,7 @@ from that stamp and `nlat` from the actual injection (`:731-732`). The testbench
 | Source queue delay | AX handshake cycle minus the slot's `qtime`, recorded per transaction |
 | Report | per node at end of sim: `[SrcQueue nodeN][Read] mean=<cyc> n=<count>` and `[Write]` |
 | Outstanding | unchanged, NMU `max_txns_per_id` 32 is the network's backpressure, it becomes queue delay |
-| Run length | fixed transaction count per node, scaled with rate so the offered window is at least 1000 cycles (`max(200, rate x 1000)`), stated in Method. Above saturation `plat` grows with run length, which is the expected signature |
+| Run length | fixed 200 transactions per node. At AxLEN 32 the sweep rates are at most `p` = 0.018, so the offered window is at least 11000 cycles, stated in Method. Above saturation `plat` grows with run length, which is the expected signature |
 
 `sim/dv/floonoc-test/axi_bw_monitor.sv` is not modified. `emit_result_csv.py` adds the source
 queue delay to the monitor mean, sample weighted, into `mean_latency_open`, and keeps the monitor
@@ -67,7 +67,7 @@ One generator, `sim/tools/perf_report.py <output dir>`, writes `sim/verilator/ou
 
 Runs are grouped by their parameter tuple from `result.csv` as today. Patterns with a full
 curve: uniform_random, tornado, shuffle, bit_complement, bit_reverse, transpose (textbook Table
-7.2 set). Rates 0.005 0.05 0.1 0.2 0.3 0.4 0.5 0.7 1.0, seed 1, plus seeds 2 and 3 at the two
+7.2 set). Offered load 0.067 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.2 flits per node per cycle (the Bernoulli rate per channel is offered / 67 at AxLEN 32), seed 1, plus seeds 2 and 3 at the two
 rates around the 3x saturation point. The other four patterns (neighbor, bit_rotation, all_to_all, hotspot)
 appear in section 4 from their rate 0.9 runs with a note.
 
