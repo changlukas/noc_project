@@ -49,8 +49,14 @@ def test_self_fraction_is_the_share_that_never_enters_the_noc():
     # no monitor ever sees it.
     assert pm.metrics("uniform_random", 4, 4)["self_fraction"] == 1 / 16
     assert pm.metrics("hotspot", 4, 4)["self_fraction"] == 1 / 16
-    assert pm.metrics("transpose", 4, 4)["self_fraction"] == 4 / 16
     assert pm.metrics("all_to_all", 4, 4)["self_fraction"] == 0.0
+    # The permutations that have fixed points: transpose fixes its diagonal,
+    # bit_reverse the 4 palindromes of 4 bits, shuffle and bit_rotation the two
+    # constant words 0000 and 1111.
+    assert pm.metrics("transpose", 4, 4)["self_fraction"] == 4 / 16
+    assert pm.metrics("bit_reverse", 4, 4)["self_fraction"] == 4 / 16
+    assert pm.metrics("shuffle", 4, 4)["self_fraction"] == 2 / 16
+    assert pm.metrics("bit_rotation", 4, 4)["self_fraction"] == 2 / 16
 
 
 def test_every_pattern_reports_a_finite_ideal():

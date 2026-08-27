@@ -218,7 +218,9 @@ with the monitor's bandwidth and latency numbers; mode 2 prints
 `make sim-injection-sweep` sweeps offered load — twelve points in DAT network
 flits per node per cycle, overridable via `SWEEP_OFFERED`, converted per point
 to the Bernoulli injection rate the tb takes — over `SWEEP_PATTERNS` and
-`SWEEP_SEEDS`. It sweeps load only, at whatever VC count `constants.yaml`
+`SWEEP_SEEDS`. `PATTERN` and `SEED` are ignored by this target, and `BURST_LEN`
+defaults to 32 here rather than to the global 0, because `SWEEP_OFFERED` is
+stated in the flits an AxLEN 32 pair carries. It sweeps load only, at whatever VC count `constants.yaml`
 holds: the VC count is a tracked file, so a sweep across it would have to edit
 that file mid-run. Each row records the VC count it ran at, so four curves is
 four edits and four sweeps. Expect a long run.

@@ -30,11 +30,12 @@ def _curve(root, pattern="uniform_random"):
         _point(root, pattern, offered, acc, plat)
 
 
+_KEY = ("mesh_4x4", "2", "8", "8", "32", "32", "1", "32", "200", "0")
+
+
 def test_curve_marks_saturation(tmp_path):
     _curve(tmp_path)
-    points = pr.collect(tmp_path)[("mesh_4x4", "2", "8", "8", "32", "32", "1", "32",
-                                   "200", "0")]["uniform_random"]
-    sat = pr.saturation(points)
+    sat = pr.saturation(pr.collect(tmp_path)[_KEY]["uniform_random"])
     # Zero load plat is 40 at the lowest offered point, so the 3x threshold is
     # 120, crossed between offered 0.3 (plat 50) and 0.4 (plat 130).
     # f = (120 - 50) / (130 - 50) = 0.875.
@@ -50,6 +51,30 @@ def _row(text, heading, first_cell):
         if cells and cells[0].rstrip("*") == first_cell:
             return cells
     raise AssertionError(f"no {first_cell!r} row under {heading!r}")
+
+
+def test_curve_that_never_reaches_3x_reports_a_bound(tmp_path):
+    """A curve still climbing at the last point has no saturation load, only a
+    lower bound: the row says `> <max offered>` rather than inventing one."""
+    for offered, plat in zip((0.1, 0.2, 0.3), (40.0, 42.0, 50.0)):
+        _point(tmp_path, "tornado", offered, 10.0, plat)
+    text = pr.report(tmp_path)
+    assert pr.saturation(pr.collect(tmp_path)[_KEY]["tornado"]) is None
+    assert "> 0.300" in text and "never reaches 3x zero load" in text
+
+
+def test_zero_load_probes_report_nlat_and_no_plat(tmp_path):
+    """The narrow and data probes predate the open-loop tb, so they carry no
+    [SrcQueue] line and section 2 shows nlat with plat marked absent."""
+    _curve(tmp_path)
+    (tmp_path / "s2zl_va_narrow").mkdir()
+    (tmp_path / "s2zl_va_narrow" / "run.log").write_text(
+        "[Monitor node0.master][Read] Latency: 31.01 +- 0.14, N: 200, BW: 4.65 Bits/cycle\n"
+        "[Monitor node0.master][Write] Latency: 32.00 +- 0.00, N: 200, BW: 4.65 Bits/cycle\n")
+    cells = _row(pr.report(tmp_path), "## 2 Zero-load latency", "s2zl_va_narrow")
+    assert cells[1] == "narrow"
+    assert cells[2] == "31.0" and cells[3] == "-"
+    assert cells[4] == "32.0" and cells[5] == "-"
 
 
 def test_pattern_summary_percent_of_ideal(tmp_path):
@@ -75,25 +100,19 @@ def test_no_removed_names():
     """The clean cut: no tracked file under Makefile, sim/, docs/ or README.md
     still names a removed script or the old report.
 
-    docs/superpowers/ is excluded: those are the archived plan and spec records
-    of the campaigns that created and then removed those files, and the spec
-    driving this deletion is itself one of them."""
+    Two exclusions. This file, because a check that forbids four strings has to
+    name them. docs/superpowers/, because those are the archived plan and spec
+    records of the campaigns that created and then removed those files, and the
+    spec driving this deletion is itself one of them."""
+    self_path = pathlib.Path(__file__).name
     root = pathlib.Path(__file__).resolve().parents[2]
-    tracked = subprocess.run(
-        ["git", "ls-files", "Makefile", "sim", "docs", "README.md"], cwd=root,
-        capture_output=True, text=True, check=True).stdout.split()
-    assert tracked, "git ls-files found nothing: the scope of this check is wrong"
-    names = ("summarize_results", "plot_injection_sweep", "perf_cli_summary", "sweep_summary")
-    hits = []
-    for path in tracked:
-        if path.startswith("docs/superpowers/"):
-            continue
-        try:
-            text = (root / path).read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        hits += [f"{path}: {n}" for n in names if n in text]
-    assert hits == []
+    names = "summarize_results|plot_injection_sweep|perf_cli_summary|sweep_summary"
+    grep = subprocess.run(
+        ["git", "grep", "-nE", names, "--", "Makefile", "sim", "docs", "README.md",
+         ":(exclude)docs/superpowers", f":(exclude)sim/tools/{self_path}"],
+        cwd=root, capture_output=True, encoding="utf-8", errors="replace")
+    # git grep exits 1 on no match, 0 on a match, 2 and up on a real failure.
+    assert grep.returncode == 1, grep.stdout or grep.stderr
 
 
 if __name__ == "__main__":

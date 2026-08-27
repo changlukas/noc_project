@@ -80,6 +80,8 @@ help:
 	@echo ""
 	@echo "  make sim-injection-sweep                     saturation sweep, long"
 	@echo "  Vars: SWEEP_OFFERED= (DAT flits per node per cycle) SWEEP_PATTERNS= SWEEP_SEEDS="
+	@echo "  PATTERN and SEED are ignored here, use SWEEP_PATTERNS and SWEEP_SEEDS."
+	@echo "  BURST_LEN defaults to 32 in this target (SWEEP_OFFERED assumes AxLEN 32)"
 	@echo "  Render the curves with: tools/perf_report.py sim/verilator/output"
 	@echo ""
 	@echo "Build and test gates stay at the repo root: make build / make test / make pytest"
@@ -484,17 +486,26 @@ SWEEP_SEEDS    ?= 1
 # the method, not a per-point knob.
 # The rate is rounded to basis points, the resolution of the tb's Bernoulli
 # comparison against a 10000-wide draw.
+# PATTERN and SEED are ignored here: SWEEP_PATTERNS and SWEEP_SEEDS are the
+# knobs, because one invocation walks several of each.
+# BURST_LEN is target specific. The global default is 0 (single beat), which
+# would make SWEEP_OFFERED mean 3 flits per AX pair instead of the 67 the grid,
+# the README and the spec are written for. A command line BURST_LEN still wins,
+# and the value is passed to every sub-make explicitly: target specific values
+# do not reach a recursive make on their own.
 .PHONY: sim-injection-sweep
+sim-injection-sweep: BURST_LEN = 32
 sim-injection-sweep:
 	@for p in $(SWEEP_PATTERNS); do \
 	    for s in $(SWEEP_SEEDS); do \
 	        $(MAKE) gen CONFIG=$(CONFIG) PATTERN=$$p SEED=$$s INJECTION_MODE=1 \
+	            BURST_LEN=$(BURST_LEN) \
 	            $(if $(INJECTION_COUNT),INJECTION_COUNT=$(INJECTION_COUNT)) || exit 1; \
 	        for o in $(SWEEP_OFFERED); do \
 	            r=$$($(PYTHON3) -c "print('%.4f' % ($$o / (2 * ($(BURST_LEN) + 1) + 1)))"); \
 	            echo ">>> sweep $$p seed $$s offered $$o flits/node/cyc, INJECTION_RATE=$$r"; \
 	            $(MAKE) sim CONFIG=$(CONFIG) PATTERN=$$p SEED=$$s \
-	                INJECTION_MODE=1 INJECTION_RATE=$$r \
+	                INJECTION_MODE=1 INJECTION_RATE=$$r BURST_LEN=$(BURST_LEN) \
 	                $(if $(MAX_UNIQUE_IDS),MAX_UNIQUE_IDS=$(MAX_UNIQUE_IDS)) \
 	                $(if $(MAX_OUTSTANDING),MAX_OUTSTANDING=$(MAX_OUTSTANDING)) || exit 1; \
 	        done; \
