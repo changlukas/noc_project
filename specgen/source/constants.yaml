@@ -100,30 +100,12 @@ noc:
   DAT_NUM_VC:
     type: int
     units: count
-    description: "Number of virtual channels per NoC link (DAT network; REQ/RSP are single-VC, see REQ_NUM_VC/RSP_NUM_VC)"
+    description: "Number of virtual channels per NoC link (DAT network; REQ/RSP are single-VC)"
     default: 2
     min: 1
     max: 8
     sv_symbol: NOC_DAT_NUM_VC_DFLT
     cpp_symbol: NOC_DAT_NUM_VC
-  REQ_NUM_VC:
-    type: int
-    units: count
-    description: "Number of virtual channels on the REQ network (NarrowAw/NarrowW/NarrowAr/DataAr); spec ready/valid TXREQREADY is scalar, so this defaults to 1"
-    default: 1
-    min: 1
-    max: 8
-    sv_symbol: NOC_REQ_NUM_VC_DFLT
-    cpp_symbol: NOC_REQ_NUM_VC
-  RSP_NUM_VC:
-    type: int
-    units: count
-    description: "Number of virtual channels on the RSP network (NarrowB/NarrowR/DataB); spec ready/valid TXRSPREADY is scalar, so this defaults to 1"
-    default: 1
-    min: 1
-    max: 8
-    sv_symbol: NOC_RSP_NUM_VC_DFLT
-    cpp_symbol: NOC_RSP_NUM_VC
   REQ_FLIT_WIDTH:
     type: int
     units: bits
@@ -328,13 +310,3 @@ nsu:
     max: 64
     sv_symbol: NSU_ARBITER_FIFO_DEPTH_DFLT
     cpp_symbol: NSU_ARBITER_FIFO_DEPTH
-
-derived:
-  WSTRB_WIDTH:
-    type: int
-    units: bits
-    description: "AXI write strobe width"
-    expression: "DATA_WIDTH / 8"
-    constraint: "DATA_WIDTH % 8 == 0"
-    sv_symbol: AXI_WSTRB_WIDTH_DFLT
-    cpp_symbol: AXI_WSTRB_WIDTH
