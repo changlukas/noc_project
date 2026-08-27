@@ -84,7 +84,7 @@ def test_pattern_summary_percent_of_ideal(tmp_path):
     _point(tmp_path, "neighbor", 0.9, 0.6 * 64 * 66 / 67, 90.0)
     cells = _row(pr.report(tmp_path), "## 4 Pattern summary", "neighbor")
     assert cells[5] == "0.600"   # accepted flits at the highest offered load
-    assert cells[6] == "60"      # 0.600 / (1.000 served * 1.000 ideal)
+    assert cells[6] == "60.0"    # 0.600 / (1.000 served * 1.000 ideal)
 
 
 def test_seed_spread_column(tmp_path):

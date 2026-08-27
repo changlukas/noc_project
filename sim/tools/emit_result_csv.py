@@ -11,11 +11,28 @@ Per node or whole mesh, never guess from the name:
     offered_*_per_node_cycle       per node, analytic
     mean_latency_*                 a mean, so neither
 
-accepted_bits_per_cycle sums BW across all monitors, which is correct because
-every monitor shares one cycle_cnt window. Only its per-node twin is
-comparable to the offered columns. The node count comes from a mesh_<x>x<y>
-topology name. Any other name leaves the per-node column empty rather than
-inventing a divisor.
+Accepted throughput is total delivered over the run, booksim2's batch-mode
+convention, not a sum of the monitors' printed `BW:` fields. Each monitor
+divides by its own span, so in a saturated run the nodes that finish early
+report a rate over a short window and the sum overstates what the mesh carried
+at any one moment. Measured, in the transpose run at offered 1.199: node1 and
+node8 each retired 200 transactions of the same size, yet printed 235.85 and
+83.97 bits per cycle, a 2.8x spread that is a 14329 cycle window against a
+40347 cycle one. Summing those two rates describes no cycle of the run.
+
+The rule, per monitor and then summed:
+
+    bytes/cyc = (N_read + N_write) * beats * 64 / window
+
+with `beats = burst_len + 1`, 64 B the monitor's charge per beat, and `window`
+the common one, `window.end_cyc - window.start_cyc` from the `perf.json` beside
+the log. A run with no perf.json falls back to summing `BW:`, which is each
+monitor's own span; `window_source` says which of the two produced the row.
+`accepted_bits_per_cycle` is the whole mesh, `accepted_bytes_per_node_cycle`
+divides it by the node count, so a node that sent nothing (self traffic, which
+never reaches a monitor) counts as a zero rather than shrinking the divisor.
+The node count comes from a mesh_<x>x<y> topology name. Any other name leaves
+the per-node column empty rather than inventing a divisor.
 
 Both latency columns are weighted by each monitor's sample count. A plain
 average of the printed means is wrong: each is already a mean over that
@@ -43,6 +60,7 @@ fills only half of each beat, so neither number is net payload.
 """
 import argparse
 import csv
+import json
 import pathlib
 import re
 import sys
@@ -69,7 +87,7 @@ _CONFIG = re.compile(
 
 
 def parse_monitors(log_text):
-    """Return (summed BW, sample-weighted mean latency)."""
+    """Return (summed BW, sample-weighted mean latency, total sample count)."""
     total_bw = 0.0
     weighted_latency = 0.0
     total_samples = 0
@@ -80,7 +98,19 @@ def parse_monitors(log_text):
         total_samples += count
     if total_samples == 0:
         sys.exit("emit_result_csv: no monitor line reported a sample; the run injected nothing")
-    return total_bw, weighted_latency / total_samples
+    return total_bw, weighted_latency / total_samples, total_samples
+
+
+def run_window(log_path):
+    """Cycles the run spanned, from the perf.json the tb writes beside the log.
+
+    None when there is no perf.json, which is the caller's signal to fall back
+    to the monitors' own spans."""
+    perf = pathlib.Path(log_path).with_name("perf.json")
+    if not perf.is_file():
+        return None
+    w = json.loads(perf.read_text())["window"]
+    return w["end_cyc"] - w["start_cyc"] or None
 
 
 def parse_source_queue(log_text):
@@ -156,10 +186,16 @@ def main():
     a = ap.parse_args()
 
     log_text = pathlib.Path(a.log).read_text()
-    bw, latency = parse_monitors(log_text)
+    bw, latency, samples = parse_monitors(log_text)
     srcq = parse_source_queue(log_text)
     offered_flits, offered_bytes = offered_load(a.injection_rate, a.burst_len)
     nodes = mesh_nodes(a.topology)
+    window = run_window(a.log)
+    if window:
+        bw = samples * (int(a.burst_len) + 1) * BEAT_BYTES * 8 / window
+        window_source = "run"
+    else:
+        window_source = "monitor"
     accepted_bytes = bw / 8 / nodes if nodes else None
     (max_unique_ids, max_outstanding, dat_num_vc, router_vc_depth, mst_stall_random,
      ni_dat_rx_vc_depth) = parse_config(log_text, a.max_unique_ids, a.max_outstanding)
@@ -185,6 +221,7 @@ def main():
         "accepted_bits_per_cycle": f"{bw:.1f}",
         "accepted_bytes_per_node_cycle": "" if accepted_bytes is None else str(
             round(accepted_bytes, 6)),
+        "window_source": window_source,
         "mean_latency_network": f"{latency:.1f}",
         "mean_latency_open": f"{latency + srcq:.1f}",
     }

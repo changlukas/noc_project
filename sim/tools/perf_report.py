@@ -512,7 +512,10 @@ def section_summary(key, patterns):
             fmt(sat["offered"], 3) if sat else
             (f"> {last['offered']:.3f}" if is_curve else "-"),
             fmt(acc, 3),
-            fmt(pct, 0),
+            # One decimal: the two patterns that saturate their bottleneck link
+            # land at 99.6, and a whole number column would print that as 100
+            # and lose the one digit that says the bound holds.
+            fmt(pct, 1),
             fmt(rows_c[0]["plat"]) if is_curve else "-",
         ])
     out.append(table(["pattern", "avg hops", "ideal", "served", "saturation (3x)",

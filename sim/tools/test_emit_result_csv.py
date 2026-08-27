@@ -6,8 +6,10 @@ import emit_result_csv as e
 # Read and Write carry different sample counts on purpose: an implementation
 # that averaged the printed means instead of weighting them by N would read
 # 50.0 network and 70.0 open here, not 45.0 and 60.0.
-LOG = """[Config] max_unique_ids=1 max_outstanding=32 dat_num_vc=2 router_vc_depth=8 mst_stall_random=0 ni_dat_rx_vc_depth=8
-[Monitor node0.master][Read] Latency: 40.00 +- 1.00, N: 300, BW: 64.00 Bits/cycle, Util: 10.00%
+LOG_HEAD = """[Config] max_unique_ids=1 max_outstanding=32 dat_num_vc=2 router_vc_depth=8 mst_stall_random=0 ni_dat_rx_vc_depth=8
+"""
+
+LOG = LOG_HEAD + """[Monitor node0.master][Read] Latency: 40.00 +- 1.00, N: 300, BW: 64.00 Bits/cycle, Util: 10.00%
 [Monitor node0.master][Write] Latency: 60.00 +- 1.00, N: 100, BW: 64.00 Bits/cycle, Util: 10.00%
 [SrcQueue node0][Read] mean: 10.00, N: 300
 [SrcQueue node0][Write] mean: 30.00, N: 100
@@ -34,8 +36,10 @@ def test_open_latency_adds_source_queue_delay(tmp_path, monkeypatch):
     row = _run(tmp_path, monkeypatch, LOG)
     assert row["mean_latency_network"] == "45.0"   # (40*300 + 60*100) / 400
     assert row["mean_latency_open"] == "60.0"      # + (10*300 + 30*100) / 400
-    # accepted is the sum over every node monitor, so the per-node column
-    # divides by the 16 nodes mesh_4x4 names: 128 bits / 8 / 16.
+    # No perf.json here, so accepted falls back to the sum of the printed BW
+    # fields, each over its own monitor span. The per-node column divides by
+    # the 16 nodes mesh_4x4 names: 128 bits / 8 / 16.
+    assert row["window_source"] == "monitor"
     assert row["accepted_bits_per_cycle"] == "128.0"
     assert row["accepted_bytes_per_node_cycle"] == "1.0"
     # offered on the DAT plane: p = 0.5 AX per cycle on each of AW and AR. BURST_LEN 32 is
@@ -45,6 +49,29 @@ def test_open_latency_adds_source_queue_delay(tmp_path, monkeypatch):
     assert row["offered_flits_per_node_cycle"] == "33.5"
     assert row["offered_bytes_per_node_cycle"] == "2112.0"
     assert "mean_latency" not in row
+
+
+def test_accepted_uses_the_common_window_not_each_monitor_span(tmp_path, monkeypatch):
+    """Two nodes retire the same work, one over half the run, and the row must
+    describe the run rather than the sum of two private rates.
+
+    node0 finishes in 1000 cycles and prints twice the BW of node1, which takes
+    the full 2000. Summing the printed fields gives 3 * 64 = 192 bits per cycle,
+    a rate the mesh never carried. Counted as delivered work over the common
+    window: 4 monitor lines of 100 transactions, 33 beats of 64 B each, is
+    400 * 33 * 64 * 8 / 2000 = 3379.2 bits per cycle.
+    """
+    log = LOG_HEAD + "".join(
+        f"[Monitor node{n}.master][{d}] Latency: 50.00 +- 1.00, N: 100, "
+        f"BW: {bw:.2f} Bits/cycle, Util: 10.00%\n"
+        for n, bw in ((0, 128.0), (1, 64.0)) for d in ("Read", "Write"))
+    (tmp_path / "perf.json").write_text(
+        '{"window":{"start_cyc":0,"end_cyc":2000}}')
+    row = _run(tmp_path, monkeypatch, log)
+    assert row["window_source"] == "run"
+    assert row["accepted_bits_per_cycle"] == "3379.2"
+    # Per node over the 16 nodes mesh_4x4 names, the 14 silent ones included.
+    assert row["accepted_bytes_per_node_cycle"] == str(round(3379.2 / 8 / 16, 6))
 
 
 def test_self_traffic_nodes_report_zero_and_add_nothing(tmp_path, monkeypatch):
