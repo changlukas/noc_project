@@ -186,10 +186,10 @@ needed. While the head is parked, SA skips its continuation checks (the `fixed_v
 preferred-VC check and the F9 branch-set check, which apply to continuations only) and a fork's
 remaining branches may still allocate their own output VC off that same head.
 
-In target RTL, stage 3 checks per-VC credit for N/E/S/W outputs. For LOCAL output it checks output
-FIFO space but does not decrement a per-VC credit counter. Stage 4 holds the LOCAL flit stable until
-the NI returns a credit. Input processing is unchanged: LOCAL DAT arrivals are filed by `vc_id`
-and their dequeue returns the matching credit to the injecting NI.
+Stage 3 checks per-VC credit on all five outputs. The LOCAL counters are seeded from
+`NOC_NI_DAT_RX_VC_DEPTH`, the attached NI's per-VC receive FIFO depth, the other four from
+`NOC_ROUTER_VC_DEPTH` (section 2.2). LOCAL DAT arrivals are filed by `vc_id` and their dequeue
+returns the matching credit to the injecting NI.
 
 The model evaluates stages in reverse order (4, then 3, then 2, then 1) within one tick
 (`router.hpp:523-747`). Three observable consequences:
