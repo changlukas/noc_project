@@ -541,27 +541,59 @@ def section_curves(key, patterns, out_root):
             f"({last['accepted_bytes']:.1f} B) per node per cycle.\n"
             if last["accepted_bytes"] is not None else "")
         out.append(_throughput_note(rows, sat, key[7]))
-        png = plot(pattern, rows, out_root)
+        png = plot(pattern, rows, out_root, sat, key[7])
         if png:
             out.append(f"\n![{pattern} latency vs offered load]({png})\n")
     return "".join(out)
 
 
-def plot(pattern, rows, out_root):
-    """One PNG per curve pattern beside the report. Skipped without matplotlib."""
+def plot(pattern, rows, out_root, sat, burst_len):
+    """One PNG per curve pattern beside the report, two panels: latency
+    against offered load on a log axis with the 3x rule drawn in, and accepted
+    against offered throughput with the accepted equals offered reference.
+    Skipped without matplotlib."""
     if plt is None:
         return None
     offered = [r["offered"] for r in rows]
-    fig, ax = plt.subplots(figsize=(5, 3.2))
-    ax.plot(offered, [r["plat"] for r in rows], "o-", label="plat")
-    ax.plot(offered, [r["nlat"] for r in rows], "s--", label="nlat")
+    plat = [r["plat"] for r in rows]
+    nlat = [r["nlat"] for r in rows]
+    acc = [None if r["accepted_bytes"] is None else accepted_flits(r["accepted_bytes"], burst_len)
+           for r in rows]
+    multi = [r["seeds"] > 1 for r in rows]
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(9, 3.4))
+
+    ax.plot(offered, plat, "o-", color="tab:blue", label="plat (with source queue)")
+    ax.plot(offered, nlat, "s--", color="tab:orange", label="nlat (network only)")
+    for x, y, m in zip(offered, plat, multi):
+        if m:
+            ax.plot([x], [y], "o", markerfacecolor="white", color="tab:blue", markersize=9)
+    ax.set_yscale("log")
+    if sat is not None:
+        ax.axhline(sat["threshold"], color="grey", linewidth=0.8, linestyle=":")
+        ax.axvline(sat["offered"], color="grey", linewidth=0.8, linestyle=":")
+        ax.annotate(f"3x zero load at {sat['offered']:.2f}",
+                    (sat["offered"], sat["threshold"]), xytext=(4, 4),
+                    textcoords="offset points", fontsize=8, color="grey")
     ax.set_xlabel("offered load (DAT flits per node per cycle)")
-    ax.set_ylabel("latency (cycles)")
-    ax.set_title(pattern)
-    ax.legend()
+    ax.set_ylabel("latency (cycles, log)")
+    ax.set_title(f"{pattern}: latency")
+    ax.legend(fontsize=8)
+
+    xs = [x for x, y in zip(offered, acc) if y is not None]
+    ys = [y for y in acc if y is not None]
+    bx.plot(xs, ys, "o-", color="tab:green", label="accepted")
+    lim = max(xs + ys) if xs else 1.0
+    bx.plot([0, lim], [0, lim], color="grey", linewidth=0.8, linestyle=":", label="accepted = offered")
+    if sat is not None and sat["accepted_bytes"] is not None:
+        bx.axvline(sat["offered"], color="grey", linewidth=0.8, linestyle=":")
+    bx.set_xlabel("offered load (DAT flits per node per cycle)")
+    bx.set_ylabel("accepted (DAT flits per node per cycle)")
+    bx.set_title(f"{pattern}: throughput")
+    bx.legend(fontsize=8)
+
     fig.tight_layout()
     name = f"perf_{pattern}.png"
-    fig.savefig(out_root / name, dpi=120)
+    fig.savefig(out_root / name, dpi=130)
     plt.close(fig)
     return name
 
