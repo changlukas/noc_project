@@ -29,11 +29,11 @@ module axi_async_fifo #(
         initial $fatal(0, "Error: AXI_FIFO_DEPTH must be a power of two and at least 2 (instance %m)");
     end
 
-    cdc_fifo_gray #(
-        .T           ( T                 ),
-        .LOG_DEPTH   ( CL_AXI_FIFO_DEPTH ),
-        .SYNC_STAGES ( 2                 )
-    ) i_cdc_fifo_gray (
+    cc_cdc_fifo_gray #(
+        .data_t     ( T                 ),
+        .LogDepth   ( CL_AXI_FIFO_DEPTH ),
+        .SyncStages ( 2                 )
+    ) i_cc_cdc_fifo_gray (
         .src_rst_ni,
         .src_clk_i,
         .src_data_i,

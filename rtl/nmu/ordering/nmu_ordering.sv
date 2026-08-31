@@ -53,17 +53,17 @@ module nmu_ordering #(
     localparam int unsigned CL_NUM_IDS = $clog2(NUM_IDS);
 
     if (NMU_ROB_B_DEPTH < 1 || NMU_ROB_B_DEPTH > TAG_SPACE) begin : gen_invalid_b_depth
-        $fatal(0, "Error: NMU_ROB_B_DEPTH must be in [1, TAG_SPACE] (instance %m)");
+        initial $fatal(0, "Error: NMU_ROB_B_DEPTH must be in [1, TAG_SPACE] (instance %m)");
     end
     if (NMU_ROB_R_DEPTH < 1 || NMU_ROB_R_DEPTH > TAG_SPACE) begin : gen_invalid_r_depth
-        $fatal(0, "Error: NMU_ROB_R_DEPTH must be in [1, TAG_SPACE] (instance %m)");
+        initial $fatal(0, "Error: NMU_ROB_R_DEPTH must be in [1, TAG_SPACE] (instance %m)");
     end
     if (NMU_MAX_TXNS_PER_ID < 1 || NMU_MAX_TXNS_PER_ID > TAG_SPACE) begin : gen_invalid_max_txns
-        $fatal(0, "Error: NMU_MAX_TXNS_PER_ID must be in [1, TAG_SPACE] (instance %m)");
+        initial $fatal(0, "Error: NMU_MAX_TXNS_PER_ID must be in [1, TAG_SPACE] (instance %m)");
     end
     if ($bits(s_ar_i.axi.arid) != ID_W || $bits(s_b_i.axi.bid) != ID_W ||
         $bits(s_r_i.axi.rid) != ID_W) begin : gen_mismatched_id_width
-        $fatal(0, "Error: AW, AR, B, and R ID widths must match (instance %m)");
+        initial $fatal(0, "Error: AW, AR, B, and R ID widths must match (instance %m)");
     end
 
     typedef ni_child_types_pkg::nmu_rob_order_entry_t order_entry_t;
