@@ -308,7 +308,7 @@ behavior. Defaults below are the shipped values.
 | AW_SAM_REG_TYPE | 0 | {0,1,2} | AW decode-to-RoB slice: bypass, simple register, full skid |
 | AR_SAM_REG_TYPE | 0 | {0,1,2} | AR decode-to-RoB slice, independently selected |
 
-C++ model runtime configuration per instance: src_id, SAM config path, RobMode and RoB depth overrides come through `cmodel_nmu_create` / `cmodel_nmu_create_ex` (Section 3.3). The generated testbench sets src_id = {y[3:0], x[3:0]} per node and forwards the plusargs `+sam_config=`, `+b_rob_depth=`, `+r_rob_depth=`, `+max_txns_per_id=`. These plusargs configure the reference model only; the RTL image uses the generated package selected at elaboration.
+C++ model runtime configuration per instance: src_id, port_id, SAM config path, RobMode and RoB depth overrides come through `cmodel_nmu_create_ex` (Section 3.3). The generated testbench sets src_id = {y[3:0], x[3:0]} and port_id from the endpoint attachment per instance, then forwards the plusargs `+sam_config=`, `+b_rob_depth=`, `+r_rob_depth=`, `+max_txns_per_id=`. These plusargs configure the reference model only; the RTL image uses the generated package selected at elaboration.
 
 ### 2.8 Collective writes
 
@@ -366,7 +366,7 @@ All ports below are the current C++/DPI `nmu_wrap` ports (`ref_model/top/nmu_wra
 |---|---|---|
 | clk_i | 1 | Clock. All sampling on the positive edge. |
 | rst_ni | 1 | Synchronous active-low reset. Given only once, at the beginning of simulation. |
-| ctx_i | 64 | Model instance handle returned by `cmodel_nmu_create`. Constant after creation. |
+| ctx_i | 64 | Model instance handle returned by `cmodel_nmu_create_ex`. Constant after creation. |
 | axi_req_i.awvalid | 1 | AW valid. Must stay high until awready is observed. |
 | axi_req_i.awid | AXI_ID_WIDTH (default 3) | Write transaction ID. Sampled only on the awvalid && awready cycle. |
 | axi_req_i.awaddr | 48 | Write address. Must hit a SAM entry (guarantee G1). |
@@ -434,8 +434,7 @@ DAT bypasses this adaptation and remains credit-controlled. Declared in
 
 | Function | Signature (summary) | Semantics |
 |---|---|---|
-| cmodel_nmu_create | `unsigned long long (const char* name, int src_id, int dat_num_vc, const char* config_path)` | Constructs the instance, RobMode::Enabled (R side), default depths. `dat_num_vc` sizes the DAT face only; REQ and RSP are fixed single-VC. `config_path` is required: NULL or empty throws inside `NmuWrap::init`, which the DPI boundary catches into the error latch and returns handle 0. Returns the 64-bit handle for ctx_i. |
-| cmodel_nmu_create_ex | `unsigned long long (const char* name, int src_id, int dat_num_vc, int rob_enabled, int b_rob_depth, int r_rob_depth, int max_txns_per_id, const char* config_path)` | As create, plus R-RoB enable and depth overrides. The generated testbench calls this in both RoB modes: it is the only entry point carrying the overrides, and the B-side RoB runs regardless of `rob_enabled` (Section 2.5). |
+| cmodel_nmu_create_ex | `unsigned long long (const char* name, int src_id, int dat_num_vc, int rob_enabled, int b_rob_depth, int r_rob_depth, int max_txns_per_id, int port_id, const char* config_path)` | Constructs the instance with explicit source coordinate, endpoint attachment port, R-RoB mode, and depth overrides. `port_id` is stamped into the source-port header field of outgoing requests. `dat_num_vc` sizes the DAT face only; REQ and RSP are fixed single-VC. `config_path` is required: NULL or empty throws inside `NmuWrap::init`, which the DPI boundary catches into the error latch and returns handle 0. The generated testbench calls this in both RoB modes; the B-side RoB runs regardless of `rob_enabled` (Section 2.5). Returns the 64-bit handle for ctx_i. |
 | cmodel_nmu_set_inputs | `(ctx, AXI args incl. a 58 b awuser, then the three NoC faces: tx_req_ready, rx_rsp_valid + flit, rx_dat_valid + flit, tx_dat_crdvalid)` | Latches inputs only. Packing: 8-bit fields in word[0] low byte, addresses 2 words little-endian, data 16 words little-endian, wstrb 2 words, awuser 2 words, flits little-endian at their own network's word count (REQ 5, RSP 4, DAT 20), credit vector 1 word bit-per-VC. |
 | cmodel_nmu_tick | `(ctx)` | One full model cycle. One call = one clock edge. |
 | cmodel_nmu_get_outputs | `(ctx, AXI response args, tx_req_valid + flit, rx_rsp_ready, tx_dat_valid + flit, rx_dat_crdvalid)` | Copies the output latch. bresp / rresp masked with 2'b11. |

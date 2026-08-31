@@ -137,9 +137,12 @@ class Router {
             assert(false && "Router: num_vc out of range (1 .. 2^VC_ID_WIDTH)");
             std::abort();
         }
-        if (cfg_.vc_depth < 2 || !is_power_of_two(cfg_.vc_depth) || cfg_.local_vc_depth < 2 ||
-            !is_power_of_two(cfg_.local_vc_depth)) {
+        if (cfg_.vc_depth < 2 || !is_power_of_two(cfg_.vc_depth)) {
             assert(false && "Router: vc_depth must be a power of two and at least 2");
+            std::abort();
+        }
+        if (cfg_.local_vc_depth < 2 || !is_power_of_two(cfg_.local_vc_depth)) {
+            assert(false && "Router: local_vc_depth must be a power of two and at least 2");
             std::abort();
         }
         if (!is_power_of_two(cfg_.output_fifo_depth)) {
