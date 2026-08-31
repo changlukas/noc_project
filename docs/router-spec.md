@@ -331,7 +331,7 @@ counters on all five DAT outputs. REQ and RSP have no counters.
 1. **Seed**: N/E/S/W counters start at `NOC_ROUTER_VC_DEPTH`; LOCAL counters start at
    `NOC_NI_DAT_RX_VC_DEPTH`, each equal to the corresponding downstream receive-VC FIFO depth.
 2. **Decrement**: by 1 at the grant event (stage-2 admission into the output FIFO,
-   `router.hpp:262-263`), not at link traversal. With seed 8, eight grants toward one
+   `router.hpp:646-647`), not at link traversal. With seed 8, eight grants toward one
    (output, VC) with no returns leave the counter at 0 and stall further grants on
    that VC.
 3. **Increment**: by 1 per received credit pulse on that (output, VC), including LOCAL when the NI

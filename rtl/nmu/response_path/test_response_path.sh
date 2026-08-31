@@ -2,7 +2,8 @@
 set -euo pipefail
 
 task_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
-task_revision=9ca8a7655f741e7dd5736669a20a301325194c28
+task_revision=63b7c50d43e462b59506f69d341ff1e40202866d
+task_tech_revision=3a3de73632a06826b1bd9c65a0a2e92b32016845
 task_tmp=$(mktemp -d "${TMPDIR:-/tmp}/nmu-response-path-XXXXXX")
 trap 'rm -rf "$task_tmp"' EXIT
 
@@ -14,16 +15,26 @@ else
     git -C "$task_common_cells" checkout --quiet "$task_revision"
 fi
 
+if [[ -n "${TECH_CELLS_GENERIC_DIR:-}" ]]; then
+    task_tech_cells=$TECH_CELLS_GENERIC_DIR
+else
+    task_tech_cells="$task_tmp/tech_cells_generic"
+    git clone --quiet https://github.com/pulp-platform/tech_cells_generic.git "$task_tech_cells"
+    git -C "$task_tech_cells" checkout --quiet "$task_tech_revision"
+fi
+[[ $(git -C "$task_tech_cells" rev-parse HEAD) == "$task_tech_revision" ]]
+
 task_sources=(
     "$task_root/specgen/generated/sv/ni_params_pkg.sv"
     "$task_root/specgen/generated/sv/ni_signals_pkg.sv"
-    "$task_common_cells/src/binary_to_gray.sv"
-    "$task_common_cells/src/gray_to_binary.sv"
-    "$task_common_cells/src/spill_register_flushable.sv"
-    "$task_common_cells/src/spill_register.sv"
-    "$task_common_cells/src/stream_register.sv"
-    "$task_common_cells/src/sync.sv"
-    "$task_common_cells/src/cdc_fifo_gray.sv"
+    "$task_common_cells/src/cc_pkg.sv"
+    "$task_common_cells/src/cc_binary_to_gray.sv"
+    "$task_common_cells/src/cc_gray_to_binary.sv"
+    "$task_common_cells/src/cc_spill_register_flushable.sv"
+    "$task_common_cells/src/cc_spill_register.sv"
+    "$task_common_cells/src/cc_stream_register.sv"
+    "$task_tech_cells/src/rtl/tc_sync.sv"
+    "$task_common_cells/src/cc_cdc_fifo_gray.sv"
     "$task_root/rtl/common/axi_async_fifo.sv"
     "$task_root/rtl/nmu/response_fifo/nmu_response_fifo.sv"
     "$task_root/rtl/nmu/response_path/nmu_response_path.sv"

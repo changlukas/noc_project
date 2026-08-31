@@ -11,6 +11,7 @@
 #include "cmodel_dpi.h"
 #include "dpi_marshal.hpp"
 #include "handle_block.hpp"
+#include "ni_params.h"
 #include <atomic>
 #include <gtest/gtest.h>
 #include <string>
@@ -28,6 +29,14 @@ void check_and_clear_error(int expected_code) {
     EXPECT_EQ(code, expected_code) << "msg: " << (msg ? msg : "<null>");
     ni::cmodel::wrap::g_dpi_error_code.store(CMODEL_DPI_OK);
     ni::cmodel::wrap::g_dpi_error_msg.clear();
+}
+
+// One NMU handle at the testbench's own defaults (noc_tb_top.sv passes the
+// same specgen values into cmodel_nmu_create_ex).
+unsigned long long make_nmu(const char* name, const char* config_path) {
+    return cmodel_nmu_create_ex(name, /*src_id=*/0, /*num_vc=*/1, ni::NMU_READ_ROB_ENABLED,
+                                ni::NMU_ROB_B_DEPTH, ni::NMU_ROB_R_DEPTH, ni::NMU_MAX_TXNS_PER_ID,
+                                /*port_id=*/0, config_path);
 }
 
 class CmodelDpiLifecycleTest : public ::testing::Test {};
@@ -55,8 +64,8 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
 
     // Case: create 2 NMU adapters — distinct void* + both validate as live.
     const char* topology = CONFIG_DIR "/mesh_2x2.yml";
-    unsigned long long nmu_a = cmodel_nmu_create("nmu_a", 0, /*num_vc=*/1, topology);
-    unsigned long long nmu_b = cmodel_nmu_create("nmu_b", 0, /*num_vc=*/1, topology);
+    unsigned long long nmu_a = make_nmu("nmu_a", topology);
+    unsigned long long nmu_b = make_nmu("nmu_b", topology);
     ASSERT_NE(nmu_a, 0ull);
     ASSERT_NE(nmu_b, 0ull);
     EXPECT_NE(nmu_a, nmu_b);
@@ -66,7 +75,7 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     // latch the SV side polls. The wrap used to invent a 16x16 / 4 GB SAM
     // here, so a testbench that dropped its config_path ran to completion
     // against a map nothing in the tree ships.
-    EXPECT_EQ(cmodel_nmu_create("nmu_no_sam", 0, /*num_vc=*/1, /*config_path=*/nullptr), 0ull);
+    EXPECT_EQ(make_nmu("nmu_no_sam", /*config_path=*/nullptr), 0ull);
     check_and_clear_error(CMODEL_DPI_ERR_GENERIC);
 
     // Case: type-guard — an NMU handle passed to cmodel_nsu_tick (WrapType

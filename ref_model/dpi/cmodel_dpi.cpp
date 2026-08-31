@@ -437,7 +437,8 @@ static unsigned long long nmu_create_impl(const char* name, int src_id, int dat_
                                           std::size_t r_rob_depth, std::size_t max_txns_per_id,
                                           int port_id) {
     if (g_session_state != SessionState::Initialized) {
-        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED, "cmodel_nmu_create: not initialized");
+        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
+                             "cmodel_nmu_create_ex: not initialized");
         return 0ull;
     }
     DPI_BOUNDARY_BEGIN_R(nmu_create_impl, 0ull) {
@@ -454,13 +455,6 @@ static unsigned long long nmu_create_impl(const char* name, int src_id, int dat_
         return static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(h));
     }
     DPI_BOUNDARY_END_R(nmu_create_impl);
-}
-
-extern "C" unsigned long long cmodel_nmu_create(const char* name, int src_id, int dat_num_vc,
-                                                const char* config_path) {
-    return nmu_create_impl(name, src_id, dat_num_vc, ni::cmodel::nmu::DEFAULT_ROB_MODE, config_path,
-                           ni::NMU_ROB_B_DEPTH, ni::NMU_ROB_R_DEPTH, ni::NMU_MAX_TXNS_PER_ID,
-                           /*port_id=*/0);
 }
 
 extern "C" unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int dat_num_vc,

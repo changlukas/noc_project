@@ -17,8 +17,6 @@ constexpr int NOC_DAT_VC_MODE_SHARED           = 0;
 constexpr int NOC_DAT_VC_MODE_READ_WRITE_SPLIT = 1;
 constexpr int NOC_DAT_VC_MODE                  = 0;
 constexpr int NOC_DAT_NUM_VC                   = 2;
-constexpr int NOC_REQ_NUM_VC                   = 1;
-constexpr int NOC_RSP_NUM_VC                   = 1;
 constexpr int NOC_REQ_FLIT_WIDTH               = 136;
 constexpr int NOC_RSP_FLIT_WIDTH               = 126;
 constexpr int NOC_DAT_FLIT_WIDTH               = 633;
@@ -46,8 +44,5 @@ constexpr int NSU_QUEUE_DEPTH                 = 16;
 constexpr int NSU_META_BUFFER_MAX_OUTSTANDING = 32;
 constexpr int NSU_META_BUFFER_MAX_UNIQUE_IDS  = 8;
 constexpr int NSU_ARBITER_FIFO_DEPTH          = 4;
-
-// Derived parameter defaults
-constexpr int AXI_WSTRB_WIDTH = 64;
 
 }  // namespace ni

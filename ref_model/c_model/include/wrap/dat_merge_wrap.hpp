@@ -47,7 +47,7 @@
 // is split by destination, because the two sides have different ingress
 // capacity. NMU's DataR ingress queue is unbounded and always accepts (see
 // nmu_wrap.hpp), so its credit returns immediately at demux. NSU's DataAw/
-// DataW ingress is one BOUNDED queue per DAT VC (depth NOC_ROUTER_VC_DEPTH,
+// DataW ingress is one BOUNDED queue per DAT VC (depth NOC_NI_DAT_RX_VC_DEPTH,
 // nsu_standalone.hpp), so its credit is the NSU's own consume pulse
 // (nsu_wrap rx_dat_crdvalid_o, DatMergeInputs::nsu_rx_dat_crdvalid) forwarded
 // on -- returning it at demux instead would leave that queue with no

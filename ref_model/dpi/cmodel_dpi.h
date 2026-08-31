@@ -104,7 +104,7 @@ void cmodel_router_dat_get_outputs(unsigned long long ctx, svBitVecVal* tx_dat_v
 // translate of floo_nw_chimney.sv's wide-link merge). One instance per node,
 // created in ni_wrap.sv, sitting between nmu_wrap/nsu_wrap's DAT pins and
 // router_wrap's DAT LOCAL port. See wrap/dat_merge_wrap.hpp for the full
-// rationale. dat_num_vc mirrors cmodel_router_create's / cmodel_nmu_create's
+// rationale. dat_num_vc mirrors cmodel_router_create's / cmodel_nmu_create_ex's
 // same-named parameter (the DAT face's VC count; REQ/RSP have no analog
 // here, DatMerge is DAT-only).
 // Egress (NMU DataAw/W + NSU DataR -> router LOCAL rx): nmu_tx_dat_*/
@@ -155,8 +155,6 @@ void cmodel_dat_merge_get_outputs(unsigned long long ctx, svBitVecVal* nmu_tx_da
 // max_txns_per_id: per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId). With no
 // aggregate pool above it, this times 2**NOC_ID_WIDTH is the master-side
 // injection budget.
-unsigned long long cmodel_nmu_create(const char* name, int src_id, int dat_num_vc,
-                                     const char* config_path);
 unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int dat_num_vc,
                                         int rob_enabled, int b_rob_depth, int r_rob_depth,
                                         int max_txns_per_id, int port_id, const char* config_path);

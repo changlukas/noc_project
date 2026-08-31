@@ -34,15 +34,17 @@
 //
 // Depth rationale (DAT): vc_depth = NOC_ROUTER_VC_DEPTH (spec default; also
 // the value the NMU/NSU DAT face seeds its own sender credit counter with, so
-// both ends of the link agree on the credit window). The eject buffers are
-// sized to num_vc * vc_depth (aggregate output-credit window).
+// both ends of the link agree on the credit window). LOCAL is the exception:
+// the FIFO behind that output belongs to the attached NI, so local_vc_depth =
+// NOC_NI_DAT_RX_VC_DEPTH (router-spec §2.7 rule 1). Each eject buffer is sized
+// to num_vc * that port's seed (aggregate output-credit window).
 #pragma once
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "wrap/router_wrap_io.hpp"
 #include "router/router.hpp"
 #include "router/simple_router.hpp"
 #include "router/router_adapters.hpp"
-#include "ni_params.h"  // NOC_ROUTER_VC_DEPTH, NOC_ROUTER_OUTPUT_FIFO_DEPTH
+#include "ni_params.h"  // NOC_ROUTER_VC_DEPTH, NOC_NI_DAT_RX_VC_DEPTH, NOC_ROUTER_OUTPUT_FIFO_DEPTH
 #include <array>
 #include <memory>
 
@@ -74,12 +76,12 @@ class RouterWrap {
         dc.mesh_y_dim = mesh_y_dim;
         dc.num_vc = dat_num_vc;
         dc.vc_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH);
+        dc.local_vc_depth = static_cast<std::size_t>(::ni::NOC_NI_DAT_RX_VC_DEPTH);
         dc.output_fifo_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_OUTPUT_FIFO_DEPTH);
         dat_router_ = std::make_unique<router::Router>(dc);
         for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
             dat_eject_[p] = std::make_unique<router::LinkEjectAdapter>(
-                static_cast<std::size_t>(dat_num_vc_) *
-                static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH));
+                static_cast<std::size_t>(dat_num_vc_) * dat_router_->out_credit_seed(p));
             dat_credit_[p] = std::make_unique<router::LinkCreditOut>(dat_num_vc_);
             dat_router_->set_downstream(p, *dat_eject_[p]);
             dat_router_->set_upstream_credit(p, *dat_credit_[p]);

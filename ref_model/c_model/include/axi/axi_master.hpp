@@ -673,8 +673,7 @@ namespace detail {
 //   - When ready is true: push_* returns true (handshake complete); the beat is
 //     consumed and Wrap clears the pending latch.
 //
-// pop_b / pop_r supply B/R response beats injected by Wrap from the
-// incoming SV wire. inject_b / inject_r are the injection points.
+// pop_b / pop_r drain the B/R response queues, which nothing currently fills.
 struct WireSlavePort {
     // Backpressure controls: Wrap sets these from MasterInputs before
     // each call to AxiMasterT::tick().
@@ -767,10 +766,6 @@ struct WireSlavePort {
         if (!ar_pending_) return std::nullopt;
         return last_ar_;
     }
-
-    // Wrap injects B/R response beats from the SV wire into the port.
-    void inject_b(const BBeat& b) { b_queue_.push_back(b); }
-    void inject_r(const RBeat& r) { r_queue_.push_back(r); }
 
     // Registered DPI tick inject support: force-clear AW pending state so that AWVALID
     // drops to 0 on the wire. Called by MasterWrap when fault injection

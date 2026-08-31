@@ -18,8 +18,6 @@ package ni_params_pkg;
   localparam int unsigned NOC_DAT_VC_MODE_READ_WRITE_SPLIT  = 1;
   localparam int unsigned NOC_DAT_VC_MODE_DFLT              = 0;
   localparam int unsigned NOC_DAT_NUM_VC_DFLT               = 2;
-  localparam int unsigned NOC_REQ_NUM_VC_DFLT               = 1;
-  localparam int unsigned NOC_RSP_NUM_VC_DFLT               = 1;
   localparam int unsigned NOC_REQ_FLIT_WIDTH_DFLT           = 136;
   localparam int unsigned NOC_RSP_FLIT_WIDTH_DFLT           = 126;
   localparam int unsigned NOC_DAT_FLIT_WIDTH_DFLT           = 633;
@@ -47,9 +45,6 @@ package ni_params_pkg;
   localparam int unsigned NSU_META_BUFFER_MAX_OUTSTANDING_DFLT = 32;
   localparam int unsigned NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT  = 8;
   localparam int unsigned NSU_ARBITER_FIFO_DEPTH_DFLT          = 4;
-
-  // Derived parameter defaults
-  localparam int unsigned AXI_WSTRB_WIDTH_DFLT = 64;
 
 endpackage
 

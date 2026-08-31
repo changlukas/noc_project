@@ -44,8 +44,11 @@ if [[ "${1:-test}" == test ]]; then
   )
   for task_case in 0 1 2; do
     task_log="$task_tmp/guard_$task_case.log"
-    if "${task_verilator[@]}" --lint-only --top-module nmu_ordering \
-      ${task_guard_values[$task_case]} "${task_sources[@]}" >"$task_log" 2>&1; then
+    task_guard_obj="$task_tmp/obj_dir_guard_$task_case"
+    "${task_verilator[@]}" --binary --top-module nmu_ordering \
+      --Mdir "$task_guard_obj" -o nmu_ordering_guard_tb \
+      ${task_guard_values[$task_case]} "${task_sources[@]}"
+    if "$task_guard_obj/nmu_ordering_guard_tb" >"$task_log" 2>&1; then
       echo "ordering parameter guard $task_case did not fail" >&2
       exit 1
     fi

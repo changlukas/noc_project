@@ -8,8 +8,8 @@
 // Multi-NSU ctor (ChannelModel(num_nsu, req_per_nsu, rsp_total)) requires
 // explicit set_dst_route(dst_id, nsu_idx) -- unmapped dst pushes assert.
 //
-// Per-NSU response latency (set_nsu_latency / set_nsu_latency_range) replaces
-// global rsp_delay_ for the configured NSU (not additive).
+// Per-NSU response latency (set_nsu_latency) replaces global rsp_delay_ for
+// the configured NSU (not additive).
 //
 // Bounded deque per direction. Accepts multiple flits per tick -- does NOT
 // model 1-flit/cycle physical NoC pacing. That's vc_arb's responsibility.
@@ -29,7 +29,6 @@
 #include <deque>
 #include <limits>
 #include <optional>
-#include <random>
 #include <utility>
 #include <vector>
 
@@ -105,18 +104,11 @@ class ChannelModel {
         dst_to_nsu_[dst_id] = static_cast<int8_t>(nsu_idx);
     }
 
-    // Per-NSU response latency (static)
+    // Per-NSU response latency, in cycles.
     void set_nsu_latency(std::size_t nsu_idx, std::size_t cycles) noexcept {
         assert(nsu_idx < num_nsu_);
-        nsu_latency_[nsu_idx] = NsuLatencyConfig{/*is_random=*/false, cycles, 0, 0};
+        nsu_latency_[nsu_idx] = cycles;
     }
-    // Per-NSU response latency (random uniform in [min, max] inclusive)
-    void set_nsu_latency_range(std::size_t nsu_idx, std::size_t min, std::size_t max) noexcept {
-        assert(nsu_idx < num_nsu_);
-        assert(min <= max);
-        nsu_latency_[nsu_idx] = NsuLatencyConfig{/*is_random=*/true, 0, min, max};
-    }
-    void set_random_seed(uint64_t seed) noexcept { rng_.seed(seed); }
 
     // Per-VC credit depth configuration and introspection.
     void set_per_vc_depth(std::size_t depth) noexcept {
@@ -126,9 +118,6 @@ class ChannelModel {
     std::size_t per_vc_depth() const noexcept { return per_vc_depth_; }
     std::size_t nmu_req_per_vc_in_flight(uint8_t vc_id) const noexcept {
         return nmu_req_per_vc_in_flight_[vc_id];
-    }
-    std::size_t nsu_rsp_per_vc_in_flight(uint8_t vc_id) const noexcept {
-        return nsu_rsp_per_vc_in_flight_[vc_id];
     }
 
     // Legacy global delay (preserved for single-NSU fixtures only;
@@ -175,17 +164,6 @@ class ChannelModel {
         age(rsp_pipe_, rsp_q_, rsp_q_depth_total_);
     }
 
-    // Test introspection
-    std::size_t nsu_req_q_size(std::size_t i) const noexcept { return nsu_req_q_[i].size(); }
-    std::size_t rsp_q_size() const noexcept { return rsp_q_.size(); }
-
-    // Legacy single-NSU introspection (preserved for backward compat).
-    // req_q_size() returns the visible NSU_0 request-queue size, plus any
-    // in-flight req_q_ from the legacy global-delay path.
-    std::size_t req_q_size() const noexcept { return nsu_req_q_[0].size() + req_q_.size(); }
-    std::size_t req_pipe_size() const noexcept { return req_pipe_.size(); }
-    std::size_t rsp_pipe_size() const noexcept { return rsp_pipe_.size(); }
-
   private:
     static constexpr std::size_t DST_ID_SPACE = 1u << ni::header::DST_ID_WIDTH;
     static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
@@ -193,13 +171,6 @@ class ChannelModel {
     // that push more than any small sentinel to one VC are unaffected.
     // Tests that want to exercise credit exhaustion call set_per_vc_depth().
     static constexpr std::size_t kDefaultPerVcDepth = std::numeric_limits<std::size_t>::max();
-
-    struct NsuLatencyConfig {
-        bool is_random = false;
-        std::size_t value = 0;
-        std::size_t min = 0;
-        std::size_t max = 0;
-    };
 
     struct DelayedFlit {
         Flit flit;
@@ -282,14 +253,7 @@ class ChannelModel {
         bool push_flit(const Flit& f) override {
             uint8_t vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
             if (p->nsu_rsp_per_vc_in_flight_[vc] >= p->per_vc_depth_) return false;
-            const auto& cfg = p->nsu_latency_[i];
-            std::size_t latency;
-            if (cfg.is_random) {
-                std::uniform_int_distribution<std::size_t> dist(cfg.min, cfg.max);
-                latency = dist(p->rng_);
-            } else {
-                latency = cfg.value;
-            }
+            const std::size_t latency = p->nsu_latency_[i];
             if (latency == 0) {
                 // Fast path: bypass per-NSU delay queue.
                 if (p->rsp_delay_ > 0) {
@@ -350,11 +314,10 @@ class ChannelModel {
     std::deque<Flit> rsp_q_;
     std::vector<std::deque<DelayedFlit>> nsu_rsp_delay_q_;
     std::size_t total_delayed_rsp_count_ = 0;
-    std::vector<NsuLatencyConfig> nsu_latency_;
+    std::vector<std::size_t> nsu_latency_;
     unsigned req_delay_ = 0, rsp_delay_ = 0;
     std::deque<std::pair<Flit, unsigned>> req_pipe_, rsp_pipe_;
     std::deque<Flit> req_q_;  // legacy global req delay output
-    std::mt19937_64 rng_;
     NmuReqOutAdapter nmu_req_out_adapter_;
     NmuRspInAdapter nmu_rsp_in_adapter_;
     std::vector<NsuReqInAdapter> nsu_req_in_adapters_;

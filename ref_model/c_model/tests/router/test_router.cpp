@@ -69,6 +69,21 @@ TEST(RouterRouteComputeDeath, DstOutsideMeshAborts) {
     EXPECT_DEATH(route_compute(make_dst(5, 1), kTilePort, cfg), "outside mesh");
 }
 
+TEST(RouterCreditSeed, LocalUsesNiDepthAndCompassPortsUseRouterDepth) {
+    RouterConfig cfg = center_cfg();
+    cfg.vc_depth = 8;
+    cfg.local_vc_depth = 2;
+    Router r(cfg);
+
+    for (uint8_t vc = 0; vc < cfg.num_vc; ++vc) {
+        EXPECT_EQ(r.credit(static_cast<std::size_t>(RouterPort::LOCAL), vc), 2u);
+        for (const auto port : {RouterPort::NORTH, RouterPort::EAST, RouterPort::SOUTH,
+                                RouterPort::WEST}) {
+            EXPECT_EQ(r.credit(static_cast<std::size_t>(port), vc), 8u);
+        }
+    }
+}
+
 TEST(RouteCompute, PortZeroEjectsLocalAtTheDestinationCoordinate) {
     RouterConfig cfg{};
     cfg.x = 1;
@@ -173,6 +188,9 @@ TEST(RouterConstructionDeath, BadParametersAbort) {
     RouterConfig non_power_of_two_vc_depth = center_cfg();
     non_power_of_two_vc_depth.vc_depth = 3;
     EXPECT_DEATH(Router r(non_power_of_two_vc_depth), "power of two");
+    RouterConfig non_power_of_two_local_vc_depth = center_cfg();
+    non_power_of_two_local_vc_depth.local_vc_depth = 3;
+    EXPECT_DEATH(Router r(non_power_of_two_local_vc_depth), "local_vc_depth");
     RouterConfig non_power_of_two_output_depth = center_cfg();
     non_power_of_two_output_depth.output_fifo_depth = 3;
     EXPECT_DEATH(Router r(non_power_of_two_output_depth), "power of two");

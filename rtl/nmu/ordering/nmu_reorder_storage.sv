@@ -32,7 +32,7 @@ module nmu_reorder_storage #(
     localparam int unsigned TAG_SPACE = 1 << TAG_W;
 
     if (DEPTH < 1 || DEPTH > TAG_SPACE) begin : gen_invalid_depth
-        $fatal(0, "Error: DEPTH must be in [1, TAG_SPACE] (instance %m)");
+        initial $fatal(0, "Error: DEPTH must be in [1, TAG_SPACE] (instance %m)");
     end
 
     T data_reg [DEPTH];
