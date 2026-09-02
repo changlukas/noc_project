@@ -80,6 +80,10 @@ import sys
 # AXI data bus width in bytes (specgen DATA_WIDTH 512 b), the monitor's charge
 # per beat.
 BEAT_BYTES = 64
+AI_WRITE_ONLY = frozenset({
+    "broadcast", "gather", "alltoall", "neighbor_exchange", "pipeline",
+    "many_to_many",
+})
 
 # [Monitor node0.master][Read] Latency: 98.30 +- 4.10, N: 200, BW: 107.02 Bits/cycle, Util: 41.80%
 _MON = re.compile(
@@ -140,6 +144,28 @@ def parse_round_perf(log_text):
         "round_active_sources": str(active_sources),
         "round_write_bursts": str(write_bursts),
     }
+
+
+def load_traffic_meta(path, log_text, pattern):
+    try:
+        payload = json.loads(pathlib.Path(path).read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        sys.exit(f"emit_result_csv: invalid traffic metadata: {error}")
+    required = {"active_sources", "source_write_bursts", "destination_deliveries"}
+    if set(payload) != required or any(
+            not isinstance(payload[name], int) or payload[name] <= 0
+            for name in required):
+        sys.exit("emit_result_csv: traffic metadata requires three positive integer counts")
+    log_meta = parse_traffic_meta(log_text)
+    if (payload["active_sources"] != int(log_meta["round_active_sources"]) or
+            payload["source_write_bursts"] != int(log_meta["round_write_bursts"])):
+        sys.exit("emit_result_csv: traffic metadata does not match the run log")
+    deliveries = payload["destination_deliveries"]
+    writes = payload["source_write_bursts"]
+    if (pattern == "broadcast" and deliveries <= writes) or \
+            (pattern != "broadcast" and deliveries != writes):
+        sys.exit("emit_result_csv: traffic metadata destination fanout is inconsistent")
+    return payload
 
 
 def _channel_means(samples):
@@ -291,6 +317,8 @@ def main():
     ap.add_argument("--burst-len", default="0")
     ap.add_argument("--stim-size")
     ap.add_argument("--space", default="memory")
+    ap.add_argument("--traffic-meta")
+    ap.add_argument("--traffic-mapping")
     ap.add_argument("--require-round-perf", action="store_true")
     ap.add_argument("--channel-mapping", choices=("2-channel", "3-channel"))
     ap.add_argument("--channel-case", choices=("write", "read"))
@@ -323,16 +351,29 @@ def main():
     srcq = parse_source_queue(log_text)
     offered_flits, offered_bytes = offered_load(
         a.injection_rate, a.burst_len,
-        write_only=a.pattern in {"broadcast", "gather", "alltoall",
-                                 "neighbor_exchange", "pipeline", "many_to_many"})
+        write_only=a.pattern in AI_WRITE_ONLY)
     nodes = mesh_nodes(a.topology)
     window = run_window(a.log)
+    traffic_meta = None
+    if a.pattern in AI_WRITE_ONLY:
+        if not a.traffic_meta or not a.traffic_mapping:
+            ap.error("AI traffic results require --traffic-meta and --traffic-mapping")
+        traffic_meta = load_traffic_meta(a.traffic_meta, log_text, a.pattern)
     if window:
         bw = samples * (int(a.burst_len) + 1) * BEAT_BYTES * 8 / window
         window_source = "run"
     else:
         window_source = "monitor"
     accepted_bytes = bw / 8 / nodes if nodes else None
+    active_sources = traffic_meta["active_sources"] if traffic_meta else None
+    offered_mesh_avg = (offered_flits * active_sources / nodes
+                        if active_sources is not None and nodes else None)
+    accepted_injection = (
+        traffic_meta["source_write_bursts"] * (int(a.burst_len) + 2) / window / nodes
+        if traffic_meta and window and nodes else None)
+    delivered_payload = (
+        traffic_meta["destination_deliveries"] * (int(a.burst_len) + 1) *
+        BEAT_BYTES / window if traffic_meta and window else None)
     (max_unique_ids, max_outstanding, dat_num_vc, router_vc_depth, mst_stall_random,
      ni_dat_rx_vc_depth) = parse_config(log_text, a.max_unique_ids, a.max_outstanding)
 
@@ -354,6 +395,8 @@ def main():
         "router_vc_depth": router_vc_depth,
         "ni_dat_rx_vc_depth": ni_dat_rx_vc_depth,
         "pattern": a.pattern,
+        "traffic_mapping": a.traffic_mapping or "",
+        "active_sources": "" if active_sources is None else str(active_sources),
         "injection_mode": a.injection_mode,
         "injection_rate": a.injection_rate,
         "injection_count": a.injection_count,
@@ -368,6 +411,15 @@ def main():
         "mst_stall_random": mst_stall_random,
         "offered_flits_per_node_cycle": str(round(offered_flits, 6)),
         "offered_bytes_per_node_cycle": str(round(offered_bytes, 6)),
+        "offered_load_per_active_source": str(round(offered_flits, 6)),
+        "offered_load_mesh_avg": "" if offered_mesh_avg is None else str(
+            round(offered_mesh_avg, 6)),
+        "accepted_injection_load_mesh_avg": "" if accepted_injection is None else str(
+            round(accepted_injection, 6)),
+        "delivered_payload_bytes_per_cycle": "" if delivered_payload is None else str(
+            round(delivered_payload, 6)),
+        "destination_deliveries": "" if traffic_meta is None else str(
+            traffic_meta["destination_deliveries"]),
         "accepted_bits_per_cycle": f"{bw:.1f}",
         "accepted_bytes_per_node_cycle": "" if accepted_bytes is None else str(
             round(accepted_bytes, 6)),

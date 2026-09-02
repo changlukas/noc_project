@@ -378,6 +378,7 @@ _HOTSPOT_ARGS  := $(if $(filter hotspot,$(PATTERN)),$(if $(HOTSPOT_PERIPHERALS),
 _MCAST_ARGS    := $(if $(filter multicast broadcast,$(PATTERN)),--mcast-shape $(MCAST_SHAPE),)
 _GATHER_ARGS   := $(if $(filter gather,$(PATTERN)),--gather-shape $(GATHER_SHAPE) --root-node $(ROOT_NODE),)
 _AI_ARGS       := $(if $(AI_ROUNDS),--rounds $(AI_ROUNDS))
+_AI_META_ARGS  := $(if $(_AI_WRITE_ONLY),--traffic-meta $(STIM_ROOT)/traffic_meta.json --traffic-mapping $(_PATTERN_TAG))
 
 # Stimulus generation alone: no build, no run.
 .PHONY: gen
@@ -486,7 +487,8 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 	        $(if $(MAX_OUTSTANDING),--max-outstanding $(MAX_OUTSTANDING)) \
 	        $(if $(MAX_TXNS_PER_ID),--max-txns-per-id $(MAX_TXNS_PER_ID)) \
 	        $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)) \
-	        --burst-len $(BURST_LEN) --stim-size $(STIM_SIZE) --space $(SPACE); \
+	        --burst-len $(BURST_LEN) --stim-size $(STIM_SIZE) --space $(SPACE) \
+	        $(_AI_META_ARGS); \
 	    echo "CONTINUOUS PASS: $(SIM_TAG)"; \
 	elif [ "$(INJECTION_MODE)" = "3" ]; then \
 	    if [ $$rc -ne 0 ] || ! grep -qE '^PASS: all [0-9]+ nodes done, non-vacuous$$' output/$(SIM_TAG)/run.log; then \
@@ -513,6 +515,7 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 	            $(if $(MAX_TXNS_PER_ID),--max-txns-per-id $(MAX_TXNS_PER_ID)) \
 	            $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)) \
 	            --burst-len $(BURST_LEN) --stim-size $(STIM_SIZE) --space $(SPACE) \
+	            $(_AI_META_ARGS) \
 	            --require-round-perf || exit 1; \
 	    fi; \
 	    echo "$(if $(_CHECKED),CHECKED,DIRECTED) PASS: $(SIM_TAG) scoreboard clean, non-vacuous"; \
@@ -522,7 +525,9 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 # Injection Sweep  #
 ####################
 
-# The sweep axis is offered load in DAT network flits per node per cycle, the
+# The sweep axis is offered DAT load per active source per cycle. The CSV also
+# records the mesh-average load after scaling by active_sources / NUM_ENDPOINTS.
+# For legacy read/write patterns it remains DAT flits per node per cycle, the
 # unit the report and the analytic ideal are stated in. At AxLEN 32 one AX per
 # channel per cycle offers 2 * 33 + 1 = 67 flits (a write is 34, a read 33), so
 # the Bernoulli rate per channel is offered / 67 and the retired 0.05 to 1.0
@@ -568,7 +573,7 @@ sim-injection-sweep:
 	        $(MAKE) gen CONFIG=$(CONFIG) PATTERN=$$p SEED=$$s INJECTION_MODE=1 \
 	            BURST_LEN=$(BURST_LEN) $(_SWEEP_COUNT) || exit 1; \
 	        for o in $(SWEEP_OFFERED); do \
-	            if [ "$$p" = "many_to_many" ]; then \
+	            if echo " broadcast gather alltoall neighbor_exchange pipeline many_to_many " | grep -q " $$p "; then \
 	                flits_per_event=$$(( $(BURST_LEN) + 2 )); \
 	            else \
 	                flits_per_event=$$(( 2 * ($(BURST_LEN) + 1) + 1 )); \

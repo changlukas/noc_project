@@ -505,7 +505,7 @@ Goal: Run every approved AI communication type under one documented geometry and
 
 Success Criteria: Each row states its participant scale and shape, all patterns use the same 4 KB transfer geometry and per-active-source load points, directed-round completion is separated from continuous-load metrics, and generated output contains only current results plus Markdown reports.
 
-Status: Not Started
+Status: In Progress
 
 ### Task 4: Extend result aggregation and report wording
 
@@ -542,11 +542,11 @@ useful_delivered_bandwidth = destination_deliveries * beats * BEAT_BYTES * usefu
 
 For unicast, `destination_deliveries` equals completed source writes. For Broadcast, the generated member count supplies fanout and the merged B completion proves that all expected replicas completed; never infer fanout from the single source-side monitor sample.
 
-- [ ] **Step 1: Add failing aggregation tests**
+- [x] **Step 1: Add failing aggregation tests**
 
 Test that every AI pattern omits read offered-load terms and that `many_to_many` renders as `Regional Exchange`. Parse `active_sources` only from `[TrafficMeta]`, require it to match `traffic_meta.json`, then test 1/16, 4/16, 15/16, and 16/16 normalization. Reject missing metadata, count mismatches, and Broadcast fanout mismatches. Test that the report rejects comparison rows with different `STIM_SIZE`, `BURST_LEN`, per-active-source load points, or seeds.
 
-- [ ] **Step 2: Run aggregation tests and confirm RED**
+- [x] **Step 2: Run aggregation tests and confirm RED**
 
 ```text
 python -m pytest sim/tools/test_emit_result_csv.py sim/tools/test_perf_report.py -q
@@ -554,7 +554,7 @@ python -m pytest sim/tools/test_emit_result_csv.py sim/tools/test_perf_report.py
 
 Expected: FAIL on the new AI pattern set and label mapping.
 
-- [ ] **Step 3: Centralize the two small policy tables**
+- [x] **Step 3: Centralize the two small policy tables**
 
 ```python
 AI_WRITE_ONLY = frozenset({
@@ -574,7 +574,7 @@ DISPLAY_NAME = {
 
 Do not add a class or registry; these two immutable tables are the complete current policy.
 
-- [ ] **Step 4: Separate the two measurement conditions in the report**
+- [x] **Step 4: Separate the two measurement conditions in the report**
 
 Use these labels:
 
@@ -590,7 +590,7 @@ Synchronized directed round:
 
 State the measurement boundary beside the metric: common issue start through the final expected B response. Do not claim it is a NoC-only time or that it was measured under background load.
 
-- [ ] **Step 5: Run report tests**
+- [x] **Step 5: Run report tests**
 
 ```text
 python -m pytest sim/tools/test_emit_result_csv.py sim/tools/test_perf_report.py -q
@@ -598,7 +598,7 @@ python -m pytest sim/tools/test_emit_result_csv.py sim/tools/test_perf_report.py
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit aggregation and report structure**
+- [x] **Step 6: Commit aggregation and report structure**
 
 ```text
 git add sim/tools/emit_result_csv.py sim/tools/perf_report.py sim/tools/test_emit_result_csv.py sim/tools/test_perf_report.py

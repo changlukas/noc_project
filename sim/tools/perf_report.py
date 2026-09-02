@@ -1,744 +1,372 @@
 #!/usr/bin/env python3
-"""Render the standard performance report from the runs under an output dir.
-
-    perf_report.py [output dir] [-o perf_report.md]
-
-Every `continuous_*/result.csv` under the output dir is one measured point. Points
-are grouped by their parameter tuple and pattern and ordered by offered load, so a
-group with three or more offered points is a latency-vs-load curve and a group with
-fewer is a single operating point.
-
-Method, in one place, because every number below depends on it:
-
-    offered   analytic, from the injection rate and the burst length
-              (emit_result_csv.py), in DAT network flits per node per cycle
-    accepted  measured at the AXI master monitors, bytes per node per cycle,
-              converted to DAT network flits by the same 34 / 33 convention
-    nlat      monitor latency, from the AX handshake
-    plat      nlat plus the open-loop source queue delay, booksim2's packet latency
-    3x rule   saturation is the offered load at which plat reaches three times its
-              value at the lowest offered point, linearly interpolated
-
-Percent of ideal charges the analytic ideal only for the traffic that reaches the
-NoC. A pattern that permits self traffic answers that share in the tile crossbar,
-where no monitor sees it, so the comparison is against `(1 - self_fraction) * ideal`.
-"""
+"""Render an AI-inference NoC performance report from simulation results."""
 
 import argparse
 import csv
+import html
 import json
 import pathlib
-import re
 import sys
 
-import pattern_metrics as pm
 
-try:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-except ImportError:
-    plt = None
+AI_WRITE_ONLY = frozenset({
+    "broadcast", "gather", "alltoall", "neighbor_exchange", "pipeline",
+    "many_to_many",
+})
 
-# AXI data bus width in bytes (specgen DATA_WIDTH 512 b), what the monitor
-# charges per beat. emit_result_csv.py charges the same on the offered side.
-BEAT_BYTES = 64
+DISPLAY_NAME = {
+    "broadcast": "Broadcast / Multicast",
+    "gather": "Gather",
+    "alltoall": "AlltoAll",
+    "neighbor_exchange": "Neighbor Exchange",
+    "pipeline": "Pipeline P2P",
+    "many_to_many": "Regional Exchange",
+}
 
-_PARAM_COLS = ("topology", "vc", "router_depth", "ni_rx_depth", "outstanding",
-               "txns_per_id", "ids/init", "burst_len", "txns/node", "mst_stall")
+MAPPING_SUFFIX = {
+    "broadcast_row": "Row",
+    "broadcast_col": "Column",
+    "broadcast_submesh": "Local 2x2",
+    "broadcast_global": "Global",
+    "gather_global_root0": "Global, root 0",
+    "gather_submesh": "Local 2x2",
+}
 
-_NI_PARAMS_H = (pathlib.Path(__file__).resolve().parents[2] /
-                "specgen/generated/cpp/ni_params.h")
+EXPECTED_MAPPINGS = (
+    "broadcast_row", "broadcast_col", "broadcast_submesh",
+    "broadcast_global", "gather_global_root0", "gather_submesh",
+    "alltoall", "neighbor_exchange", "pipeline", "many_to_many",
+)
 
-
-def ni_params():
-    """{name: value} from the specgen NI parameter header, so the report never
-    carries a second copy of a generated constant."""
-    if not _NI_PARAMS_H.exists():
-        return {}
-    return dict(re.findall(r"constexpr int (\w+)\s*=\s*(\d+);", _NI_PARAMS_H.read_text()))
-
-
-_P = ni_params()
-# Only the three the report calls out as a sensitivity axis need a default; a
-# group differing in any of them gets its own appendix row.
-_DEFAULTS = {"vc": _P.get("NOC_DAT_NUM_VC", "2"),
-             "router_depth": _P.get("NOC_ROUTER_VC_DEPTH", "8"),
-             "ni_rx_depth": _P.get("NOC_NI_DAT_RX_VC_DEPTH", "8")}
+USEFUL_RATIO = {pattern: 1.0 for pattern in AI_WRITE_ONLY}
+USEFUL_RATIO["broadcast"] = 0.5
 
 
-def accepted_flits(bytes_per_node_cycle, burst_len):
-    """Accepted bytes per node per cycle as DAT network flits per node per cycle.
-
-    One AXI transaction of `beats` beats is `1 + beats` DAT flits when it is a
-    write (AW header plus its W beats) and `beats` when it is a read (R beats,
-    AR rides REQ). Read and write are offered in equal measure, and the monitor
-    charges `beats` full beats either way, so bytes convert at
-    (2 * beats + 1) / (2 * beats): 67 / 66 at AxLEN 32."""
-    beats = int(burst_len) + 1
-    return bytes_per_node_cycle / BEAT_BYTES * (2 * beats + 1) / (2 * beats)
+def mapping_label(mapping):
+    pattern = mapping if mapping in DISPLAY_NAME else mapping.split("_", 1)[0]
+    base = DISPLAY_NAME.get(pattern)
+    if base is None:
+        raise ValueError(f"unknown AI traffic mapping: {mapping}")
+    suffix = MAPPING_SUFFIX.get(mapping)
+    return f"{base} — {suffix}" if suffix else base
 
 
-def dat_link_util(perf_path):
-    """(mean, max, min) DAT inter-router link utilization from a run's perf.json:
-    flit_count / window cycles per link, 1 flit per cycle being the link's
-    capacity. None when the run carries no perf.json."""
-    if not perf_path.exists():
-        return None
-    perf = json.loads(perf_path.read_text())
-    cyc = perf["window"]["end_cyc"] - perf["window"]["start_cyc"]
-    if cyc <= 0:
-        return None
-    utils = [l["flit_count"] / cyc for l in perf["noc"]["links"]
-             if l["name"].startswith("dat_")]
-    return (sum(utils) / len(utils), max(utils), min(utils)) if utils else None
+def _one_csv(path):
+    with path.open(newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    if len(rows) != 1:
+        sys.exit(f"perf_report: expected one result row in {path}")
+    return rows[0]
 
 
-def collect(out_root, stale=None):
-    """{param_tuple: {pattern: [point]}}, param_tuple ordered as _PARAM_COLS.
-
-    A continuous run without a result.csv aborted before its monitors reported
-    and carries no measurement, so it is skipped rather than shown as a hole.
-    So is a row written before `offered_flits_per_node_cycle` and
-    `mean_latency_open` existed: it has neither an offered load nor a packet
-    latency, so it is not a point on any curve. Those run directories are named
-    in `stale` and the report says how many it left out."""
-    groups = {}
-    for run_dir in sorted(p for p in out_root.iterdir() if p.is_dir()):
-        csv_path = run_dir / "result.csv"
-        if not run_dir.name.startswith("continuous_") or not csv_path.exists():
-            continue
-        row = next(csv.DictReader(csv_path.open()))
-        if "offered_flits_per_node_cycle" not in row or "mean_latency_open" not in row:
-            if stale is not None:
-                stale.append(run_dir.name)
-            continue
-        accepted = row.get("accepted_bytes_per_node_cycle") or ""
-        # Per channel latency, empty on a row written before the columns existed
-        # and on a channel that retired nothing. `-` in the table, never a zero.
-        chan = lambda col: float(row[col]) if row.get(col) else None
-        key = (row["topology"], row["vc"], row.get("router_vc_depth") or "?",
-               row.get("ni_dat_rx_vc_depth") or "?", row["max_outstanding"],
-               row.get("max_txns_per_id", "32"), row.get("ids_per_initiator", "1"),
-               row.get("burst_len", "0"), row["injection_count"],
-               row.get("mst_stall_random") or "-")
-        groups.setdefault(key, {}).setdefault(row["pattern"], []).append({
-            "seed": row["seed"],
-            "offered": float(row["offered_flits_per_node_cycle"]),
-            "offered_bytes": float(row["offered_bytes_per_node_cycle"]),
-            "accepted_bytes": float(accepted) if accepted else None,
-            "nlat": float(row["mean_latency_network"]),
-            "plat": float(row["mean_latency_open"]),
-            "nlat_read": chan("mean_latency_network_read"),
-            "nlat_write": chan("mean_latency_network_write"),
-            "plat_read": chan("mean_latency_open_read"),
-            "plat_write": chan("mean_latency_open_write"),
-            "dat_util": dat_link_util(run_dir / "perf.json"),
-        })
-    return groups
-
-
-_PROBE_MON = re.compile(r"\[Monitor node0\.master\]\[(Read|Write)\]\s+Latency:\s*([\d.]+)")
-_PROBE_SRCQ = re.compile(r"\[SrcQueue node0\]\[(Read|Write)\]\s+mean:\s*([\d.]+)")
-
-
-def zero_load_probes(out_root):
-    """The narrow and data zero-load probe runs, read straight out of run.log.
-
-    node0 is the only loaded node of these runs, so its monitor means are the
-    unloaded latency of one traffic class. The class is the tag suffix, which is
-    how the recipe in docs/backlog.md names them. A probe from before the open
-    loop tb has no [SrcQueue node0] line, and its `plat` is then unknown rather
-    than equal to `nlat`."""
-    probes = []
-    for run_dir in sorted(p for p in out_root.iterdir() if p.is_dir()):
-        log = run_dir / "run.log"
-        if not run_dir.name.startswith("s2zl") or not log.exists():
-            continue
-        text = log.read_text(errors="ignore")
-        nlat = {ch: float(v) for ch, v in _PROBE_MON.findall(text)}
-        if not nlat:
-            continue
-        probes.append({
-            "tag": run_dir.name,
-            "space": "narrow" if run_dir.name.endswith("_narrow") else "data",
-            "nlat": nlat,
-            "srcq": {ch: float(v) for ch, v in _PROBE_SRCQ.findall(text)},
-        })
-    return probes
-
-
-def _mean(values):
-    values = [v for v in values if v is not None]
-    return sum(values) / len(values) if values else None
-
-
-def curve(points):
-    """One row per offered load, seeds folded into a mean and a spread."""
-    by_offered = {}
-    for p in points:
-        by_offered.setdefault(round(p["offered"], 6), []).append(p)
-    rows = []
-    for offered in sorted(by_offered):
-        seeds = by_offered[offered]
-        plats = [p["plat"] for p in seeds]
-        rows.append({
-            "offered": offered,
-            "offered_bytes": seeds[0]["offered_bytes"],
-            "accepted_bytes": _mean(p["accepted_bytes"] for p in seeds),
-            "nlat": _mean(p["nlat"] for p in seeds),
-            "plat": sum(plats) / len(plats),
-            "nlat_read": _mean(p["nlat_read"] for p in seeds),
-            "nlat_write": _mean(p["nlat_write"] for p in seeds),
-            "plat_read": _mean(p["plat_read"] for p in seeds),
-            "plat_write": _mean(p["plat_write"] for p in seeds),
-            # One seed is one sample, and a spread of zero would read as three
-            # seeds that happened to agree.
-            "spread": None if len(plats) == 1 else max(plats) - min(plats),
-            "seeds": len(seeds),
-            "dat_util": _mean(p["dat_util"][0] for p in seeds if p["dat_util"]),
-            "dat_util_max": max((p["dat_util"][1] for p in seeds if p["dat_util"]),
-                                default=None),
-            "dat_util_min": min((p["dat_util"][2] for p in seeds if p["dat_util"]),
-                                default=None),
-        })
-    return rows
-
-
-def saturation(points):
-    """The 3x rule: the offered load at which plat reaches three times its value
-    at the lowest offered point, linearly interpolated between the two points
-    that bracket the crossing. None when the curve never reaches 3x.
-
-    Accepted is interpolated on the same fraction, which is the throughput the
-    network was carrying when latency ran away."""
-    rows = curve(points)
-    if len(rows) < 2:
-        return None
-    threshold = 3 * rows[0]["plat"]
-    for a, b in zip(rows, rows[1:]):
-        if a["plat"] < threshold <= b["plat"]:
-            f = (threshold - a["plat"]) / (b["plat"] - a["plat"])
-            lerp = lambda k: (None if a[k] is None or b[k] is None
-                              else a[k] + f * (b[k] - a[k]))
-            return {"offered": a["offered"] + f * (b["offered"] - a["offered"]),
-                    "accepted_bytes": lerp("accepted_bytes"),
-                    "threshold": threshold}
-    return None
-
-
-def analytic(pattern, topology):
-    """pattern_metrics for a mesh_<x>x<y> topology. None when the topology is
-    not a mesh or the pattern has no definition on those dimensions (the bit
-    permutations need a power-of-two node count).
-
-    SystemExit is caught because the shape guards it borrows from
-    gen_test_patterns.py end the process, which is the right contract for a
-    stimulus generator asked for one pattern and the wrong one for a report
-    surveying ten."""
-    m = re.match(r"mesh_(\d+)x(\d+)$", topology)
-    if not m:
-        return None
+def _integer(row, field, path):
     try:
-        return pm.metrics(pattern, int(m.group(1)), int(m.group(2)))
-    except (ValueError, SystemExit):
-        return None
+        value = int(row[field])
+    except (KeyError, ValueError):
+        sys.exit(f"perf_report: invalid {field} in {path}")
+    if value <= 0:
+        sys.exit(f"perf_report: {field} must be positive in {path}")
+    return value
 
 
-##########
-# Layout #
-##########
+def _number(row, field, path):
+    try:
+        return float(row[field])
+    except (KeyError, ValueError):
+        sys.exit(f"perf_report: invalid {field} in {path}")
 
 
-def table(header, rows):
-    rows = [[str(c) for c in r] for r in rows]
-    widths = [max([len(h)] + [len(r[i]) for r in rows]) for i, h in enumerate(header)]
-    line = lambda cells: "| " + " | ".join(c.ljust(w) for c, w in zip(cells, widths)) + " |"
-    out = [line(header), "|" + "|".join("-" * (w + 2) for w in widths) + "|"]
-    return "\n".join(out + [line(r) for r in rows]) + "\n"
+def _dat_link_utils(path):
+    if not path.exists():
+        sys.exit(f"perf_report: missing {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    cycles = payload["window"]["end_cyc"] - payload["window"]["start_cyc"]
+    if cycles <= 0:
+        sys.exit(f"perf_report: invalid measurement window in {path}")
+    return [link["flit_count"] / cycles for link in payload["noc"]["links"]
+            if link["name"].startswith("dat_")]
 
 
-def fmt(value, digits=1):
-    return "-" if value is None else f"{value:.{digits}f}"
+def collect(out_root):
+    out_root = pathlib.Path(out_root)
+    continuous = []
+    rounds = []
+    settings = set()
+    offered_by_mapping = {}
 
-
-def group_label(key):
-    """Name a group by how it differs from the shipped specgen defaults."""
-    diffs = [f"{col}={val}" for col, val in zip(_PARAM_COLS, key)
-             if col in _DEFAULTS and val not in ("?", "-") and val != _DEFAULTS[col]]
-    return ", ".join(diffs) if diffs else "default"
-
-
-def _seeds_rule(patterns):
-    """Which offered points carry more than one seed, read off the runs."""
-    repeated = {}
-    for pattern in sorted(patterns):
-        for r in curve(patterns[pattern]):
-            if r["seeds"] > 1:
-                repeated.setdefault((round(r["offered"], 3), r["seeds"]), []).append(pattern)
-    extra = [f"{', '.join(pats)} carry {n} seeds at offered {offered:.3f}"
-             for (offered, n), pats in sorted(repeated.items())]
-    return "seed 1 on every point. " + (". ".join(extra) if extra
-                                        else "No point carries a second seed")
-
-
-def _batch_note(patterns):
-    """The accepted against offered shortfall at the two lowest offered points of
-    a curve, so the accepted row states the batch overhang from the runs."""
-    for pattern in ["bit_complement"] + sorted(patterns):
-        rows = curve(patterns.get(pattern, []))
-        if len(rows) >= 3 and all(r["accepted_bytes"] for r in rows[:2]):
-            return pattern + " accepts " + " and ".join(
-                f"{100 * r['accepted_bytes'] / r['offered_bytes']:.0f} percent of "
-                f"offered at {r['offered']:.3f}" for r in rows[:2])
-    return "no curve here carries an accepted column"
-
-
-def section_method(key, patterns):
-    topology, vc, router_depth, ni_rx_depth, outstanding, txns_per_id, ids, burst, \
-        count, mst_stall = key
-    beats = int(burst) + 1 if burst.isdigit() else "?"
-    # The shortest offered window of the whole report: the highest offered point
-    # is the highest Bernoulli rate, so it is the first to run out of work.
-    top = max(p["offered"] for points in patterns.values() for p in points)
-    rate = top / (2 * beats + 1)
-    window = f"`p` = {rate:.4f} per channel at the highest offered point " \
-             f"({top:.3f} flits per node per cycle), so the offered window is at " \
-             f"least {int(count) / rate:.0f} cycles"
-    out = ["## 1 Method\n",
-           "The machine under measurement and the definitions every later number "
-           "depends on.\n\n"]
-    out.append(table(["item", "value"], [
-        ["topology", f"{topology}, XY routing, wormhole"],
-        ["networks", "REQ and RSP narrow, DAT wide"],
-        ["router pipeline", "REQ and RSP 2 cycles per router, DAT head 4 cycles "
-                            "then one flit per cycle (docs/router-spec.md 2.4)"],
-        ["flow control", "credit per (output, VC) on DAT, ready/valid on REQ and RSP"],
-        ["DAT VCs", f"`NOC_DAT_NUM_VC` = {vc}"],
-        ["router input VC FIFO", f"`NOC_ROUTER_VC_DEPTH` = {router_depth}"],
-        ["NI DAT receive FIFO", f"`NOC_NI_DAT_RX_VC_DEPTH` = {ni_rx_depth}"],
-        ["NMU per ID depth", f"`NMU_MAX_TXNS_PER_ID` = {txns_per_id}"],
-        ["NSU outstanding", f"`NSU_META_BUFFER_MAX_OUTSTANDING` = {outstanding}"],
-        ["AXI IDs per initiator", ids],
-        ["burst", f"AxLEN {burst} ({beats} beats) of {BEAT_BYTES} B"],
-        ["patterns", ", ".join(sorted(patterns))],
-    ]))
-    out.append("\n### Injection\n")
-    out.append(table(["point", "rule"], [
-        ["model", "open loop, Bernoulli per node per channel (AW, AR) per cycle"],
-        ["`qtime`", "advanced every cycle by the trial, never blocked by "
-                    "`awready` or `arready`"],
-        ["source queue delay", "AX handshake cycle minus the slot's `qtime`"],
-        ["run length", f"{count} transactions per node, fixed. {window}"],
-        ["seeds", _seeds_rule(patterns)],
-        ["backpressure", "ideal master face, ideal memory: the curve measures "
-                         "the fabric, not a consumer that stalls first"],
-    ]))
-    out.append("\n### Latency and flits\n")
-    out.append(table(["term", "definition"], [
-        ["`nlat`", "the monitor value, from the AX handshake at the master. A "
-                   "read ends at its first R beat, a write at B, so the two are "
-                   "different measurements and section 2 keeps them apart"],
-        ["`plat`", "`nlat` plus the source queue delay, booksim2's packet latency"],
-        ["zero load", "`plat` at the lowest offered point"],
-        ["saturation", "offered load where `plat` reaches 3x zero load, linearly "
-                       "interpolated"],
-        ["network flits", f"every DAT flit: a write is {beats + 1} flits (AW header "
-                          f"plus its W beats), a read {beats}"],
-        ["offered", "analytic, `rate * (1 + beats) + rate * beats` flits per node "
-                    "per cycle"],
-        ["accepted", f"measured bytes per node per cycle / {BEAT_BYTES} * "
-                     f"(2 * {beats} + 1) / (2 * {beats}) flits, the same convention"],
-        ["accepted window", f"one whole run batch throughput, total delivered over "
-                            f"the `perf.json` window. Below saturation that window "
-                            f"outlives the offered traffic by the overhang of the "
-                            f"slowest node finishing its fixed {count} transaction "
-                            f"batch, so accepted sits under offered: "
-                            f"{_batch_note(patterns)}. Only once congestion sets "
-                            f"the run length do the two meet"],
-        ["percent of ideal", "accepted flits / ((1 - self fraction) * ideal). Self "
-                             "addressed traffic is answered by the tile crossbar "
-                             "and reaches no monitor"],
-    ]))
-    return "".join(out)
-
-
-# docs/router-spec.md 2.4 and the retired Scenario 2 probe: one node, single beat
-# AxSIZE 3, node0 to node3, three hops east, four routers, no competing traffic.
-_STAGES = [
-    ["master AR handshake to NI egress flit", 3, 3],
-    ["4 request routers on REQ, 2 cycles each", 8, 8],
-    ["NSU ingress to slave arvalid", 2, 2],
-    ["slave arvalid to rlast", 3, 3],
-    ["slave R to NSU egress flit", 4, 4],
-    ["DAT merge, NSU pins to router LOCAL", 0, 1],
-    ["4 response routers, RSP 2 cycles each, DAT 4 cycles each", 8, 16],
-    ["DAT merge, router LOCAL to NMU pins", 0, 1],
-    ["NMU ingress to master rvalid", 3, 3],
-]
-# Everything in the static decomposition that is neither a response router nor a
-# payload beat: the fixed NI, slave and merge cost of a data read.
-_DATA_READ_FIXED = sum(r[2] for r in _STAGES) - 16
-
-
-def _probe_block(probes):
-    """The measured narrow against data probe rows, the thing the static per
-    stage table below them is an account of."""
-    if not probes:
-        return ("\nNo `s2zl*` zero-load probe run sits under this output dir, so "
-                "the per stage table below has no measured column beside it.\n")
-    rows = []
-    for p in sorted(probes, key=lambda p: (p["space"], p["tag"])):
-        cells = [p["tag"], p["space"]]
-        for channel in ("Read", "Write"):
-            nlat, srcq = p["nlat"].get(channel), p["srcq"].get(channel)
-            cells += [fmt(nlat), "-" if nlat is None or srcq is None else fmt(nlat + srcq)]
-        rows.append(cells)
-    out = ["\nMeasured on the single node zero-load probe: node0 issues single "
-           "beat reads and writes on one AXI ID over three hops with the mesh "
-           "otherwise idle, and the target address space selects the class. This "
-           "is the measurement the per stage table below accounts for.\n\n",
-           table(["probe", "class", "read nlat", "read plat", "write nlat",
-                  "write plat"], rows)]
-    if any(c == "-" for r in rows for c in r):
-        out.append("\nA `-` under `plat` is a probe run before the open loop tb, "
-                   "whose log carries no `[SrcQueue node0]` line. Its source queue "
-                   "delay is unknown, not zero.\n")
-    return "".join(out)
-
-
-def section_zero_load(key, patterns, probes=()):
-    out = ["## 2 Zero-load latency\n",
-           "Measured at the lowest offered point of each curve, where the source "
-           "queue is empty and `plat` equals `nlat`. A pattern measured at a "
-           "single operating point is not listed: its one point is saturated, "
-           "not unloaded.\n\n"]
-    rows = []
-    for pattern in sorted(patterns):
-        rows_c = curve(patterns[pattern])
-        if len(rows_c) < 3:
+    for run_dir in sorted(path for path in out_root.iterdir() if path.is_dir()):
+        csv_path = run_dir / "result.csv"
+        if not csv_path.exists():
             continue
-        m = analytic(pattern, key[0])
-        hops = m["avg_hops"] if m else None
-        ideal = None if hops is None else _DATA_READ_FIXED + 4 * (hops + 1)
-        first = rows_c[0]
-        gap = (None if ideal is None or first["plat_read"] is None
-               else first["plat_read"] - ideal)
-        rows.append([pattern, fmt(first["offered"], 3), fmt(hops, 2),
-                     fmt(first["nlat_read"]), fmt(first["plat_read"]),
-                     fmt(ideal, 0), fmt(gap),
-                     fmt(first["nlat_write"]), fmt(first["plat_write"])])
-    out.append(table(["pattern", "offered", "avg hops", "read nlat", "read plat",
-                      "read ideal", "read gap", "write nlat", "write plat"], rows))
-    out.append(
-        "\n`read ideal` is the static decomposition below generalized to the "
-        "measured hop count: the fixed NI, slave and merge cost of a data read "
-        f"({_DATA_READ_FIXED} cycles), plus 4 cycles in each of the `avg hops` + 1 "
-        "response routers a DAT head passes. It carries no burst term because "
-        "`axi_bw_monitor.sv` timestamps a read at its first R beat rather than at "
-        "`rlast`, so the rest of the worm falls outside the measurement. "
-        "`read gap` is `read plat` minus `read ideal`, which is queueing plus the "
-        "cost of a mean over a hop distribution.\n"
-        "\nThe write columns carry no analytic. A write is timestamped at B, "
-        "after every W beat has landed, and its response returns on RSP rather "
-        "than DAT, so the read decomposition is not an account of it.\n")
-    out.append(_probe_block(probes))
-    out.append(
-        "\nPer stage, single beat, three hops, from `docs/router-spec.md` 2.4 and "
-        "`docs/nmu-spec.md` / `docs/nsu-spec.md` rule 8. The narrow column is a "
-        "request on REQ answered on RSP, the data column a request on REQ answered "
-        "on DAT.\n\n")
-    out.append(table(["stage", "narrow read", "data read"],
-                     [[s, str(n), str(d)] for s, n, d in _STAGES] +
-                     [["total", str(sum(r[1] for r in _STAGES)),
-                       str(sum(r[2] for r in _STAGES))]]))
-    out.append(
-        "\nThe 10 cycle gap is the DAT return path: 2 cycles more per router over "
-        "4 routers, plus 1 cycle at each end for the DAT merge. A write follows "
-        "the same shape with AW and W on DAT and B on RSP, 32 and 42.\n")
-    return "".join(out)
-
-
-def _curve_rows(rows, sat, burst):
-    marked = False
-    out = []
-    for r in rows:
-        mark = ""
-        if sat and not marked and r["offered"] >= sat["offered"]:
-            mark, marked = "*", True
-        acc_flits = (None if r["accepted_bytes"] is None
-                     else accepted_flits(r["accepted_bytes"], burst))
-        out.append([fmt(r["offered"], 3) + mark, fmt(r["offered_bytes"], 1),
-                    fmt(acc_flits, 3), fmt(r["accepted_bytes"], 1),
-                    fmt(r["nlat"]), fmt(r["plat"]), fmt(r["spread"]),
-                    str(r["seeds"])])
-    return out
-
-
-def _throughput_note(rows, sat, burst):
-    """Where throughput stops climbing, against where latency runs away.
-
-    The 3x rule reads latency alone, so it can fire while the network is still
-    taking more work. The knee stated here is the first offered load whose
-    accepted throughput is within 5 percent of the curve's maximum, which is
-    what the throughput side of the same curve calls saturated."""
-    acc = [(r["offered"], accepted_flits(r["accepted_bytes"], burst))
-           for r in rows if r["accepted_bytes"] is not None]
-    if not acc:
-        return ""
-    peak = max(a for _offered, a in acc)
-    knee = next(offered for offered, a in acc if a >= 0.95 * peak)
-    head = (f"Accepted peaks at {peak:.3f} flits per node per cycle and first "
-            f"reaches 95 percent of that ({0.95 * peak:.3f}) at offered {knee:.3f}")
-    if sat is None:
-        return head + ". The curve never reaches 3x zero load, so it carries no " \
-                      "latency saturation point.\n"
-    rel, tail = (
-        ("above", "so latency runs away while throughput is still climbing")
-        if knee > sat["offered"] else
-        ("below", "so throughput flattens before latency runs away")
-        if knee < sat["offered"] else ("at", "so the two sides of the curve agree"))
-    return f"{head}, {rel} the 3x point at offered {sat['offered']:.3f}, {tail}.\n"
-
-
-def section_curves(key, patterns, out_root):
-    out = ["## 3 Latency vs offered load\n",
-           "One table per pattern with a full curve. `*` marks the first point at "
-           "or above the 3x crossing. Offered and accepted are per node per cycle, "
-           "flits on the DAT plane and bytes at the AXI master. `spread` is max "
-           "minus min of `plat` across the seeds of that point, `-` at a point "
-           "with one seed.\n"
-           "\n`offered` is per node and counts the traffic a node addresses to "
-           "itself. `accepted` averages over all nodes and excludes that traffic, "
-           "which the tile crossbar answers where no monitor sees it. The `served` "
-           "factor in section 4 reconciles the two.\n"]
-    curves = [p for p in sorted(patterns) if len(curve(patterns[p])) >= 3]
-    if not curves:
-        return "".join(out) + ("\nNo pattern under this output dir carries three or "
-                               "more offered points, so there is no curve to draw.\n")
-    for pattern in curves:
-        rows = curve(patterns[pattern])
-        sat = saturation(patterns[pattern])
-        out.append(f"\n### {pattern}\n\n")
-        out.append(table(["offered", "offered B", "accepted", "accepted B",
-                          "nlat", "plat", "spread", "seeds"],
-                         _curve_rows(rows, sat, key[7])))
-        last = rows[-1]
-        if sat:
-            acc = ("not recorded" if sat["accepted_bytes"] is None else
-                   f"{accepted_flits(sat['accepted_bytes'], key[7]):.3f} flits "
-                   f"({sat['accepted_bytes']:.1f} B)")
-            out.append(
-                f"\nSaturation (3x of {rows[0]['plat']:.1f} = "
-                f"{sat['threshold']:.1f} cycles): offered {sat['offered']:.3f} "
-                f"flits per node per cycle, accepted {acc}.\n")
-        else:
-            out.append(f"\nSaturation (3x rule): > {rows[-1]['offered']:.3f} flits "
-                       f"per node per cycle, the curve never reaches 3x zero load.\n")
-        out.append(
-            f"Accepted at the highest offered load ({last['offered']:.3f}): "
-            f"{accepted_flits(last['accepted_bytes'], key[7]):.3f} flits "
-            f"({last['accepted_bytes']:.1f} B) per node per cycle.\n"
-            if last["accepted_bytes"] is not None else "")
-        out.append(_throughput_note(rows, sat, key[7]))
-        png = plot(pattern, rows, out_root, sat, key[7])
-        if png:
-            out.append(f"\n![{pattern} latency vs offered load]({png})\n")
-    return "".join(out)
-
-
-def plot(pattern, rows, out_root, sat, burst_len):
-    """One PNG per curve pattern beside the report, two panels: latency
-    against offered load on a log axis with the 3x rule drawn in, and accepted
-    against offered throughput with the accepted equals offered reference.
-    Skipped without matplotlib."""
-    if plt is None:
-        return None
-    offered = [r["offered"] for r in rows]
-    plat = [r["plat"] for r in rows]
-    nlat = [r["nlat"] for r in rows]
-    acc = [None if r["accepted_bytes"] is None else accepted_flits(r["accepted_bytes"], burst_len)
-           for r in rows]
-    multi = [r["seeds"] > 1 for r in rows]
-    fig, (ax, bx) = plt.subplots(1, 2, figsize=(9, 3.4))
-
-    ax.plot(offered, plat, "o-", color="tab:blue", label="plat (with source queue)")
-    ax.plot(offered, nlat, "s--", color="tab:orange", label="nlat (network only)")
-    for x, y, m in zip(offered, plat, multi):
-        if m:
-            ax.plot([x], [y], "o", markerfacecolor="white", color="tab:blue", markersize=9)
-    ax.set_yscale("log")
-    if sat is not None:
-        ax.axhline(sat["threshold"], color="grey", linewidth=0.8, linestyle=":")
-        ax.axvline(sat["offered"], color="grey", linewidth=0.8, linestyle=":")
-        ax.annotate(f"3x zero load at {sat['offered']:.2f}",
-                    (sat["offered"], sat["threshold"]), xytext=(4, 4),
-                    textcoords="offset points", fontsize=8, color="grey")
-    ax.set_xlabel("offered load (DAT flits per node per cycle)")
-    ax.set_ylabel("latency (cycles, log)")
-    ax.set_title(f"{pattern}: latency")
-    ax.legend(fontsize=8)
-
-    xs = [x for x, y in zip(offered, acc) if y is not None]
-    ys = [y for y in acc if y is not None]
-    bx.plot(xs, ys, "o-", color="tab:green", label="accepted")
-    lim = max(xs + ys) if xs else 1.0
-    bx.plot([0, lim], [0, lim], color="grey", linewidth=0.8, linestyle=":", label="accepted = offered")
-    if sat is not None and sat["accepted_bytes"] is not None:
-        bx.axvline(sat["offered"], color="grey", linewidth=0.8, linestyle=":")
-    bx.set_xlabel("offered load (DAT flits per node per cycle)")
-    bx.set_ylabel("accepted (DAT flits per node per cycle)")
-    bx.set_title(f"{pattern}: throughput")
-    bx.legend(fontsize=8)
-
-    fig.tight_layout()
-    name = f"perf_{pattern}.png"
-    fig.savefig(out_root / name, dpi=130)
-    plt.close(fig)
-    return name
-
-
-def section_summary(key, patterns):
-    out = ["## 4 Pattern summary\n",
-           "`ideal` is the analytic channel load bound (`pattern_metrics.py`). It "
-           "counts both directions, the write worm on the request path and the "
-           "read reply on the reverse path, because `accepted at max` counts both "
-           "too. "
-           "`served` is `1 - self fraction`, the share of the offered traffic that "
-           "reaches the NoC at all. `% ideal` charges the accepted flits at the "
-           "highest offered load against `served * ideal`. A pattern with fewer "
-           "than three offered points contributes its single operating point and "
-           "no saturation or zero-load figure.\n"
-           "\n`pattern_metrics` counts inter router links only, never the LOCAL "
-           "injection and ejection ports. For hotspot and neighbor the real "
-           "limiter is the terminal ejection port of the node every flow lands "
-           "on, so `% ideal` understates what the fabric delivered.\n\n"]
-    rows = []
-    notes = {}
-    for pattern in sorted(patterns):
-        rows_c = curve(patterns[pattern])
-        is_curve = len(rows_c) >= 3
-        sat = saturation(patterns[pattern]) if is_curve else None
-        m = analytic(pattern, key[0])
-        last = rows_c[-1]
-        acc = (None if last["accepted_bytes"] is None
-               else accepted_flits(last["accepted_bytes"], key[7]))
-        served = None if m is None else (1 - m["self_fraction"]) * m["ideal_flits_per_node_cycle"]
-        pct = None if acc is None or not served else 100 * acc / served
-        rows.append([
-            pattern,
-            fmt(None if m is None else m["avg_hops"], 2),
-            fmt(None if m is None else m["ideal_flits_per_node_cycle"], 3),
-            fmt(None if m is None else 1 - m["self_fraction"], 3),
-            fmt(sat["offered"], 3) if sat else
-            (f"> {last['offered']:.3f}" if is_curve else "-"),
-            fmt(acc, 3),
-            # One decimal: the two patterns that saturate their bottleneck link
-            # land at 99.6, and a whole number column would print that as 100
-            # and lose the one digit that says the bound holds.
-            fmt(pct, 1),
-            fmt(rows_c[0]["plat"]) if is_curve else "-",
-        ])
-        notes[pattern] = (pct, last["dat_util_max"])
-    out.append(table(["pattern", "avg hops", "ideal", "served", "saturation (3x)",
-                      "accepted at max", "% ideal", "zero-load plat"], rows))
-    pct, busiest = notes.get("uniform_random", (None, None))
-    if pct is not None and busiest is not None:
-        out.append(
-            f"\nEvery row but one reads `% ideal` within a decimal of its busiest "
-            f"measured DAT link in Appendix A, because model and measurement are "
-            f"then the same link. uniform_random is the exception, {pct:.1f} "
-            f"against {100 * busiest:.1f}: its bound comes from the bisection, "
-            f"while the busiest link the run actually loaded sits elsewhere.\n")
-    return "".join(out)
-
-
-def section_links(key, patterns):
-    out = ["## Appendix A: DAT link utilization\n",
-           "Inter-router DAT links at the highest offered load of each pattern, "
-           "`flit_count` over the perf.json window against the link's 1 flit per "
-           "cycle capacity.\n\n"]
-    rows = []
-    for pattern in sorted(patterns):
-        last = curve(patterns[pattern])[-1]
-        if last["dat_util"] is None:
+        row = _one_csv(csv_path)
+        pattern = row.get("pattern")
+        mapping = row.get("traffic_mapping")
+        if pattern not in AI_WRITE_ONLY or mapping not in EXPECTED_MAPPINGS:
             continue
-        rows.append([pattern, fmt(last["offered"], 3),
-                     fmt(100 * last["dat_util"]), fmt(100 * last["dat_util_min"]),
-                     fmt(100 * last["dat_util_max"])])
-    if not rows:
-        return "".join(out) + "No run under this output dir carries a perf.json.\n"
-    return "".join(out) + table(
-        ["pattern", "offered", "avg %", "min %", "max %"], rows)
-
-
-def section_sensitivity(groups, main_key):
-    out = ["## Appendix B: parameter sensitivity\n",
-           "Groups whose parameter tuple differs from the shipped specgen "
-           "defaults, at their highest offered load.\n\n"]
-    rows = []
-    for key in sorted(groups, key=group_label):
-        label = group_label(key)
-        if key == main_key or label == "default":
+        settings.add((row.get("topology"), row.get("stim_size"),
+                      row.get("burst_len"), row.get("seed")))
+        active = _integer(row, "active_sources", csv_path)
+        base = {"pattern": pattern, "mapping": mapping,
+                "active_sources": active}
+        if row.get("round_completion_cycles"):
+            source_writes = _integer(row, "round_write_bursts", csv_path)
+            if _integer(row, "round_active_sources", csv_path) != active:
+                sys.exit(f"perf_report: round active-source mismatch in {csv_path}")
+            rounds.append({
+                **base,
+                "source_writes": source_writes,
+                "destination_deliveries": _integer(
+                    row, "destination_deliveries", csv_path),
+                "completion_cycles": _integer(
+                    row, "round_completion_cycles", csv_path),
+            })
             continue
-        for pattern in sorted(groups[key]):
-            last = curve(groups[key][pattern])[-1]
-            acc = (None if last["accepted_bytes"] is None
-                   else accepted_flits(last["accepted_bytes"], key[7]))
-            rows.append([label, pattern, fmt(last["offered"], 3), fmt(acc, 3),
-                         fmt(last["nlat"]), fmt(last["plat"])])
-    if not rows:
-        return "".join(out) + "No run under this output dir departs from the defaults.\n"
-    return "".join(out) + table(
-        ["group", "pattern", "offered", "accepted", "nlat", "plat"], rows)
+        offered = _number(row, "offered_load_per_active_source", csv_path)
+        delivered = _number(row, "delivered_payload_bytes_per_cycle", csv_path)
+        link_utils = _dat_link_utils(run_dir / "perf.json")
+        if not link_utils:
+            sys.exit(f"perf_report: no DAT links in {run_dir / 'perf.json'}")
+        continuous.append({
+            **base,
+            "offered": offered,
+            "offered_mesh_avg": _number(row, "offered_load_mesh_avg", csv_path),
+            "accepted_injection": _number(
+                row, "accepted_injection_load_mesh_avg", csv_path),
+            "completion_latency": _number(
+                row, "mean_latency_open_write", csv_path),
+            "delivered_bandwidth": delivered,
+            "useful_bandwidth": delivered * USEFUL_RATIO[pattern],
+            "dat_link_utils": link_utils,
+            "dat_link_utilization": max(link_utils) * 100,
+        })
+        offered_by_mapping.setdefault(mapping, set()).add(round(offered, 9))
+
+    if not continuous:
+        sys.exit(f"perf_report: no AI continuous results under {out_root}")
+    if len(settings) != 1:
+        sys.exit("perf_report: topology, transfer geometry, and seed must match")
+    load_sets = list(offered_by_mapping.values())
+    if (set(offered_by_mapping) != set(EXPECTED_MAPPINGS) or
+            any(loads != load_sets[0] for loads in load_sets[1:])):
+        sys.exit("perf_report: every AI mapping must use the same offered-load points")
+    return {"continuous": continuous, "rounds": rounds,
+            "settings": next(iter(settings))}
+
+
+def _table(headers, rows):
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "|" + "|".join("---" if index == 0 else "---:"
+                         for index in range(len(headers))) + "|",
+    ]
+    lines.extend("| " + " | ".join(str(value) for value in row) + " |"
+                 for row in rows)
+    return "\n".join(lines)
+
+
+def _require_complete(results):
+    for key in ("continuous", "rounds"):
+        found = {row["mapping"] for row in results[key]}
+        if found != set(EXPECTED_MAPPINGS):
+            sys.exit(f"perf_report: incomplete AI {key} results")
+
+
+def _by_mapping(rows):
+    return {mapping: [row for row in rows if row["mapping"] == mapping]
+            for mapping in EXPECTED_MAPPINGS}
 
 
 def report(out_root):
-    stale = []
-    groups = collect(out_root, stale)
-    if not groups:
-        sys.exit(f"perf_report: no continuous_*/result.csv under {out_root} carries the "
-                 f"offered load and open-loop latency columns"
-                 f"{f' ({len(stale)} run dirs predate them)' if stale else ''}")
-    # The report's subject is the machine as built: the default group, and the
-    # one with the most measured points when several share the label.
-    main_key = max(groups, key=lambda k: (group_label(k) == "default",
-                                          sum(len(v) for v in groups[k].values())))
-    patterns = groups[main_key]
-    curves = [p for p in sorted(patterns) if len(curve(patterns[p])) >= 3]
-    singles = [p for p in sorted(patterns) if len(curve(patterns[p])) < 3]
-    body = [f"# Performance report: {main_key[0]}\n",
-            f"\nGenerated by `sim/tools/perf_report.py` from `{out_root}`. "
-            f"Parameter set: {group_label(main_key)}.\n",
-            f"\nCurve patterns: {', '.join(curves) or 'none'}. Single operating "
-            f"point: {', '.join(singles) or 'none'}.\n\n",
-            section_method(main_key, patterns), "\n",
-            section_zero_load(main_key, patterns, zero_load_probes(out_root)), "\n",
-            section_curves(main_key, patterns, out_root), "\n",
-            section_summary(main_key, patterns), "\n",
-            section_links(main_key, patterns), "\n",
-            section_sensitivity(groups, main_key)]
-    if plt is None:
-        body.insert(3, "matplotlib is not installed, so the curves are tables only.\n\n")
-    if stale:
-        body.insert(3, f"{len(stale)} run directories are left out: their `result.csv` "
-                       f"predates the offered load and open-loop latency columns, so they "
-                       f"carry no point on any curve. First: `{stale[0]}`.\n\n")
-    return "".join(body)
+    results = collect(out_root)
+    _require_complete(results)
+    topology, _stim_size, burst_len, seed = results["settings"]
+    beats = int(burst_len) + 1
+    flits = beats + 1
+    curves = _by_mapping(results["continuous"])
+    round_by_mapping = {row["mapping"]: row for row in results["rounds"]}
+
+    communication_rows = []
+    for mapping in EXPECTED_MAPPINGS:
+        row = curves[mapping][0]
+        communication_rows.append([
+            mapping_label(mapping), row["active_sources"],
+            "50% GEMM payload" if row["pattern"] == "broadcast" else "100% payload",
+        ])
+
+    metric_rows = []
+    for mapping in EXPECTED_MAPPINGS:
+        points = sorted(curves[mapping], key=lambda point: point["offered"])
+        low = points[0]
+        peak = max(points, key=lambda point: point["useful_bandwidth"])
+        metric_rows.append([
+            mapping_label(mapping), low["active_sources"],
+            f"{low['completion_latency']:.1f}",
+            f"{peak['useful_bandwidth']:.1f}", f"{peak['offered']:.3f}",
+            f"{peak['dat_link_utilization']:.1f}",
+        ])
+
+    round_rows = []
+    for mapping in EXPECTED_MAPPINGS:
+        row = round_by_mapping[mapping]
+        round_rows.append([
+            mapping_label(mapping), row["active_sources"], row["source_writes"],
+            row["destination_deliveries"], row["completion_cycles"],
+        ])
+
+    return "\n".join([
+        f"# AI Inference NoC Performance Report — {topology}",
+        "",
+        "## 1. Test Setup and Measurement",
+        "",
+        f"所有結果固定使用 seed {seed}、4 KB AXI write（{beats} beats，burst length {burst_len}）與相同 offered-load sweep。",
+        "",
+        "1. 先指定每個 active source 的 Offered load。",
+        f"2. Offered load per active source = Injection rate × {flits} DAT flits",
+        "3. Offered load mesh average = Offered load per active source × active sources / 16",
+        "4. Continuous sweep 量測每筆 transaction 的 completion latency、delivery rate 與 DAT-link loading。",
+        "5. Directed round 讓所有 source 同步送出一次 mapping，再等待全部 B response。",
+        "",
+        "## 2. AI Communication Types",
+        "",
+        _table(["Communication type", "Active sources", "Useful-byte policy"], communication_rows),
+        "",
+        "Broadcast / Multicast 使用 50% useful-byte ratio，表示 GEMM 情境中只有送到各 destination 的目標 tensor slice 計入 useful payload；其他 mapping 的 delivered payload 全數計入。",
+        "",
+        "## 3. Continuous-load Results",
+        "",
+        _table([
+            "Communication type", "Active sources",
+            "Low-load completion latency (cycles/transaction)",
+            "Peak useful delivered bandwidth (B/cycle)",
+            "Offered load at peak (DAT flits/active source/cycle)",
+            "Busiest DAT-link utilization (%)",
+        ], metric_rows),
+        "",
+        "Low-load completion latency 越小越好。Useful delivered bandwidth (B/cycle) 越大越好。DAT-link utilization (%) 顯示同一 peak-bandwidth 量測點的最忙 link，越接近 100% 越可能成為 bottleneck。三者必須看同一列：先看 latency，再看能送達多少 useful tensor data，最後確認是否由單一 link 限制。",
+        "",
+        "![Completion latency](perf_ai_latency.svg)",
+        "",
+        "![Useful delivered bandwidth](perf_ai_bandwidth.svg)",
+        "",
+        "![DAT-link utilization](perf_ai_link_utilization.svg)",
+        "",
+        "## 4. Synchronized Directed Round",
+        "",
+        "AXI write round completion time (cycles/round) 的邊界是 common issue start through the final expected B response。它包含 source issue、NI、NoC、destination handling 與 B return，不是 NoC-only latency，也沒有 background traffic。",
+        "",
+        _table([
+            "Communication type", "Active sources", "Source write bursts",
+            "Destination deliveries", "Completion time (cycles/round)",
+        ], round_rows),
+        "",
+        "Source write bursts 是注入的 AXI writes；Destination deliveries 會把 Broadcast fanout 展開。Completion time 用來比較完整 communication round 完成速度，不能直接與每筆 transaction latency 相減。",
+        "",
+        "![AXI write round completion time](perf_ai_round_completion.svg)",
+        "",
+    ])
+
+
+_COLORS = ("#1a73e8", "#d93025", "#188038", "#a142f4", "#f29900",
+           "#0097a7", "#5f6368", "#c2185b", "#7cb342", "#3949ab")
+
+
+def _line_svg(series, title, x_label, y_label, path):
+    width, height = 1100, 650
+    left, right, top, bottom = 90, 25, 115, 70
+    all_points = [point for _label, points in series for point in points]
+    xs = [point[0] for point in all_points]
+    ys = [point[1] for point in all_points]
+    x_span = max(xs) - min(xs) or 1
+    y_span = max(ys) - min(ys) or 1
+    sx = lambda x: left + (x - min(xs)) / x_span * (width - left - right)
+    sy = lambda y: top + (max(ys) - y) / y_span * (height - top - bottom)
+    lines = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">',
+        '<style>text{font-family:Arial,sans-serif;fill:#202124}.title{font-size:22px;font-weight:700}.label{font-size:17px}.legend{font-size:13px}</style>',
+        f'<text class="title" x="20" y="28">{html.escape(title)}</text>',
+    ]
+    for index, (label, points) in enumerate(series):
+        color = _COLORS[index]
+        lx = 20 + (index % 5) * 215
+        ly = 55 + (index // 5) * 24
+        lines.append(f'<line x1="{lx}" y1="{ly}" x2="{lx + 18}" y2="{ly}" stroke="{color}" stroke-width="3"/>')
+        lines.append(f'<text class="legend" x="{lx + 24}" y="{ly + 4}">{html.escape(label)}</text>')
+        coords = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in points)
+        lines.append(f'<polyline points="{coords}" fill="none" stroke="{color}" stroke-width="2"/>')
+        lines.extend(f'<circle cx="{sx(x):.1f}" cy="{sy(y):.1f}" r="3" fill="{color}"/>'
+                     for x, y in points)
+    lines.append(f'<text class="label" x="{(left + width - right) / 2:.1f}" y="{height - 12}" text-anchor="middle">{html.escape(x_label)}</text>')
+    lines.append(f'<text class="label" transform="translate(18 {(top + height - bottom) / 2:.1f}) rotate(-90)" text-anchor="middle">{html.escape(y_label)}</text>')
+    lines.append('</svg>')
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+
+
+def _bar_svg(rows, title, unit, path):
+    width, height = 1100, 600
+    left, right, top, bottom = 250, 50, 60, 45
+    plot_width = width - left - right
+    maximum = max(value for _label, value in rows) or 1
+    row_height = (height - top - bottom) / len(rows)
+    lines = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">',
+        '<style>text{font-family:Arial,sans-serif;fill:#202124}.title{font-size:22px;font-weight:700}.label{font-size:14px}.value{font-size:13px}</style>',
+        f'<text class="title" x="20" y="28">{html.escape(title)} ({html.escape(unit)})</text>',
+    ]
+    for index, (label, value) in enumerate(rows):
+        y = top + index * row_height
+        bar_width = value / maximum * plot_width
+        lines.append(f'<text class="label" x="{left - 10}" y="{y + 18:.1f}" text-anchor="end">{html.escape(label)}</text>')
+        lines.append(f'<rect x="{left}" y="{y + 3:.1f}" width="{bar_width:.1f}" height="20" fill="{_COLORS[index]}"/>')
+        lines.append(f'<text class="value" x="{left + bar_width + 6:.1f}" y="{y + 18:.1f}">{value:.1f}</text>')
+    lines.append('</svg>')
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+
+
+def write_figures(results, destination):
+    destination = pathlib.Path(destination)
+    _require_complete(results)
+    curves = _by_mapping(results["continuous"])
+    latency = destination / "perf_ai_latency.svg"
+    bandwidth = destination / "perf_ai_bandwidth.svg"
+    links = destination / "perf_ai_link_utilization.svg"
+    rounds = destination / "perf_ai_round_completion.svg"
+    _line_svg([
+        (mapping_label(mapping), [(point["offered"], point["completion_latency"])
+                                  for point in sorted(curves[mapping], key=lambda p: p["offered"])])
+        for mapping in EXPECTED_MAPPINGS
+    ], "Completion Latency", "Offered load (DAT flits/active source/cycle)",
+       "Completion latency (cycles/transaction)", latency)
+    _line_svg([
+        (mapping_label(mapping), [(point["offered"], point["useful_bandwidth"])
+                                  for point in sorted(curves[mapping], key=lambda p: p["offered"])])
+        for mapping in EXPECTED_MAPPINGS
+    ], "Useful Delivered Bandwidth", "Offered load (DAT flits/active source/cycle)",
+       "Useful delivered bandwidth (B/cycle)", bandwidth)
+    peak_rows = []
+    for mapping in EXPECTED_MAPPINGS:
+        peak = max(curves[mapping], key=lambda point: point["useful_bandwidth"])
+        peak_rows.append((mapping_label(mapping), peak["dat_link_utilization"]))
+    _bar_svg(peak_rows, "Busiest DAT-link Utilization at Peak Bandwidth", "%", links)
+    round_by_mapping = {row["mapping"]: row for row in results["rounds"]}
+    _bar_svg([(mapping_label(mapping), round_by_mapping[mapping]["completion_cycles"])
+              for mapping in EXPECTED_MAPPINGS],
+             "AXI Write Round Completion Time", "cycles/round", rounds)
+    return [latency, bandwidth, links, rounds]
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("out_dir", nargs="?", default="sim/verilator/output",
-                    help="Directory holding the continuous_* run directories")
-    ap.add_argument("-o", "--out", default=None,
-                    help="Report path (default <out_dir>/perf_report.md)")
-    a = ap.parse_args(argv)
-    out_root = pathlib.Path(a.out_dir)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("out_dir", nargs="?", default="sim/verilator/output")
+    parser.add_argument("-o", "--out")
+    args = parser.parse_args(argv)
+    out_root = pathlib.Path(args.out_dir)
+    results = collect(out_root)
+    _require_complete(results)
+    destination = pathlib.Path(args.out) if args.out else out_root / "perf_report.md"
+    write_figures(results, destination.parent)
     text = report(out_root)
-    dest = pathlib.Path(a.out) if a.out else out_root / "perf_report.md"
-    dest.write_text(text, encoding="utf-8", newline="\n")
-    print(f"wrote {dest} ({len(text.splitlines())} lines)")
+    destination.write_text(text, encoding="utf-8", newline="\n")
+    print(f"wrote {destination} ({len(text.splitlines())} lines)")
 
 
 if __name__ == "__main__":

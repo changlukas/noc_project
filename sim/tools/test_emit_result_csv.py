@@ -1,4 +1,5 @@
 import csv
+import json
 import sys
 
 import pytest
@@ -194,12 +195,70 @@ def test_single_beat_offered_load(tmp_path, monkeypatch):
 
 def test_many_to_many_offered_load_counts_write_data_only(tmp_path, monkeypatch):
     write_only = "\n".join(l for l in LOG.splitlines() if "[Read]" not in l) + "\n"
+    meta = tmp_path / "traffic_meta.json"
+    meta.write_text(json.dumps({
+        "active_sources": 16,
+        "source_write_bursts": 3200,
+        "destination_deliveries": 3200,
+    }))
     row = _run(tmp_path, monkeypatch, write_only,
                **{"--pattern": "many_to_many", "--burst-len": "63",
-                  "--injection-rate": "0.01"})
+                  "--injection-rate": "0.01", "--traffic-meta": str(meta),
+                  "--traffic-mapping": "many_to_many"})
     assert row["offered_flits_per_node_cycle"] == "0.65"  # 0.01 * (1 header + 64 W)
     assert row["offered_bytes_per_node_cycle"] == "40.96"  # 0.01 * 64 beats * 64 B
     assert row["mean_latency_network_read"] == ""
+
+
+@pytest.mark.parametrize("active_sources", [1, 4, 15, 16])
+def test_ai_load_is_normalized_per_active_source_and_mesh(
+        tmp_path, monkeypatch, active_sources):
+    log_text = LOG_HEAD.replace(
+        "active_sources=16 write_bursts=3200",
+        f"active_sources={active_sources} write_bursts={active_sources * 10}")
+    log_text += "[Monitor node0.master][Write] Latency: 30.00 +- 1.00, N: 10, BW: 64.00 Bits/cycle, Util: 10.00%\n"
+    meta = tmp_path / f"meta_{active_sources}.json"
+    meta.write_text(json.dumps({
+        "active_sources": active_sources,
+        "source_write_bursts": active_sources * 10,
+        "destination_deliveries": active_sources * 10,
+    }))
+    (tmp_path / "perf.json").write_text(
+        '{"window":{"start_cyc":0,"end_cyc":100}}')
+    row = _run(tmp_path, monkeypatch, log_text, **{
+        "--pattern": "pipeline", "--injection-rate": "0.1",
+        "--burst-len": "0", "--traffic-meta": str(meta),
+        "--traffic-mapping": "pipeline",
+    })
+    assert row["active_sources"] == str(active_sources)
+    assert row["offered_load_per_active_source"] == "0.2"
+    assert row["offered_load_mesh_avg"] == str(round(0.2 * active_sources / 16, 6))
+    assert row["accepted_injection_load_mesh_avg"] == str(
+        round(active_sources * 10 * 2 / 100 / 16, 6))
+    assert row["delivered_payload_bytes_per_cycle"] == str(
+        round(active_sources * 10 * 64 / 100, 6))
+    assert row["destination_deliveries"] == str(active_sources * 10)
+
+
+def test_ai_metadata_rejects_log_mismatch_and_bad_broadcast_fanout(tmp_path, monkeypatch):
+    (tmp_path / "perf.json").write_text(
+        '{"window":{"start_cyc":0,"end_cyc":100}}')
+    invalid = [
+        {"active_sources": 15, "source_write_bursts": 3200,
+         "destination_deliveries": 3200},
+        {"active_sources": 16, "source_write_bursts": 3199,
+         "destination_deliveries": 3199},
+        {"active_sources": 16, "source_write_bursts": 3200,
+         "destination_deliveries": 0},
+    ]
+    for index, payload in enumerate(invalid):
+        meta = tmp_path / f"invalid_{index}.json"
+        meta.write_text(json.dumps(payload))
+        with pytest.raises(SystemExit):
+            _run(tmp_path, monkeypatch, LOG, **{
+                "--pattern": "broadcast", "--traffic-meta": str(meta),
+                "--traffic-mapping": "broadcast_global",
+            })
 
 
 CHANNEL_COMPARE_LOG = """[TrafficMeta] active_sources=3 write_bursts=192

@@ -1,143 +1,146 @@
-import pathlib
-import subprocess
-import sys
+import csv
+import json
+import re
+
+import pytest
 
 import perf_report as pr
 
-_COLS = ("topology,vc,router_vc_depth,ni_dat_rx_vc_depth,pattern,injection_mode,"
-         "injection_rate,injection_count,seed,max_unique_ids,max_outstanding,"
-         "max_txns_per_id,ids_per_initiator,burst_len,space,mst_stall_random,"
-         "offered_flits_per_node_cycle,offered_bytes_per_node_cycle,"
-         "accepted_bits_per_cycle,accepted_bytes_per_node_cycle,"
-         "mean_latency_network,mean_latency_open")
+
+MAPPINGS = {
+    "broadcast_row": ("broadcast", 4, 4, 16),
+    "broadcast_col": ("broadcast", 4, 4, 16),
+    "broadcast_submesh": ("broadcast", 4, 4, 16),
+    "broadcast_global": ("broadcast", 1, 1, 16),
+    "gather_global_root0": ("gather", 15, 15, 15),
+    "gather_submesh": ("gather", 12, 12, 12),
+    "alltoall": ("alltoall", 16, 240, 240),
+    "neighbor_exchange": ("neighbor_exchange", 16, 48, 48),
+    "pipeline": ("pipeline", 15, 15, 15),
+    "many_to_many": ("many_to_many", 16, 64, 64),
+}
 
 
-def _point(root, pattern, offered, accepted_bytes, plat, seed=1, nlat=None):
-    """One run directory holding the Task 1 result.csv column set."""
-    d = root / f"continuous_mesh_4x4_{pattern}_r{offered}_s{seed}"
-    d.mkdir(parents=True)
-    row = (f"mesh_4x4,2,8,8,{pattern},1,{offered},200,{seed},1,32,32,1,32,memory,0,"
-           f"{offered},{offered * 64 * 33 * 2},{accepted_bytes * 8 * 16},{accepted_bytes},"
-           f"{plat if nlat is None else nlat},{plat}")
-    (d / "result.csv").write_text(_COLS + "\n" + row + "\n")
-    return d
+def _write_result(root, mapping, offered, seed="1", stim_size="6",
+                  burst_len="63", directed=False):
+    pattern, active, writes, deliveries = MAPPINGS[mapping]
+    prefix = "directed" if directed else "continuous"
+    run = root / f"{prefix}_mesh_4x4_{mapping}_{offered}_{seed}"
+    run.mkdir(parents=True)
+    row = {
+        "topology": "mesh_4x4", "vc": "2", "router_vc_depth": "8",
+        "ni_dat_rx_vc_depth": "8", "pattern": pattern,
+        "traffic_mapping": mapping, "active_sources": str(active),
+        "injection_mode": "0" if directed else "1", "injection_rate": "0.001",
+        "injection_count": "16", "seed": seed, "max_unique_ids": "8",
+        "max_outstanding": "32", "max_txns_per_id": "32",
+        "ids_per_initiator": "1", "burst_len": burst_len,
+        "stim_size": stim_size, "space": "memory", "mst_stall_random": "0",
+        "offered_load_per_active_source": str(offered),
+        "offered_load_mesh_avg": str(offered * active / 16),
+        "accepted_injection_load_mesh_avg": str(offered * active / 20),
+        "delivered_payload_bytes_per_cycle": str(1000 * offered * deliveries),
+        "destination_deliveries": str(deliveries),
+        "mean_latency_open_write": str(40 + 100 * offered),
+        "round_completion_cycles": "250" if directed else "",
+        "round_active_sources": str(active) if directed else "",
+        "round_write_bursts": str(writes) if directed else "",
+    }
+    with (run / "result.csv").open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+    perf = {
+        "window": {"start_cyc": 0, "end_cyc": 1000},
+        "noc": {"links": [
+            {"name": f"dat_{index}", "flit_count": 100 + 10 * index}
+            for index in range(48)
+        ]},
+    }
+    (run / "perf.json").write_text(json.dumps(perf))
 
 
-def _curve(root, pattern="uniform_random"):
-    for offered, plat, acc in zip((0.1, 0.2, 0.3, 0.4, 0.5),
-                                  (40.0, 42.0, 50.0, 130.0, 400.0),
-                                  (5.0, 10.0, 20.0, 21.0, 21.0)):
-        _point(root, pattern, offered, acc, plat)
+def _complete_results(root):
+    for mapping in MAPPINGS:
+        for offered in (0.05, 0.2, 0.5):
+            _write_result(root, mapping, offered)
+        _write_result(root, mapping, 0.0, directed=True)
 
 
-_KEY = ("mesh_4x4", "2", "8", "8", "32", "32", "1", "32", "200", "0")
+def test_policy_tables_cover_only_ai_inference_traffic():
+    assert pr.AI_WRITE_ONLY == frozenset({
+        "broadcast", "gather", "alltoall", "neighbor_exchange", "pipeline",
+        "many_to_many",
+    })
+    assert pr.DISPLAY_NAME["many_to_many"] == "Regional Exchange"
+    assert pr.DISPLAY_NAME["broadcast"] == "Broadcast / Multicast"
 
 
-def test_curve_marks_saturation(tmp_path):
-    _curve(tmp_path)
-    sat = pr.saturation(pr.collect(tmp_path)[_KEY]["uniform_random"])
-    # Zero load plat is 40 at the lowest offered point, so the 3x threshold is
-    # 120, crossed between offered 0.3 (plat 50) and 0.4 (plat 130).
-    # f = (120 - 50) / (130 - 50) = 0.875.
-    assert abs(sat["offered"] - 0.3875) < 1e-9
-    assert abs(sat["accepted_bytes"] - 20.875) < 1e-9
+@pytest.mark.parametrize(("field", "value"), [
+    ("stim_size", "5"), ("burst_len", "31"), ("seed", "2"),
+    ("offered_load_per_active_source", "0.3"),
+])
+def test_report_rejects_incomparable_rows(tmp_path, field, value):
+    _complete_results(tmp_path)
+    target = tmp_path / "continuous_mesh_4x4_pipeline_0.2_1/result.csv"
+    rows = list(csv.DictReader(target.open()))
+    rows[0][field] = value
+    with target.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    with pytest.raises(SystemExit):
+        pr.collect(tmp_path)
 
 
-def _row(text, heading, first_cell):
-    """The cells of the one row of `heading`'s table whose first cell matches."""
-    body = text.split(heading, 1)[1]
-    for line in body.splitlines():
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if cells and cells[0].rstrip("*") == first_cell:
-            return cells
-    raise AssertionError(f"no {first_cell!r} row under {heading!r}")
-
-
-def test_curve_that_never_reaches_3x_reports_a_bound(tmp_path):
-    """A curve still climbing at the last point has no saturation load, only a
-    lower bound: the row says `> <max offered>` rather than inventing one."""
-    for offered, plat in zip((0.1, 0.2, 0.3), (40.0, 42.0, 50.0)):
-        _point(tmp_path, "tornado", offered, 10.0, plat)
+def test_ai_report_uses_common_metrics_and_plain_formulas(tmp_path):
+    _complete_results(tmp_path)
     text = pr.report(tmp_path)
-    assert pr.saturation(pr.collect(tmp_path)[_KEY]["tornado"]) is None
-    assert "> 0.300" in text and "never reaches 3x zero load" in text
+    assert re.findall(r"^## .+$", text, re.M) == [
+        "## 1. Test Setup and Measurement",
+        "## 2. AI Communication Types",
+        "## 3. Continuous-load Results",
+        "## 4. Synchronized Directed Round",
+    ]
+    for mapping in MAPPINGS:
+        assert pr.mapping_label(mapping) in text
+    assert "Low-load completion latency (cycles/transaction)" in text
+    assert "Useful delivered bandwidth (B/cycle)" in text
+    assert "DAT-link utilization (%)" in text
+    assert "AXI write round completion time (cycles/round)" in text
+    assert "common issue start through the final expected B response" in text
+    assert "Offered load per active source = Injection rate × 65 DAT flits" in text
+    assert "Offered load mesh average = Offered load per active source × active sources / 16" in text
+    assert "Regional Exchange" in text
+    assert "uniform_random" not in text and "Hotspot" not in text
+    assert "RR vs RRD" not in text
+    assert "$" not in text and "\\times" not in text
+    assert len(text.splitlines()) <= 120
 
 
-def test_zero_load_probes_report_nlat_and_no_plat(tmp_path):
-    """The narrow and data probes predate the open-loop tb, so they carry no
-    [SrcQueue] line and section 2 shows nlat with plat marked absent."""
-    _curve(tmp_path)
-    (tmp_path / "s2zl_va_narrow").mkdir()
-    (tmp_path / "s2zl_va_narrow" / "run.log").write_text(
-        "[Monitor node0.master][Read] Latency: 31.01 +- 0.14, N: 200, BW: 4.65 Bits/cycle\n"
-        "[Monitor node0.master][Write] Latency: 32.00 +- 0.00, N: 200, BW: 4.65 Bits/cycle\n")
-    cells = _row(pr.report(tmp_path), "## 2 Zero-load latency", "s2zl_va_narrow")
-    assert cells[1] == "narrow"
-    assert cells[2] == "31.0" and cells[3] == "-"
-    assert cells[4] == "32.0" and cells[5] == "-"
+def test_broadcast_useful_bandwidth_applies_gemm_payload_ratio(tmp_path):
+    _complete_results(tmp_path)
+    results = pr.collect(tmp_path)
+    broadcast = next(point for point in results["continuous"]
+                     if point["mapping"] == "broadcast_global" and point["offered"] == 0.5)
+    pipeline = next(point for point in results["continuous"]
+                    if point["mapping"] == "pipeline" and point["offered"] == 0.5)
+    assert broadcast["useful_bandwidth"] == broadcast["delivered_bandwidth"] * 0.5
+    assert pipeline["useful_bandwidth"] == pipeline["delivered_bandwidth"]
 
 
-def test_pattern_summary_percent_of_ideal(tmp_path):
-    # neighbor has ideal 1.0 flits per node per cycle and no self traffic, so
-    # the served share is the whole pattern. 0.6 accepted flits per node per
-    # cycle is 0.6 * 64 * 66 / 67 B, the inverse of the 34/33 flit conversion.
-    _point(tmp_path, "neighbor", 0.9, 0.6 * 64 * 66 / 67, 90.0)
-    # transpose maps the four diagonal nodes to themselves, so a quarter of the
-    # offered traffic is answered in the tile crossbar and reaches no monitor:
-    # served is 0.750 against an ideal of 0.333. 0.250 accepted flits is exactly
-    # 100.0 percent of `served * ideal`, and 75.0 percent of the ideal alone, so
-    # a `served` factor dropped to 1 fails here where neighbor cannot see it.
-    _point(tmp_path, "transpose", 0.9, 0.25 * 64 * 66 / 67, 90.0)
-    text = pr.report(tmp_path)
-    cells = _row(text, "## 4 Pattern summary", "neighbor")
-    assert cells[5] == "0.600"   # accepted flits at the highest offered load
-    assert cells[6] == "60.0"    # 0.600 / (1.000 served * 1.000 ideal)
-    cells = _row(text, "## 4 Pattern summary", "transpose")
-    assert cells[3] == "0.750"   # served
-    assert cells[5] == "0.250" and cells[6] == "100.0"
-
-
-def test_seed_spread_column(tmp_path):
-    _curve(tmp_path)
-    _point(tmp_path, "uniform_random", 0.3, 20.0, 60.0, seed=2)
-    # The rate 0.3 point now carries seeds 1 and 2 with plat 50 and 60: the
-    # cell is their mean and the spread is max minus min.
-    cells = _row(pr.report(tmp_path), "### uniform_random", "0.300")
-    assert cells[5] == "55.0" and cells[6] == "10.0" and cells[7] == "2"
-
-
-def test_single_point_pattern_is_not_a_zero_load_row(tmp_path):
-    """A pattern measured at one saturated operating point carries no unloaded
-    latency. It stays out of the section 2 table and its section 4 zero-load
-    cell is blank, rather than presenting a congested plat as zero load."""
-    _curve(tmp_path)
-    _point(tmp_path, "hotspot", 0.9, 10.0, 45266.0, nlat=7472.0)
-    text = pr.report(tmp_path)
-    section2 = text.split("## 2 Zero-load latency", 1)[1].split("## 3", 1)[0]
-    assert "hotspot" not in section2
-    assert "uniform_random" in section2
-    assert _row(text, "## 4 Pattern summary", "hotspot")[7] == "-"
-    assert _row(text, "## 4 Pattern summary", "uniform_random")[7] == "40.0"
-
-
-def test_no_removed_names():
-    """The clean cut: no tracked file under Makefile, sim/, docs/ or README.md
-    still names a removed script or the old report.
-
-    Two exclusions. This file, because a check that forbids four strings has to
-    name them. docs/superpowers/, because those are the archived plan and spec
-    records of the campaigns that created and then removed those files, and the
-    spec driving this deletion is itself one of them."""
-    self_path = pathlib.Path(__file__).name
-    root = pathlib.Path(__file__).resolve().parents[2]
-    names = "summarize_results|plot_injection_sweep|perf_cli_summary|sweep_summary"
-    grep = subprocess.run(
-        ["git", "grep", "-nE", names, "--", "Makefile", "sim", "docs", "README.md",
-         ":(exclude)docs/superpowers", f":(exclude)sim/tools/{self_path}"],
-        cwd=root, capture_output=True, encoding="utf-8", errors="replace")
-    # git grep exits 1 on no match, 0 on a match, 2 and up on a real failure.
-    assert grep.returncode == 1, grep.stdout or grep.stderr
-
-
-if __name__ == "__main__":
-    sys.exit(subprocess.call([sys.executable, "-m", "pytest", "-q", __file__]))
+def test_figures_are_english_and_show_all_mappings(tmp_path):
+    _complete_results(tmp_path)
+    results = pr.collect(tmp_path)
+    paths = pr.write_figures(results, tmp_path)
+    assert {path.name for path in paths} == {
+        "perf_ai_latency.svg", "perf_ai_bandwidth.svg",
+        "perf_ai_link_utilization.svg", "perf_ai_round_completion.svg",
+    }
+    for path in paths:
+        svg = path.read_text(encoding="utf-8")
+        assert re.search(r"[\u4e00-\u9fff]", svg) is None
+        assert "cycles" in svg or "B/cycle" in svg or "%" in svg
+    round_svg = (tmp_path / "perf_ai_round_completion.svg").read_text(
+        encoding="utf-8")
+    assert all(pr.mapping_label(mapping) in round_svg for mapping in MAPPINGS)
