@@ -1,12 +1,20 @@
 import csv
 import sys
 
+import pytest
+
 import emit_result_csv as e
 
 # Read and Write carry different sample counts on purpose: an implementation
 # that averaged the printed means instead of weighting them by N would read
 # 50.0 network and 70.0 open here, not 45.0 and 60.0.
 LOG_HEAD = """[Config] max_unique_ids=1 max_outstanding=32 dat_num_vc=2 router_vc_depth=8 mst_stall_random=0 ni_dat_rx_vc_depth=8
+[TrafficMeta] active_sources=16 write_bursts=3200
+"""
+
+ROUND_LOG = """[TrafficMeta] active_sources=15 write_bursts=15
+[RoundPerf] start_cycle=10 completion_cycle=210 round_cycles=200 active_sources=15 write_bursts=15
+PASS: all 16 nodes done, non-vacuous
 """
 
 LOG = LOG_HEAD + """[Monitor node0.master][Read] Latency: 40.00 +- 1.00, N: 300, BW: 64.00 Bits/cycle, Util: 10.00%
@@ -22,7 +30,7 @@ def _run(tmp_path, monkeypatch, log_text, **overrides):
     out = tmp_path / "result.csv"
     args = {"--topology": "mesh_4x4", "--pattern": "neighbor", "--injection-mode": "1",
             "--injection-rate": "0.5", "--injection-count": "200", "--seed": "1",
-            "--burst-len": "32"}
+            "--burst-len": "32", "--stim-size": "6"}
     args.update(overrides)
     argv = ["emit_result_csv", "--log", str(log), "--out", str(out)]
     for k, v in args.items():
@@ -48,7 +56,52 @@ def test_open_latency_adds_source_queue_delay(tmp_path, monkeypatch):
     # flits: 0.5 * 34 + 0.5 * 33 = 33.5. bytes (payload beats only): 0.5 * 33 * 64 * 2 = 2112.
     assert row["offered_flits_per_node_cycle"] == "33.5"
     assert row["offered_bytes_per_node_cycle"] == "2112.0"
+    assert row["stim_size"] == "6"
     assert "mean_latency" not in row
+
+
+def test_round_perf_fields_are_preserved():
+    assert e.parse_round_perf(ROUND_LOG) == {
+        "round_completion_cycles": "200",
+        "round_active_sources": "15",
+        "round_write_bursts": "15",
+    }
+
+
+@pytest.mark.parametrize("log_text", [
+    ROUND_LOG.replace("round_cycles=200", "round_cycles=199"),
+    ROUND_LOG.replace("[RoundPerf]", "[Other]"),
+    ROUND_LOG + ROUND_LOG.splitlines()[1] + "\n",
+    ROUND_LOG + "[RoundPerf] malformed\n",
+    ROUND_LOG.replace("active_sources=15", "active_sources=0"),
+    ROUND_LOG.replace("write_bursts=15", "write_bursts=0"),
+])
+def test_round_perf_rejects_invalid_evidence(log_text):
+    with pytest.raises(SystemExit):
+        e.parse_round_perf(log_text)
+
+
+def test_traffic_meta_is_strict_and_matches_round_perf():
+    assert e.parse_traffic_meta(ROUND_LOG) == {
+        "round_active_sources": "15",
+        "round_write_bursts": "15",
+    }
+    invalid = [
+        ROUND_LOG.replace("[TrafficMeta]", "[Other]"),
+        ROUND_LOG + ROUND_LOG.splitlines()[0] + "\n",
+        ROUND_LOG + "[TrafficMeta] malformed\n",
+        ROUND_LOG.replace("active_sources=15", "active_sources=0", 1),
+        ROUND_LOG.replace("write_bursts=15", "write_bursts=0", 1),
+    ]
+    for log_text in invalid:
+        with pytest.raises(SystemExit):
+            e.parse_traffic_meta(log_text)
+
+
+def test_round_perf_rejects_traffic_meta_mismatch():
+    with pytest.raises(SystemExit):
+        e.parse_round_perf(ROUND_LOG.replace(
+            "[TrafficMeta] active_sources=15", "[TrafficMeta] active_sources=14"))
 
 
 def test_latency_columns_split_read_from_write(tmp_path, monkeypatch):
@@ -137,3 +190,78 @@ def test_single_beat_offered_load(tmp_path, monkeypatch):
     row = _run(tmp_path, monkeypatch, LOG, **{"--burst-len": "0", "--injection-rate": "0.005"})
     assert row["offered_flits_per_node_cycle"] == "0.015"      # 0.005 * (2 + 1)
     assert row["offered_bytes_per_node_cycle"] == "0.64"       # 0.005 * 1 * 64 * 2
+
+
+def test_many_to_many_offered_load_counts_write_data_only(tmp_path, monkeypatch):
+    write_only = "\n".join(l for l in LOG.splitlines() if "[Read]" not in l) + "\n"
+    row = _run(tmp_path, monkeypatch, write_only,
+               **{"--pattern": "many_to_many", "--burst-len": "63",
+                  "--injection-rate": "0.01"})
+    assert row["offered_flits_per_node_cycle"] == "0.65"  # 0.01 * (1 header + 64 W)
+    assert row["offered_bytes_per_node_cycle"] == "40.96"  # 0.01 * 64 beats * 64 B
+    assert row["mean_latency_network_read"] == ""
+
+
+CHANNEL_COMPARE_LOG = """[TrafficMeta] active_sources=3 write_bursts=192
+PASS: all 16 nodes done, non-vacuous
+[Monitor node0.master][Write] Latency: 289.50 +- 4.00, N: 64, BW: 64.00 Bits/cycle, Util: 10.00%
+[ChannelCompare] case=write node=1 bursts=64 data_beats=16384
+[ChannelCompare] case=write node=2 bursts=64 data_beats=16384
+"""
+READ_CHANNEL_COMPARE_LOG = """[TrafficMeta] active_sources=3 write_bursts=192
+PASS: all 16 nodes done, non-vacuous
+[Monitor node0.master][Read] Latency: 35.25 +- 2.00, N: 64, BW: 64.00 Bits/cycle, Util: 10.00%
+[ChannelCompare] case=read node=1 bursts=64 data_beats=16384
+[ChannelCompare] case=read node=2 bursts=64 data_beats=16384
+"""
+
+
+def _run_channel_compare(tmp_path, monkeypatch, log_text,
+                         channel_mapping="2-channel", channel_case="write"):
+    log = tmp_path / "run.log"
+    log.write_text(log_text)
+    out = tmp_path / "result.csv"
+    monkeypatch.setattr(sys, "argv", [
+        "emit_result_csv", "--log", str(log), "--out", str(out),
+        "--topology", "mesh_4x4", "--channel-mapping", channel_mapping,
+        "--channel-case", channel_case, "--seed", "1",
+    ])
+    e.main()
+    return next(csv.DictReader(out.open()))
+
+
+def test_channel_compare_writes_control_mean_and_interference_counts(tmp_path, monkeypatch):
+    row = _run_channel_compare(tmp_path, monkeypatch, CHANNEL_COMPARE_LOG)
+    assert row["channel_mapping"] == "2-channel"
+    assert row["channel_case"] == "write"
+    assert row["seed"] == "1"
+    assert row["control_samples"] == "64"
+    assert row["control_mean_latency_cycles"] == "289.5"
+    assert row["data_bursts_per_node"] == "64"
+    assert row["data_beats_per_node"] == "16384"
+
+
+def test_channel_compare_reads_control_mean_and_interference_counts(tmp_path, monkeypatch):
+    row = _run_channel_compare(tmp_path, monkeypatch, READ_CHANNEL_COMPARE_LOG,
+                               channel_mapping="3-channel", channel_case="read")
+    assert row["channel_mapping"] == "3-channel"
+    assert row["channel_case"] == "read"
+    assert row["control_samples"] == "64"
+    assert row["control_mean_latency_cycles"] == "35.25"
+    assert row["data_bursts_per_node"] == "64"
+    assert row["data_beats_per_node"] == "16384"
+
+
+def test_channel_compare_rejects_invalid_marker_evidence(tmp_path, monkeypatch):
+    invalid_logs = [
+        CHANNEL_COMPARE_LOG.replace("[Monitor node0.master]", "[Monitor node3.master]"),
+        CHANNEL_COMPARE_LOG.replace("PASS: all 16 nodes done, non-vacuous", "PASS: all"),
+        CHANNEL_COMPARE_LOG + "channel_compare_fault=1\n",
+        CHANNEL_COMPARE_LOG.replace("N: 64", "N: 63"),
+        CHANNEL_COMPARE_LOG.replace("node=2 bursts=64", "node=1 bursts=64"),
+        CHANNEL_COMPARE_LOG.replace("bursts=64", "bursts=63", 1),
+        CHANNEL_COMPARE_LOG.replace("data_beats=16384", "data_beats=16383", 1),
+    ]
+    for log in invalid_logs:
+        with pytest.raises(SystemExit):
+            _run_channel_compare(tmp_path, monkeypatch, log)

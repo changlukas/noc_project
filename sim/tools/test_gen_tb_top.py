@@ -10,9 +10,36 @@ def test_user_endpoint_exports_loaded_stimulus_count():
     generated = g.emit_tb_top(g.load_topology("mesh_4x4"))
 
     assert "output int unsigned                expected_txn_cnt_o" in endpoint
+    assert "output int unsigned                expected_write_cnt_o" in endpoint
+    assert "output longint unsigned            stimulus_start_cycle_o" in endpoint
+    assert "output longint unsigned            stimulus_done_cycle_o" in endpoint
     assert "expected_txn_cnt_o = int'(file_master.num_writes + file_master.num_reads);" in endpoint
+    assert "expected_write_cnt_o = int'(file_master.num_writes);" in endpoint
     assert "int unsigned expected_txn_cnt [16];" in generated
+    assert "int unsigned expected_write_cnt [16];" in generated
     assert ".expected_txn_cnt_o(expected_txn_cnt[i])" in generated
+    assert ".expected_write_cnt_o(expected_write_cnt[i])" in generated
+
+
+def test_generated_top_emits_strict_round_measurement_evidence():
+    text = g.emit_tb_top(g.load_topology("mesh_4x4"))
+
+    assert "longint unsigned stimulus_start_cycle [16];" in text
+    assert "longint unsigned stimulus_done_cycle [16];" in text
+    assert 'void\'($value$plusargs("round_perf=%d", round_perf));' in text
+    assert '"[TrafficMeta] active_sources=%0d write_bursts=%0d"' in text
+    assert '"[RoundPerf] start_cycle=%0d completion_cycle=%0d round_cycles=%0d active_sources=%0d write_bursts=%0d"' in text
+    assert "if (injection_mode != 0)" in text
+    assert "expected_txn_cnt[i] != expected_write_cnt[i]" in text
+    assert "stimulus_start_cycle[i] != round_start" in text
+
+
+def test_make_wires_round_perf_and_transfer_geometry_to_csv():
+    makefile = (ROOT / "sim/verilator/Makefile").read_text(encoding="utf-8")
+
+    assert '"+round_perf=$(ROUND_PERF)"' in makefile
+    assert "--require-round-perf" in makefile
+    assert "--stim-size $(STIM_SIZE)" in makefile
 
 
 def test_non_vacuity_uses_loaded_stimulus_counts():

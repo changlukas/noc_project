@@ -291,6 +291,7 @@ MCAST_SHAPE     ?= row
 GATHER_SHAPE    ?= global
 ROOT_NODE       ?= 0
 AI_ROUNDS       ?=
+ROUND_PERF      ?= 0
 INJECTION_MODE  ?= 0
 INJECTION_RATE  ?= 1.0
 # Directed default is 64: measured on mesh_4x4_vc4 uniform_random at 4 ids,
@@ -448,6 +449,7 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 	    "+stim_dir=$(STIM_ROOT)" \
 	    "+num_reads=$(_NUM_READS)" "+num_writes=$(INJECTION_COUNT)" \
 	    "+injection_mode=$(INJECTION_MODE)" "+injection_rate=$(INJECTION_RATE)" \
+	    "+round_perf=$(ROUND_PERF)" \
 	    $(if $(filter channel_compare,$(PATTERN)),"+channel_mode=$(CHANNEL_MODE)" "+channel_case=$(CHANNEL_CASE)") \
 	    $(if $(CHANNEL_COMPARE_FAULT),"+channel_compare_fault=$(CHANNEL_COMPARE_FAULT)") \
 	    $(if $(MAX_UNIQUE_IDS),"+max_unique_ids=$(MAX_UNIQUE_IDS)") \
@@ -484,7 +486,7 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 	        $(if $(MAX_OUTSTANDING),--max-outstanding $(MAX_OUTSTANDING)) \
 	        $(if $(MAX_TXNS_PER_ID),--max-txns-per-id $(MAX_TXNS_PER_ID)) \
 	        $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)) \
-	        --burst-len $(BURST_LEN) --space $(SPACE); \
+	        --burst-len $(BURST_LEN) --stim-size $(STIM_SIZE) --space $(SPACE); \
 	    echo "CONTINUOUS PASS: $(SIM_TAG)"; \
 	elif [ "$(INJECTION_MODE)" = "3" ]; then \
 	    if [ $$rc -ne 0 ] || ! grep -qE '^PASS: all [0-9]+ nodes done, non-vacuous$$' output/$(SIM_TAG)/run.log; then \
@@ -500,6 +502,19 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 	elif [ "$(DMA)" = "1" ]; then \
 	    echo "DMA PASS: $(SIM_TAG) every job retired, every region intact"; \
 	else \
+	    if [ "$(ROUND_PERF)" = "1" ]; then \
+	        $(PYTHON3) $(EMIT_CSV) --log output/$(SIM_TAG)/run.log \
+	            --out output/$(SIM_TAG)/result.csv \
+	            --topology $(CONFIG) --pattern $(PATTERN) \
+	            --injection-mode $(INJECTION_MODE) --injection-rate $(INJECTION_RATE) \
+	            --injection-count $(INJECTION_COUNT) --seed $(SEED) \
+	            $(if $(MAX_UNIQUE_IDS),--max-unique-ids $(MAX_UNIQUE_IDS)) \
+	            $(if $(MAX_OUTSTANDING),--max-outstanding $(MAX_OUTSTANDING)) \
+	            $(if $(MAX_TXNS_PER_ID),--max-txns-per-id $(MAX_TXNS_PER_ID)) \
+	            $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)) \
+	            --burst-len $(BURST_LEN) --stim-size $(STIM_SIZE) --space $(SPACE) \
+	            --require-round-perf || exit 1; \
+	    fi; \
 	    echo "$(if $(_CHECKED),CHECKED,DIRECTED) PASS: $(SIM_TAG) scoreboard clean, non-vacuous"; \
 	fi
 

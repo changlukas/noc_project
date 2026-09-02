@@ -86,6 +86,9 @@ module user_node_endpoint #(
     output logic                       end_of_sim_o,
     output int unsigned                txn_cnt_o,
     output int unsigned                expected_txn_cnt_o,
+    output int unsigned                expected_write_cnt_o,
+    output longint unsigned            stimulus_start_cycle_o,
+    output longint unsigned            stimulus_done_cycle_o,
     output logic                       compare_ready_o,
     input  logic                       compare_start_i,
     output logic                       compare_done_o
@@ -1071,12 +1074,17 @@ module user_node_endpoint #(
     // consumed and the pass terminates cleanly.
     initial begin
         string channel_case;
+        expected_txn_cnt_o = 0;
+        expected_write_cnt_o = 0;
+        stimulus_start_cycle_o = 0;
+        stimulus_done_cycle_o = 0;
         void'($value$plusargs("stim_dir=%s", stim_dir));
         write_path = $sformatf("%s/node%0d/write.txt", stim_dir, NODE_ID);
         read_path  = $sformatf("%s/node%0d/read.txt",  stim_dir, NODE_ID);
         file_master = new(master_dv);
         file_master.load_files(read_path, write_path);
         expected_txn_cnt_o = int'(file_master.num_writes + file_master.num_reads);
+        expected_write_cnt_o = int'(file_master.num_writes);
         injection_rate = 1.0;
         void'($value$plusargs("injection_rate=%f", injection_rate));
         injection_rate_bp = int'(injection_rate * 10000.0);
@@ -1108,6 +1116,7 @@ module user_node_endpoint #(
                 $fatal(1, "injection_mode=3 requires ideal tile-memory timing");
         end
         @(posedge rst_ni);
+        stimulus_start_cycle_o = cycle_cnt;
         case (get_injection_mode())
             0: begin
                 // Directed two-phase: phase 1 drains all writes (wait_b =>
@@ -1171,6 +1180,7 @@ module user_node_endpoint #(
                     get_injection_mode());
             end
         endcase
+        stimulus_done_cycle_o = cycle_cnt;
         run_done = 1'b1;
         // Single-merged-B invariant (S4 collectives): exactly one B reached
         // the initiator per issued AW -- a multicast AW's member Bs must have

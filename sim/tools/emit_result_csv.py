@@ -60,6 +60,11 @@ DAT plane (the spec's convention):
     flits/cyc = rate * (1 + beats) + rate * beats
     bytes/cyc = rate * beats * 64 * 2  payload beats both directions
 
+`many_to_many` is write-only, so its read terms are omitted:
+
+    flits/cyc = rate * (1 + beats)
+    bytes/cyc = rate * beats * 64
+
 64 B is the AXI data bus width (specgen DATA_WIDTH 512 b), which is what the
 monitor charges per beat ($bits(r.data) in axi_bw_monitor.sv). Charging the
 same per beat is what makes offered and accepted comparable; a run at AxSIZE 5
@@ -91,6 +96,50 @@ _CONFIG = re.compile(
     r"\[Config\]\s+max_unique_ids=(\d+)\s+max_outstanding=(\d+)\s+dat_num_vc=(\d+)"
     r"(?:\s+router_vc_depth=(\d+))?(?:\s+mst_stall_random=(\d+))?"
     r"(?:\s+ni_dat_rx_vc_depth=(\d+))?")
+_CHANNEL_BEATS = re.compile(
+    r"^\[ChannelCompare\]\s+case=(write|read)\s+node=([12])\s+"
+    r"bursts=(\d+)\s+data_beats=(\d+)\s*$", re.M)
+_CHANNEL_PASS = re.compile(r"^PASS: all \d+ nodes done, non-vacuous$", re.M)
+_TRAFFIC_META = re.compile(
+    r"^\[TrafficMeta\]\s+active_sources=(\d+)\s+write_bursts=(\d+)\s*$", re.M)
+_ROUND_PERF = re.compile(
+    r"^\[RoundPerf\]\s+start_cycle=(\d+)\s+completion_cycle=(\d+)\s+"
+    r"round_cycles=(\d+)\s+active_sources=(\d+)\s+write_bursts=(\d+)\s*$", re.M)
+
+
+def parse_traffic_meta(log_text):
+    rows = _TRAFFIC_META.findall(log_text)
+    tagged = sum(line.startswith("[TrafficMeta]") for line in log_text.splitlines())
+    if tagged != 1 or len(rows) != 1:
+        sys.exit("emit_result_csv: expected exactly one [TrafficMeta] line")
+    active_sources, write_bursts = map(int, rows[0])
+    if active_sources <= 0 or write_bursts <= 0:
+        sys.exit("emit_result_csv: TrafficMeta counts must be positive")
+    return {
+        "round_active_sources": str(active_sources),
+        "round_write_bursts": str(write_bursts),
+    }
+
+
+def parse_round_perf(log_text):
+    rows = _ROUND_PERF.findall(log_text)
+    tagged = sum(line.startswith("[RoundPerf]") for line in log_text.splitlines())
+    if tagged != 1 or len(rows) != 1:
+        sys.exit("emit_result_csv: expected exactly one [RoundPerf] line")
+    start, completion, elapsed, active_sources, write_bursts = map(int, rows[0])
+    if completion < start or elapsed != completion - start:
+        sys.exit("emit_result_csv: inconsistent RoundPerf cycle evidence")
+    if active_sources <= 0 or write_bursts <= 0:
+        sys.exit("emit_result_csv: RoundPerf counts must be positive")
+    meta = parse_traffic_meta(log_text)
+    if (meta["round_active_sources"] != str(active_sources) or
+            meta["round_write_bursts"] != str(write_bursts)):
+        sys.exit("emit_result_csv: RoundPerf does not match TrafficMeta")
+    return {
+        "round_completion_cycles": str(elapsed),
+        "round_active_sources": str(active_sources),
+        "round_write_bursts": str(write_bursts),
+    }
 
 
 def _channel_means(samples):
@@ -147,10 +196,12 @@ def mesh_nodes(topology):
     return int(m.group(1)) * int(m.group(2)) if m else None
 
 
-def offered_load(injection_rate, burst_len):
+def offered_load(injection_rate, burst_len, write_only=False):
     """(flits, bytes) offered per node per cycle on DAT. See the module docstring."""
     rate = float(injection_rate)
     beats = int(burst_len) + 1
+    if write_only:
+        return rate * (1 + beats), rate * beats * BEAT_BYTES
     return rate * (1 + beats) + rate * beats, rate * beats * BEAT_BYTES * 2
 
 
@@ -178,16 +229,59 @@ def parse_config(log_text, cli_max_unique_ids, cli_max_outstanding):
     )
 
 
+def parse_channel_compare(log_text, channel_mapping, channel_case, seed):
+    """Return the multi-burst comparison row after proving its log evidence."""
+    if not _CHANNEL_PASS.search(log_text):
+        sys.exit("emit_result_csv: channel comparison did not reach exact non-vacuous PASS")
+    if re.search(r"channel_compare_fault|\bfatal\b|%Error", log_text, re.I):
+        sys.exit("emit_result_csv: channel comparison log contains fault or fatal evidence")
+
+    expected_channel = channel_case.capitalize()
+    control = []
+    for line in log_text.splitlines():
+        if not line.startswith(f"[Monitor node0.master][{expected_channel}]"):
+            continue
+        match = _MON.search(line)
+        if match:
+            control.append(match.groups())
+
+    data = []
+    for line in log_text.splitlines():
+        if "[ChannelCompare]" not in line:
+            continue
+        match = _CHANNEL_BEATS.fullmatch(line)
+        if not match:
+            sys.exit("emit_result_csv: malformed [ChannelCompare] data evidence")
+        data.append(match.groups())
+
+    if len(control) != 1 or control[0][0].lower() != channel_case or int(control[0][2]) != 64:
+        sys.exit("emit_result_csv: expected exactly 64 node 0 Control samples")
+    if len(data) != 2 or {row[1] for row in data} != {"1", "2"} or any(
+            row[0] != channel_case or int(row[2]) != 64 or int(row[3]) != 16384
+            for row in data):
+        sys.exit("emit_result_csv: node 1/2 Data burst proof is inconsistent")
+
+    return {
+        "channel_mapping": channel_mapping,
+        "channel_case": channel_case,
+        "seed": seed,
+        "control_samples": "64",
+        "control_mean_latency_cycles": str(float(control[0][1])),
+        "data_bursts_per_node": "64",
+        "data_beats_per_node": "16384",
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--log", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--topology", required=True)
-    ap.add_argument("--pattern", required=True)
-    ap.add_argument("--injection-mode", required=True)
-    ap.add_argument("--injection-rate", required=True)
-    ap.add_argument("--injection-count", required=True)
-    ap.add_argument("--seed", required=True)
+    ap.add_argument("--pattern")
+    ap.add_argument("--injection-mode")
+    ap.add_argument("--injection-rate")
+    ap.add_argument("--injection-count")
+    ap.add_argument("--seed")
     ap.add_argument("--max-unique-ids", default=None)
     ap.add_argument("--max-outstanding", default=None)
     # The next three do not appear in the tb [Config] line; unset means the run
@@ -195,13 +289,42 @@ def main():
     ap.add_argument("--max-txns-per-id", default="32")
     ap.add_argument("--ids-per-initiator", default="1")
     ap.add_argument("--burst-len", default="0")
+    ap.add_argument("--stim-size")
     ap.add_argument("--space", default="memory")
+    ap.add_argument("--require-round-perf", action="store_true")
+    ap.add_argument("--channel-mapping", choices=("2-channel", "3-channel"))
+    ap.add_argument("--channel-case", choices=("write", "read"))
     a = ap.parse_args()
 
+    if bool(a.channel_mapping) != bool(a.channel_case):
+        ap.error("--channel-mapping and --channel-case must be used together")
+    if a.channel_mapping and a.seed is None:
+        ap.error("channel comparison requires --seed")
+
     log_text = pathlib.Path(a.log).read_text()
+    parse_traffic_meta(log_text)
+    if a.channel_mapping:
+        row = parse_channel_compare(log_text, a.channel_mapping, a.channel_case, a.seed)
+        with open(a.out, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(row))
+            writer.writeheader()
+            writer.writerow(row)
+        print(f"wrote {a.out}: {a.channel_mapping} {a.channel_case} mean latency "
+              f"{row['control_mean_latency_cycles']} cycles")
+        return
+
+    if any(value is None for value in (
+            a.pattern, a.injection_mode, a.injection_rate, a.injection_count, a.seed,
+            a.stim_size)):
+        ap.error("throughput results require --pattern, --injection-mode, --injection-rate, "
+                 "--injection-count, --seed, and --stim-size")
+
     bw, latency, samples = parse_monitors(log_text)
     srcq = parse_source_queue(log_text)
-    offered_flits, offered_bytes = offered_load(a.injection_rate, a.burst_len)
+    offered_flits, offered_bytes = offered_load(
+        a.injection_rate, a.burst_len,
+        write_only=a.pattern in {"broadcast", "gather", "alltoall",
+                                 "neighbor_exchange", "pipeline", "many_to_many"})
     nodes = mesh_nodes(a.topology)
     window = run_window(a.log)
     if window:
@@ -219,6 +342,12 @@ def main():
             return ""
         return f"{mean + (srcq.get(channel, 0.0) if open_loop else 0.0):.1f}"
 
+    round_fields = ({
+        "round_completion_cycles": "",
+        "round_active_sources": "",
+        "round_write_bursts": "",
+    } if not a.require_round_perf and "[RoundPerf]" not in log_text
+                    else parse_round_perf(log_text))
     row = {
         "topology": a.topology,
         "vc": dat_num_vc,
@@ -234,6 +363,7 @@ def main():
         "max_txns_per_id": a.max_txns_per_id,
         "ids_per_initiator": a.ids_per_initiator,
         "burst_len": a.burst_len,
+        "stim_size": a.stim_size,
         "space": a.space,
         "mst_stall_random": mst_stall_random,
         "offered_flits_per_node_cycle": str(round(offered_flits, 6)),
@@ -248,6 +378,7 @@ def main():
         "mean_latency_open": lat("all", True),
         "mean_latency_open_read": lat("read", True),
         "mean_latency_open_write": lat("write", True),
+        **round_fields,
     }
     with open(a.out, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(row))

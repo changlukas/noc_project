@@ -189,6 +189,7 @@ injection rate and mode 1 stays the saturation-curve instrument.
 | `HOTSPOT_PERIPHERALS` | unset | `1` aims `hotspot` at the peripherals instead of a tile |
 | `BURST_LEN` | `0` | AXI `len` for the generated stimulus; `0` is a single beat. At `--size 5` (32 B/beat) `63` gives 64 beats = 2048 B, inside the 4 KB boundary |
 | `STIM_SIZE` | `5` for memory | AXI `size`; `6` selects the full 64 B data bus. AI inference patterns use the requested burst geometry. The report recipe sets `STIM_SIZE=6 BURST_LEN=63`, which is 64 beats = 4 KB |
+| `ROUND_PERF` | `0` | set to `1` only for directed, write-only traffic; records common-start to final-B completion cycles in `result.csv` |
 | `MAX_UNIQUE_IDS` | `NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT` | NSU meta buffer: distinct upstream ids tracked at once |
 | `MAX_OUTSTANDING` | `NSU_META_BUFFER_*_DFLT` | NSU meta buffer: outstanding entries |
 | `B_ROB_DEPTH`, `R_ROB_DEPTH` | `NMU_ROB_*_DFLT` | NMU reorder-buffer pool depth per direction. Both ≤ 256 — `ordering_tag` is 8 bits |

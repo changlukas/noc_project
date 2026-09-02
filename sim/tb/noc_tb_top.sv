@@ -342,6 +342,9 @@ module noc_tb_top #(
     logic        end_of_sim [NUM_ENDPOINTS];
     int unsigned txn_cnt    [NUM_ENDPOINTS];
     int unsigned expected_txn_cnt [NUM_ENDPOINTS];
+    int unsigned expected_write_cnt [NUM_ENDPOINTS];
+    longint unsigned stimulus_start_cycle [NUM_ENDPOINTS];
+    longint unsigned stimulus_done_cycle [NUM_ENDPOINTS];
     logic        compare_ready [NUM_ENDPOINTS];
     logic        compare_start;
     logic        compare_done [NUM_ENDPOINTS];
@@ -371,6 +374,9 @@ module noc_tb_top #(
             .slave_axi_req_i(slave_axi_req[i]),   .slave_axi_rsp_o(slave_axi_rsp[i]),
             .end_of_sim_o(end_of_sim[i]), .txn_cnt_o(txn_cnt[i]),
             .expected_txn_cnt_o(expected_txn_cnt[i]),
+            .expected_write_cnt_o(expected_write_cnt[i]),
+            .stimulus_start_cycle_o(stimulus_start_cycle[i]),
+            .stimulus_done_cycle_o(stimulus_done_cycle[i]),
             .compare_ready_o(compare_ready[i]), .compare_start_i(compare_start),
             .compare_done_o(compare_done[i])
         );
@@ -419,10 +425,16 @@ module noc_tb_top #(
     // Exit logic - non-vacuous PASS guard
     // -------------------------------------------------------------------------
     localparam int unsigned SETTLE_CYCLES = 100;
+    bit round_perf = 1'b0;
+    initial void'($value$plusargs("round_perf=%d", round_perf));
     initial begin
         bit vacuous;
         bit all_done;
         int unsigned expected_total;
+        int unsigned active_sources;
+        int unsigned write_bursts;
+        longint unsigned round_start;
+        longint unsigned round_completion;
         int unsigned aw_idle, aw_same, aw_alloc, ar_idle, ar_same, ar_alloc;
         int unsigned list_hwm, wtxn_hwm, rtxn_hwm;
         // clock-polled (not wait()): end_of_sim is driven through port
@@ -446,6 +458,37 @@ module noc_tb_top #(
         end
         if (expected_total == 0) $fatal(1, "tb_top: empty stimulus");
         if (vacuous) $fatal(1, "tb_top: vacuous run");
+        active_sources = 0;
+        write_bursts = 0;
+        for (int i = 0; i < NUM_ENDPOINTS; i++) begin
+            if (expected_write_cnt[i] > 0) active_sources++;
+            write_bursts += expected_write_cnt[i];
+        end
+        $display("[TrafficMeta] active_sources=%0d write_bursts=%0d",
+                 active_sources, write_bursts);
+        if (round_perf) begin
+            if (injection_mode != 0)
+                $fatal(1, "RoundPerf requires injection_mode=0");
+            round_start = 0;
+            round_completion = 0;
+            active_sources = 0;
+            for (int i = 0; i < NUM_ENDPOINTS; i++) begin
+                if (expected_txn_cnt[i] > 0) begin
+                    if (expected_txn_cnt[i] != expected_write_cnt[i])
+                        $fatal(1, "RoundPerf requires write-only stimulus at node%0d", i);
+                    if (active_sources == 0)
+                        round_start = stimulus_start_cycle[i];
+                    else if (stimulus_start_cycle[i] != round_start)
+                        $fatal(1, "RoundPerf sources did not start together");
+                    if (stimulus_done_cycle[i] > round_completion)
+                        round_completion = stimulus_done_cycle[i];
+                    active_sources++;
+                end
+            end
+            $display("[RoundPerf] start_cycle=%0d completion_cycle=%0d round_cycles=%0d active_sources=%0d write_bursts=%0d",
+                     round_start, round_completion, round_completion - round_start,
+                     active_sources, write_bursts);
+        end
         // Sizing statistics per node: RoB slot peak, the SPEC 17 admission
         // clause split, the per-id order-list peak and the shared-pool peaks.
         for (int i = 0; i < NUM_ENDPOINTS; i++) begin

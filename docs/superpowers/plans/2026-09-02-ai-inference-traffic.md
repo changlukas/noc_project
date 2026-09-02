@@ -364,7 +364,7 @@ Goal: Measure one fully-ready AXI write round from common issue start through th
 
 Success Criteria: The log reports the common directed-round start, final expected B completion, active-source count, and exact elapsed cycles; CSV parsing rejects missing or inconsistent evidence.
 
-Status: Not Started
+Status: Complete
 
 ### Task 3: Add endpoint completion evidence and CSV fields
 
@@ -395,7 +395,7 @@ Status: Not Started
 
 - CSV columns: `round_completion_cycles`, `round_active_sources`, `round_write_bursts`, and `stim_size`.
 
-- [ ] **Step 1: Add failing parser tests**
+- [x] **Step 1: Add failing parser tests**
 
 ```python
 ROUND_LOG = """[RoundPerf] start_cycle=10 completion_cycle=210 round_cycles=200 active_sources=15 write_bursts=15
@@ -419,7 +419,7 @@ def test_round_perf_rejects_inconsistent_elapsed_time():
 
 Also reject a missing or duplicate `[RoundPerf]` line, `active_sources=0`, and `write_bursts=0`. Add equivalent strict tests for missing or duplicate `[TrafficMeta]` evidence. Verify that `STIM_SIZE` is passed into CSV as `stim_size`, because report comparisons must reject mixed transfer geometry.
 
-- [ ] **Step 2: Run the parser tests and confirm RED**
+- [x] **Step 2: Run the parser tests and confirm RED**
 
 ```text
 python -m pytest sim/tools/test_emit_result_csv.py -k round_perf -q
@@ -427,7 +427,7 @@ python -m pytest sim/tools/test_emit_result_csv.py -k round_perf -q
 
 Expected: FAIL because `parse_round_perf` does not exist.
 
-- [ ] **Step 3: Capture cycles at the correct boundaries**
+- [x] **Step 3: Capture cycles at the correct boundaries**
 
 In directed mode, set the common start immediately after reset release and set done immediately after `wait_b()`/`wait_r()` joins, before `run_done` and the 50-cycle response check:
 
@@ -464,13 +464,13 @@ end
 
 Export `expected_write_cnt_o` separately from total transactions so the log does not infer writes from a write-only policy. Sum `expected_write_cnt[]` once at top level and emit `[TrafficMeta]` for all runs; `RoundPerf` reuses the same counts instead of recomputing them from pattern semantics.
 
-- [ ] **Step 4: Gate RoundPerf to valid directed write-only runs**
+- [x] **Step 4: Gate RoundPerf to valid directed write-only runs**
 
 Add Make variable `ROUND_PERF ?= 0` and pass `+round_perf=$(ROUND_PERF)`. Fatal unless `injection_mode == 0` and every active endpoint has zero loaded reads. This prevents a synthetic write/readback run from being mislabeled as an AI communication round.
 
 When `ROUND_PERF=1`, the directed Make recipe must invoke `emit_result_csv.py` after the exact PASS check so the RoundPerf evidence reaches `result.csv`. Do not invoke the CSV path for ordinary directed correctness runs.
 
-- [ ] **Step 5: Parse and validate RoundPerf**
+- [x] **Step 5: Parse and validate RoundPerf**
 
 Implement a strict anchored regex. Require:
 
@@ -482,7 +482,7 @@ write_bursts > 0
 
 Write the fields into `result.csv`; leave the round fields empty when `+round_perf` was not requested.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 ```text
 python -m pytest sim/tools/test_emit_result_csv.py sim/tools/test_gen_tb_top.py -q
@@ -490,7 +490,7 @@ python -m pytest sim/tools/test_emit_result_csv.py sim/tools/test_gen_tb_top.py 
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit round measurement**
+- [x] **Step 7: Commit round measurement**
 
 ```text
 git add sim/tb/test/user_node_endpoint.sv sim/tb/noc_tb_top.sv sim/tools/gen_tb_top.py sim/tools/emit_result_csv.py sim/tools/test_emit_result_csv.py sim/tools/test_gen_tb_top.py
