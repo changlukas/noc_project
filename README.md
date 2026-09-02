@@ -122,8 +122,11 @@ array, the connections between them and the address ranges each endpoint owns.
 | var | values |
 |---|---|
 | `CONFIG` | a `sim/configs/*.yml` basename — `mesh_2x2`, `mesh_2x2_periph`, `mesh_4x4`, `mesh_4x4_periph4`. Four geometries, no VC or RoB variants: those are build parameters, not configurations (see below). Every node owns a 4 GiB block holding a 32 MB memory aperture at offset 0 and a 4 KB config aperture above it; the block is the node stride, declared as the `addr_range` `stride`. `mesh_2x2_periph` hangs a peripheral off the WEST port of the routers at (0,0) and (0,1); `mesh_4x4_periph4` puts one on each of the four faces. A peripheral shares its host router's coordinate and is told apart by the port it hangs off, named as an `XYDirections` value in `dst_dir` |
-| `PATTERN` | `neighbor`, `transpose`, `bit_complement`, `bit_reverse`, `shuffle`, `bit_rotation`, `tornado` (the booksim2 permutation set; the bit permutations need a power-of-two node count, `transpose` and `tornado` a square mesh), `uniform_random`, `all_to_all` (each node walks every other node in turn, so the destination changes on every transaction and, at one id per initiator, every one of them allocates a reorder-buffer slot), `hotspot` (`HOTSPOT=` names the target node), `multicast` (collective write, shape from `MCAST_SHAPE`) |
-| `MCAST_SHAPE` | `row` (default), `col`, `submesh`. `multicast` only. One shape per run, concurrent multicast trees must stay pairwise disjoint |
+| `PATTERN` | Synthetic: `neighbor`, `transpose`, `bit_complement`, `bit_reverse`, `shuffle`, `bit_rotation`, `tornado`, `uniform_random`, `all_to_all`, `hotspot`. AI inference: `broadcast`, `gather`, `alltoall`, `neighbor_exchange`, `pipeline`, `many_to_many`. `multicast` remains the checked collective pattern |
+| `MCAST_SHAPE` | `row` (default), `col`, `submesh`, `global`; used by `multicast` and `broadcast` |
+| `GATHER_SHAPE` | `global` (default) or `submesh`; the 4x4 local roots are nodes 5, 6, 9, and 10 |
+| `ROOT_NODE` | global Gather root, default node 0 |
+| `AI_ROUNDS` | optional round count for AI inference patterns; otherwise `INJECTION_COUNT` supplies the count |
 
 `SEED` unset draws and prints a random seed; pass `SEED=<n>` to replay
 a run.
@@ -185,6 +188,7 @@ injection rate and mode 1 stays the saturation-curve instrument.
 | `HOTSPOT` | `5` | target node for the `hotspot` pattern |
 | `HOTSPOT_PERIPHERALS` | unset | `1` aims `hotspot` at the peripherals instead of a tile |
 | `BURST_LEN` | `0` | AXI `len` for the generated stimulus; `0` is a single beat. At `--size 5` (32 B/beat) `63` gives 64 beats = 2048 B, inside the 4 KB boundary |
+| `STIM_SIZE` | `5` for memory | AXI `size`; `6` selects the full 64 B data bus. AI inference patterns use the requested burst geometry. The report recipe sets `STIM_SIZE=6 BURST_LEN=63`, which is 64 beats = 4 KB |
 | `MAX_UNIQUE_IDS` | `NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT` | NSU meta buffer: distinct upstream ids tracked at once |
 | `MAX_OUTSTANDING` | `NSU_META_BUFFER_*_DFLT` | NSU meta buffer: outstanding entries |
 | `B_ROB_DEPTH`, `R_ROB_DEPTH` | `NMU_ROB_*_DFLT` | NMU reorder-buffer pool depth per direction. Both ≤ 256 — `ordering_tag` is 8 bits |
@@ -207,7 +211,14 @@ Fault injection, for proving a checker fires rather than assuming it does:
 make sim-gen CONFIG=mesh_4x4 PATTERN=uniform_random
 make sim CONFIG=mesh_4x4 PATTERN=uniform_random INJECTION_MODE=1 INJECTION_RATE=0.3
 make sim CONFIG=mesh_4x4 PATTERN=uniform_random INJECTION_MODE=2 INJECTION_RATE=0.5
+make sim-gen CONFIG=mesh_4x4 PATTERN=many_to_many INJECTION_COUNT=4 STIM_SIZE=6 BURST_LEN=63 IDS_PER_INITIATOR=1
+make sim CONFIG=mesh_4x4 PATTERN=many_to_many INJECTION_COUNT=4 STIM_SIZE=6 BURST_LEN=63 IDS_PER_INITIATOR=1
 ~~~
+
+AI inference patterns are directed, write-only workloads. The generator also
+writes `traffic_meta.json` beside the node directories with
+`active_sources`, `source_write_bursts`, and `destination_deliveries`. These
+counts separate source-side injection from multicast delivery work.
 
 On success mode 1 prints `CONTINUOUS PASS: <run-tag>` and writes
 `sim/verilator/output/continuous_<config>_<pattern>_r<rate>_s<seed>/result.csv`
