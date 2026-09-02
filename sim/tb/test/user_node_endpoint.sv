@@ -84,7 +84,11 @@ module user_node_endpoint #(
     input  ni_signals_pkg::axi_req_t   slave_axi_req_i,
     output ni_signals_pkg::axi_rsp_t   slave_axi_rsp_o,
     output logic                       end_of_sim_o,
-    output int unsigned                txn_cnt_o
+    output int unsigned                txn_cnt_o,
+    output int unsigned                expected_txn_cnt_o,
+    output logic                       compare_ready_o,
+    input  logic                       compare_start_i,
+    output logic                       compare_done_o
 );
 
     localparam time ApplTime = 2ns;   // FlooNoC values; clk is 10 ns
@@ -146,6 +150,7 @@ module user_node_endpoint #(
     ) i_mst_backpressure (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
+        .bypass_i(channel_compare_mode),
         .slv(mst_pre_delay),
         .mst(mst_post_delay)
     );
@@ -527,7 +532,7 @@ module user_node_endpoint #(
             .FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),
             .FIXED_DELAY_OUTPUT(MEM_FIXED_DELAY_OUTPUT)
         ) i_delayer (
-            .clk_i(clk_i), .rst_ni(rst_ni),
+            .clk_i(clk_i), .rst_ni(rst_ni), .bypass_i(channel_compare_mode),
             .slv(tile_mst[t]), .mst(tile_mem[t])
         );
 
@@ -651,6 +656,13 @@ module user_node_endpoint #(
     // through a clocked register because Verilator does not reliably propagate
     // a procedurally-assigned output-port variable to the instantiating scope.
     logic run_done = 1'b0;
+    logic channel_compare_mode = 1'b0;
+    logic compare_started = 1'b0;
+    bit compare_is_read = 1'b0;
+    bit channel_compare_fault = 1'b0;
+    int unsigned compare_data_beats = 0;
+
+    initial void'($value$plusargs("channel_compare_fault=%d", channel_compare_fault));
 
     always_ff @(posedge clk_i or negedge rst_ni) begin
         if (!rst_ni) end_of_sim_o <= 1'b0;
@@ -675,6 +687,21 @@ module user_node_endpoint #(
         void'($value$plusargs("injection_mode=%d", m));
         return m;
     endfunction
+
+    initial channel_compare_mode = get_injection_mode() == 3;
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
+            compare_data_beats <= 0;
+        end else if (compare_started) begin
+            if ((NODE_ID == 1 || NODE_ID == 2) && !compare_is_read &&
+                mst_flat_req.wvalid && mst_flat_rsp.wready)
+                compare_data_beats <= compare_data_beats + 1;
+            if ((NODE_ID == 1 || NODE_ID == 2) && compare_is_read &&
+                mst_flat_rsp.rvalid && mst_flat_req.rready)
+                compare_data_beats <= compare_data_beats + 1;
+        end
+    end
 
     // The one "not an error response" predicate, {OKAY, EXOKAY}, the set pulp
     // uses (axi_test.sv:2133-2134). Both readers below call it -- the RRESP
@@ -1043,14 +1070,43 @@ module user_node_endpoint #(
     // queues, spec Two-phase). join (not join_none) everywhere so B/R are
     // consumed and the pass terminates cleanly.
     initial begin
+        string channel_case;
         void'($value$plusargs("stim_dir=%s", stim_dir));
         write_path = $sformatf("%s/node%0d/write.txt", stim_dir, NODE_ID);
         read_path  = $sformatf("%s/node%0d/read.txt",  stim_dir, NODE_ID);
         file_master = new(master_dv);
         file_master.load_files(read_path, write_path);
+        expected_txn_cnt_o = int'(file_master.num_writes + file_master.num_reads);
         injection_rate = 1.0;
         void'($value$plusargs("injection_rate=%f", injection_rate));
         injection_rate_bp = int'(injection_rate * 10000.0);
+        compare_ready_o = 1'b0;
+        compare_done_o = 1'b0;
+        if (get_injection_mode() == 3) begin
+            if (!$value$plusargs("channel_case=%s", channel_case) ||
+                (channel_case != "write" && channel_case != "read"))
+                $fatal(1, "injection_mode=3 requires +channel_case=write|read");
+            compare_is_read = channel_case == "read";
+            if (NODE_ID == 1 && channel_compare_fault) begin
+                if (compare_is_read) begin
+                    if (file_master.ar_queue.size() != 64 ||
+                        file_master.ar_queue[$].ax_len != 8'd255)
+                        $fatal(1, "[ChannelCompare] read fault requires 64 256-beat ARs");
+                    file_master.ar_queue[$].ax_len = 8'd254;
+                end else begin
+                    if (file_master.aw_queue.size() != 64 ||
+                        file_master.aw_queue[$].ax_len != 8'd255 ||
+                        file_master.w_queue.size() != 16384)
+                        $fatal(1, "[ChannelCompare] write fault requires 64 256-beat AW/W bursts");
+                    file_master.aw_queue[$].ax_len = 8'd254;
+                    file_master.w_queue[$-1].w_last = 1'b1;
+                    void'(file_master.w_queue.pop_back());
+                end
+            end
+            if (MEM_STALL_RANDOM_INPUT || MEM_STALL_RANDOM_OUTPUT ||
+                MEM_FIXED_DELAY_INPUT != 0 || MEM_FIXED_DELAY_OUTPUT != 0)
+                $fatal(1, "injection_mode=3 requires ideal tile-memory timing");
+        end
         @(posedge rst_ni);
         case (get_injection_mode())
             0: begin
@@ -1086,8 +1142,32 @@ module user_node_endpoint #(
                     file_master.wait_r();
                 join
             end
+            3: begin
+                if (NODE_ID >= 3) begin
+                    compare_ready_o = 1'b1;
+                    compare_done_o = 1'b1;
+                end else begin
+                    if (compare_is_read)
+                        fork file_master.run_aw(); file_master.run_w(); file_master.wait_b(); join
+                    compare_ready_o = 1'b1;
+                    wait (compare_start_i === 1'b1);
+                    compare_started = 1'b1;
+                    if (compare_is_read)
+                        fork file_master.run_ar(); file_master.wait_r(); join
+                    else
+                        fork file_master.run_aw(); file_master.run_w(); file_master.wait_b(); join
+                    if (NODE_ID == 1 || NODE_ID == 2) @(posedge clk_i);
+                    if ((NODE_ID == 1 || NODE_ID == 2) && compare_data_beats != 16384)
+                        $fatal(1, "[ChannelCompare] case=%s node=%0d expected 16384 data beats, got %0d",
+                               channel_case, NODE_ID, compare_data_beats);
+                    if (NODE_ID == 1 || NODE_ID == 2)
+                        $display("[ChannelCompare] case=%s node=%0d bursts=64 data_beats=%0d",
+                                 channel_case, NODE_ID, compare_data_beats);
+                    compare_done_o = 1'b1;
+                end
+            end
             default: begin
-                $fatal(1, "unknown +injection_mode=%0d (0, 1, 2 supported)",
+                $fatal(1, "unknown +injection_mode=%0d (0, 1, 2, 3 supported)",
                     get_injection_mode());
             end
         endcase

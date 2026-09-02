@@ -160,15 +160,16 @@ module noc_tb_top #(
     localparam int unsigned K_CYC_PER_BEAT  = FABRIC_CYC_PER_BEAT + MEM_CYC_PER_BEAT
                                             + MST_CYC_PER_BEAT;
     localparam int unsigned MAX_BURST_BEATS = int'(REGION_BYTES) / (DATA_WIDTH / 8);
-    int unsigned tb_num_reads  = 8;   // mirror endpoint defaults
-    int unsigned tb_num_writes = 8;
     import "DPI-C" context function void cmodel_dump_fabric_state();
     initial begin
         int unsigned timeout_cycles;
-        void'($value$plusargs("num_reads=%d",  tb_num_reads));
-        void'($value$plusargs("num_writes=%d", tb_num_writes));
+        int unsigned expected_total;
+        @(posedge rst_ni);
+        expected_total = 0;
+        for (int i = 0; i < NUM_ENDPOINTS; i++)
+            expected_total += expected_txn_cnt[i];
         timeout_cycles = TIMEOUT_BASE
-            + K_CYC_PER_BEAT * (tb_num_reads + tb_num_writes) * MAX_BURST_BEATS * NUM_ENDPOINTS;
+            + K_CYC_PER_BEAT * expected_total * MAX_BURST_BEATS;
         // Forensics override: fire the watchdog just past a known freeze
         // point so the state dump lands without waiting out the formula.
         void'($value$plusargs("timeout_cycles=%d", timeout_cycles));
@@ -217,12 +218,16 @@ module noc_tb_top #(
                                                                  input int max_txns_per_id,
                                                                  input int port_id,
                                                                  input string config_path);
+    import "DPI-C" context function void cmodel_nmu_set_channel_mode(input longint unsigned ctx,
+                                                                        input int mode);
     import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name,
                                                               input int src_id, input int num_vc,
                                                               input int max_unique_ids,
                                                               input int max_outstanding,
                                                               input int port_id,
                                                               input string config_path);
+    import "DPI-C" context function void cmodel_nsu_set_channel_mode(input longint unsigned ctx,
+                                                                        input int mode);
     import "DPI-C" context function longint unsigned cmodel_dat_merge_create(input string name,
                                                                     input int dat_num_vc);
 
@@ -246,9 +251,15 @@ module noc_tb_top #(
     int unsigned r_rob_depth = ni_params_pkg::NMU_ROB_R_DEPTH_DFLT;
     // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId).
     int unsigned max_txns_per_id = ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT;
+    int unsigned channel_mode = 0;
+    int unsigned injection_mode = 0;
 
     initial begin
         cmodel_init();
+        void'($value$plusargs("channel_mode=%d", channel_mode));
+        void'($value$plusargs("injection_mode=%d", injection_mode));
+        if (channel_mode != 0 && channel_mode != 2 && channel_mode != 3)
+            $fatal(1, "noc_tb_top: channel_mode must be 0, 2 or 3");
         void'($value$plusargs("sam_config=%s", sam_config_path));
         void'($value$plusargs("max_unique_ids=%d", max_unique_ids));
         void'($value$plusargs("max_outstanding=%d", max_outstanding));
@@ -284,6 +295,8 @@ module noc_tb_top #(
             nsu_ctx[e] = cmodel_nsu_create($sformatf("nsu_%0d", e), src_id, int'(DAT_NUM_VC),
                                            max_unique_ids, max_outstanding, port_id,
                                            sam_config_path);
+            cmodel_nmu_set_channel_mode(nmu_ctx[e], channel_mode);
+            cmodel_nsu_set_channel_mode(nsu_ctx[e], channel_mode);
             dat_merge_ctx[e] = cmodel_dat_merge_create($sformatf("dat_merge_%0d", e),
                                                        int'(DAT_NUM_VC));
         end
@@ -328,6 +341,15 @@ module noc_tb_top #(
     // -------------------------------------------------------------------------
     logic        end_of_sim [NUM_ENDPOINTS];
     int unsigned txn_cnt    [NUM_ENDPOINTS];
+    int unsigned expected_txn_cnt [NUM_ENDPOINTS];
+    logic        compare_ready [NUM_ENDPOINTS];
+    logic        compare_start;
+    logic        compare_done [NUM_ENDPOINTS];
+    always_comb begin
+        compare_start = injection_mode == 3;
+        for (int i = 0; i < NUM_ENDPOINTS; i++)
+            compare_start &= compare_ready[i];
+    end
     for (genvar i = 0; i < NUM_ENDPOINTS; i++) begin : g_endpoint
         user_node_endpoint #(
             .NODE_ID(i),
@@ -347,7 +369,10 @@ module noc_tb_top #(
             .master_axi_req_o(master_axi_req[i]), .master_awuser_o(master_awuser[i]),
             .master_axi_rsp_i(master_axi_rsp[i]),
             .slave_axi_req_i(slave_axi_req[i]),   .slave_axi_rsp_o(slave_axi_rsp[i]),
-            .end_of_sim_o(end_of_sim[i]), .txn_cnt_o(txn_cnt[i])
+            .end_of_sim_o(end_of_sim[i]), .txn_cnt_o(txn_cnt[i]),
+            .expected_txn_cnt_o(expected_txn_cnt[i]),
+            .compare_ready_o(compare_ready[i]), .compare_start_i(compare_start),
+            .compare_done_o(compare_done[i])
         );
     end : g_endpoint
 
@@ -397,6 +422,7 @@ module noc_tb_top #(
     initial begin
         bit vacuous;
         bit all_done;
+        int unsigned expected_total;
         int unsigned aw_idle, aw_same, aw_alloc, ar_idle, ar_same, ar_alloc;
         int unsigned list_hwm, wtxn_hwm, rtxn_hwm;
         // clock-polled (not wait()): end_of_sim is driven through port
@@ -405,16 +431,20 @@ module noc_tb_top #(
             @(posedge clk_i);
             all_done = rst_ni;
             for (int i = 0; i < NUM_ENDPOINTS; i++)
-                all_done &= end_of_sim[i];  // scoreboard is in-endpoint
+                all_done &= injection_mode == 3 ? compare_done[i] : end_of_sim[i];
         end while (!all_done);
         repeat (SETTLE_CYCLES) @(posedge clk_i);
         vacuous = 1'b0;
+        expected_total = 0;
         for (int i = 0; i < NUM_ENDPOINTS; i++) begin
-            if (txn_cnt[i] == 0) begin
+            expected_total += expected_txn_cnt[i];
+            if (expected_txn_cnt[i] > 0 && txn_cnt[i] == 0) begin
                 vacuous = 1'b1;
-                $display("FAIL: node%0d completed zero transactions (vacuous)", i);
+                $display("FAIL: node%0d completed zero of %0d loaded transactions",
+                         i, expected_txn_cnt[i]);
             end
         end
+        if (expected_total == 0) $fatal(1, "tb_top: empty stimulus");
         if (vacuous) $fatal(1, "tb_top: vacuous run");
         // Sizing statistics per node: RoB slot peak, the SPEC 17 admission
         // clause split, the per-id order-list peak and the shared-pool peaks.
