@@ -363,9 +363,9 @@ source write but one delivery per multicast member.
 - `axi_scoreboard.enable_all_checks()` + `.monitor()` arm read-data, B-resp,
   and R-resp checks against the write golden, sampled on `master_dv`. This
   requires the write-before-read precondition (see injection modes below).
-- `tb_top` counts AW/AR handshakes per node (`txn_cnt_o`). `PASS` requires
-  `txn_cnt_o > 0` on every node, so a run where a node completed zero
-  transactions cannot report clean.
+- `tb_top` counts AW/AR handshakes per node (`txn_cnt_o`). `PASS` requires a
+  non-empty loaded stimulus and `txn_cnt_o > 0` on every endpoint whose
+  loaded stimulus is non-empty; intentionally idle AI endpoints are legal.
 - `DIRECTED PASS` (the `make sim` console line) additionally requires the
   scoreboard to report zero mismatches: the run log must reach `PASS: all N
   nodes done, non-vacuous` and carry no scoreboard-mismatch or protocol-error

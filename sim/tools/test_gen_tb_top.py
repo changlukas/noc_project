@@ -21,6 +21,14 @@ def test_user_endpoint_exports_loaded_stimulus_count():
     assert ".expected_write_cnt_o(expected_write_cnt[i])" in generated
 
 
+def test_write_only_broadcast_does_not_require_readback_compares():
+    endpoint = (ROOT / "sim/tb/test/user_node_endpoint.sv").read_text(
+        encoding="utf-8")
+
+    assert ("if (file_master.num_reads > 0 && mcast_mem.num() > 0 && "
+            "mcast_checked == 0)" in endpoint)
+
+
 def test_generated_top_emits_strict_round_measurement_evidence():
     text = g.emit_tb_top(g.load_topology("mesh_4x4"))
 

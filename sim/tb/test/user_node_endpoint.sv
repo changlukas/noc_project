@@ -1200,13 +1200,13 @@ module user_node_endpoint #(
             if (mst_flat_rsp.bvalid)
                 $fatal(1, "[mcast_sb] node%0d: B still asserted after all writes retired -- extra B",
                        NODE_ID);
-            // Non-vacuity: a node that captured multicast golden read its own
-            // member replicas back (the pattern's readback phase), so zero
-            // compares means the checker never saw the readback -- vacuous.
-            if (mcast_mem.num() > 0 && mcast_checked == 0)
+            // Non-vacuity applies only when the stimulus declares a readback
+            // phase. Pure write-only Broadcast is checked by the AW/B counts
+            // above and has no R beats to compare.
+            if (file_master.num_reads > 0 && mcast_mem.num() > 0 && mcast_checked == 0)
                 $fatal(1, "[mcast_sb] node%0d: multicast golden captured but zero replica bytes compared",
                        NODE_ID);
-            if (mcast_mem.num() > 0)
+            if (file_master.num_reads > 0 && mcast_mem.num() > 0)
                 $display("[mcast_sb] node%0d: %0d replica byte compares against %0d golden bytes",
                          NODE_ID, mcast_checked, mcast_mem.num());
         end
