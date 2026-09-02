@@ -128,6 +128,8 @@ def collect(out_root):
             sys.exit(f"perf_report: no DAT links in {run_dir / 'perf.json'}")
         continuous.append({
             **base,
+            "destination_deliveries": _integer(
+                row, "destination_deliveries", csv_path),
             "offered": offered,
             "offered_mesh_avg": _number(row, "offered_load_mesh_avg", csv_path),
             "accepted_injection": _number(
@@ -176,6 +178,22 @@ def _by_mapping(rows):
             for mapping in EXPECTED_MAPPINGS}
 
 
+def _continuous_round_count(curves, round_by_mapping):
+    counts = set()
+    for mapping in EXPECTED_MAPPINGS:
+        deliveries = {row["destination_deliveries"] for row in curves[mapping]}
+        one_round = round_by_mapping[mapping]["destination_deliveries"]
+        if len(deliveries) != 1:
+            sys.exit("perf_report: continuous round count changed across load points")
+        total = deliveries.pop()
+        if total % one_round:
+            sys.exit("perf_report: continuous deliveries are not whole rounds")
+        counts.add(total // one_round)
+    if len(counts) != 1:
+        sys.exit("perf_report: continuous round count must match across mappings")
+    return counts.pop()
+
+
 def report(out_root):
     results = collect(out_root)
     _require_complete(results)
@@ -184,6 +202,7 @@ def report(out_root):
     flits = beats + 1
     curves = _by_mapping(results["continuous"])
     round_by_mapping = {row["mapping"]: row for row in results["rounds"]}
+    continuous_rounds = _continuous_round_count(curves, round_by_mapping)
 
     communication_rows = []
     for mapping in EXPECTED_MAPPINGS:
@@ -218,7 +237,7 @@ def report(out_root):
         "",
         "## 1. Test Setup and Measurement",
         "",
-        f"所有結果固定使用 seed {seed}、4 KB AXI write（{beats} beats，burst length {burst_len}）與相同 offered-load sweep。",
+        f"所有結果固定使用 seed {seed}、4 KB AXI write（{beats} beats，burst length {burst_len}）。Continuous sweep 使用 {continuous_rounds} rounds 與相同 offered-load sweep。",
         "",
         "1. 先指定每個 active source 的 Offered load。",
         f"2. Offered load per active source = Injection rate × {flits} DAT flits",

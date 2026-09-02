@@ -52,7 +52,7 @@ Status: Complete
 - Definition: `expected_txn_cnt_o = file_master.num_writes + file_master.num_reads` immediately after `load_files()`.
 - Consumers: both hand-written and generated top-level pass guards and the watchdog timeout calculation.
 
-- [ ] **Step 1: Add failing generated-top assertions**
+- [x] **Step 1: Add failing generated-top assertions**
 
 ```python
 def test_user_endpoint_exports_loaded_stimulus_count():
@@ -74,7 +74,7 @@ def test_watchdog_uses_loaded_stimulus_count():
     assert "tb_num_reads + tb_num_writes" not in text
 ```
 
-- [ ] **Step 2: Run the focused tests and confirm RED**
+- [x] **Step 2: Run the focused tests and confirm RED**
 
 Run:
 
@@ -84,7 +84,7 @@ python -m pytest sim/tools/test_gen_tb_top.py -q
 
 Expected: the new assertions fail because `expected_txn_cnt` does not exist.
 
-- [ ] **Step 3: Export the loaded count from the endpoint**
+- [x] **Step 3: Export the loaded count from the endpoint**
 
 Add the port:
 
@@ -99,7 +99,7 @@ file_master.load_files(read_path, write_path);
 expected_txn_cnt_o = int'(file_master.num_writes + file_master.num_reads);
 ```
 
-- [ ] **Step 4: Replace the per-node non-vacuity assumption**
+- [x] **Step 4: Replace the per-node non-vacuity assumption**
 
 Use this logic in `noc_tb_top.sv` and the matching `gen_tb_top.py` template:
 
@@ -120,7 +120,7 @@ if (vacuous) $fatal(1, "tb_top: vacuous run");
 
 After reset release, the watchdog must sum the loaded `expected_txn_cnt` values and size its default timeout from that total instead of `+num_reads/+num_writes`. Preserve `+timeout_cycles` as the explicit override. Apply the same change to the hand-written and generated top levels.
 
-- [ ] **Step 5: Run focused tests and a generated-top drift check**
+- [x] **Step 5: Run focused tests and a generated-top drift check**
 
 ```text
 python -m pytest sim/tools/test_gen_tb_top.py -q
@@ -129,7 +129,7 @@ python specgen/tools/codegen.py --check
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit the completion contract**
+- [x] **Step 6: Commit the completion contract**
 
 ```text
 git add sim/tb/test/user_node_endpoint.sv sim/tb/noc_tb_top.sv sim/tools/gen_tb_top.py sim/tools/test_gen_tb_top.py
@@ -505,7 +505,7 @@ Goal: Run every approved AI communication type under one documented geometry and
 
 Success Criteria: Each row states its participant scale and shape, all patterns use the same 4 KB transfer geometry and per-active-source load points, directed-round completion is separated from continuous-load metrics, and generated output contains only current results plus Markdown reports.
 
-Status: In Progress
+Status: Complete
 
 ### Task 4: Extend result aggregation and report wording
 
@@ -617,19 +617,19 @@ git commit -m "perf(sim): report AI traffic on common metrics"
 - Directed runs use `INJECTION_MODE=0 ROUND_PERF=1 AI_ROUNDS=1`.
 - Continuous sweeps use identical per-active-source `SWEEP_OFFERED`, `STIM_SIZE=6`, `BURST_LEN=63`, and seed list for every AI pattern. The report also shows each pattern's active-source count and derived mesh-average load.
 
-- [ ] **Step 1: Preserve Markdown and run the documented clean target**
+- [x] **Step 1: Preserve Markdown and run the documented clean target**
 
 Use a temporary directory for `output/*.md`, run `make -C sim/verilator clean`, then restore only the Markdown files before generating new evidence.
 
-- [ ] **Step 2: Run one directed round per mapping**
+- [x] **Step 2: Run one directed round per mapping**
 
 Run Broadcast Row/Column/2x2/Global, Gather Global/Local, AlltoAll, Neighbor Exchange, Pipeline P2P, and Regional Exchange. Require exact non-vacuous PASS plus the expected `RoundPerf` counts from Stage 2.
 
-- [ ] **Step 3: Run the common offered-load sweep**
+- [x] **Step 3: Run the common offered-load sweep**
 
 Use the approved 4 KB geometry. The sweep must calculate Injection rate from each active source's write-only DAT flits rather than reuse the retired read/write-pair formula. Record both per-active-source and mesh-average offered load; do not compare them as if they used the same denominator.
 
-- [ ] **Step 4: Generate the report and figures**
+- [x] **Step 4: Generate the report and figures**
 
 ```text
 python sim/tools/perf_report.py sim/verilator/output
@@ -637,7 +637,7 @@ python sim/tools/perf_report.py sim/verilator/output
 
 Expected: every primary communication type appears, units are present, and the report contains no retired synthetic-pattern row.
 
-- [ ] **Step 5: Run final gates**
+- [x] **Step 5: Run final gates**
 
 ```text
 python -m pytest sim/tools/test_gen_test_patterns_filemaster.py sim/tools/test_emit_result_csv.py sim/tools/test_perf_report.py sim/tools/test_gen_tb_top.py -q
@@ -650,11 +650,11 @@ make -C sim/verilator hello
 
 Then run the required clean 2x2 `neighbor` smoke and one 4x4 AI directed smoke under WSL. Expected: all checks PASS.
 
-- [ ] **Step 6: Verify cleanup and cross-file consistency**
+- [x] **Step 6: Verify cleanup and cross-file consistency**
 
 Confirm `sim/verilator/output/` contains only the current AI run directories and Markdown reports. List every `.md` hit for the changed traffic names, record whether each file needs an edit, and verify the same definitions appear in `README.md`, `docs/verification-environment.md`, and the AI report.
 
-- [ ] **Step 7: Close campaign metadata**
+- [x] **Step 7: Close campaign metadata**
 
 The report and run directories under `sim/verilator/output/` remain local ignored artifacts. Stage only explicitly listed campaign files; never use directory-wide `git add` in the dirty worktree. Fold the result into local ignored `docs/backlog.md` without committing it, and remove the root `IMPLEMENTATION_PLAN.md` only after all stages are complete.
 

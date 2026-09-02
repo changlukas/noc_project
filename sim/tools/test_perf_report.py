@@ -40,7 +40,7 @@ def _write_result(root, mapping, offered, seed="1", stim_size="6",
         "offered_load_mesh_avg": str(offered * active / 16),
         "accepted_injection_load_mesh_avg": str(offered * active / 20),
         "delivered_payload_bytes_per_cycle": str(1000 * offered * deliveries),
-        "destination_deliveries": str(deliveries),
+        "destination_deliveries": str(deliveries if directed else deliveries * 16),
         "mean_latency_open_write": str(40 + 100 * offered),
         "round_completion_cycles": "250" if directed else "",
         "round_active_sources": str(active) if directed else "",
@@ -111,6 +111,7 @@ def test_ai_report_uses_common_metrics_and_plain_formulas(tmp_path):
     assert "common issue start through the final expected B response" in text
     assert "Offered load per active source = Injection rate × 65 DAT flits" in text
     assert "Offered load mesh average = Offered load per active source × active sources / 16" in text
+    assert "Continuous sweep 使用 16 rounds" in text
     assert "Regional Exchange" in text
     assert "uniform_random" not in text and "Hotspot" not in text
     assert "RR vs RRD" not in text
