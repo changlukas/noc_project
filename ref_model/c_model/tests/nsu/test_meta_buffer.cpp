@@ -111,3 +111,23 @@ TEST(MetaBuffer, SharedPoolFullReportsInsteadOfAborting) {
     EXPECT_FALSE(mb.write_full());
     EXPECT_EQ(mb.peek_write(kDownA)->src_id, 1);
 }
+
+TEST(MetaBuffer, DirectionHighWaterMarksSurviveRetirement) {
+    MetaBuffer mb(4);
+    mb.allocate_write(0x01, {});
+    mb.allocate_write(0x02, {});
+    mb.allocate_read(0x03, {});
+    mb.allocate_read(0x04, {});
+    mb.allocate_read(0x05, {});
+
+    EXPECT_EQ(mb.write_hwm(), 2u);
+    EXPECT_EQ(mb.read_hwm(), 3u);
+
+    mb.commit_write(0x01);
+    mb.commit_write(0x02);
+    mb.commit_read(0x03);
+    mb.commit_read(0x04);
+    mb.commit_read(0x05);
+    EXPECT_EQ(mb.write_hwm(), 2u);
+    EXPECT_EQ(mb.read_hwm(), 3u);
+}

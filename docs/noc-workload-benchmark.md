@@ -1,320 +1,247 @@
-# NoC Workload Benchmark Definition
+# NoC AI Workload Benchmark Definition
 
-Revision 0.1, 2026-07-26, draft.
+Revision 0.2, 2026-09-05.
 
 ## 1. Purpose
 
-Synthetic patterns measure whether the fabric works. They do not say whether it fits the workload.
-This document defines what to run, what to measure, and what number counts as passing, for tiled
-GEMM and multi-head attention on a 2D mesh with one compute tile per node.
+This benchmark evaluates NoC traffic produced by AI dataflows. It does not model compute latency,
+PE utilization, or an end-to-end neural-network layer. Each pattern defines a deterministic
+producer-to-consumer mapping on a 4x4 mesh so that workload behavior and DUT configuration can be
+measured separately.
 
-The goal every benchmark below serves:
+The generated report is `sim/verilator/output/perf_report.md`. It contains only measured results
+that pass the validity gates in Section 8.
 
-> **Communication must finish inside the compute it overlaps.**
+## 2. Communication types
 
-A ratio below one passes, a ratio above one fails, and the margin is the headroom.
+Node numbers use row-major order on the 4x4 mesh. Read and Write runs preserve the same AI payload
+direction: a Read request travels from consumer to producer, then the Read response carries the
+payload from producer to consumer.
 
-## 1.1 Summary
-
-| | B1 Multicast | B2 Reduction | B3 GEMM step | B4 Attention layer |
-|---|---|---|---|---|
-| Stresses | operand distribution from one source to one axis of a group | partial sums from one axis to one root | B1 and B2 composed under real compute | the whole layer, prefill and decode |
-| Regime | bandwidth, kilobyte payloads | latency, hundred-byte payloads | mixed | mixed |
-| Primary metric | source port occupancy, tail completion | tail completion latency | overlap ratio `rho`, crossing tile edge | compute tile utilization, external bytes per token |
-| Baseline | repeated unicast | unicast gather | same step, all unicast | unicast, and the ideal fabric bound |
-| Passes when | port occupancy independent of set size | root occupancy independent of set size, and beats gather across the whole payload range | measured crossing near the predicted `T*` | utilization target held across the swept sequence lengths |
-| Answers | is distribution free | is decode-scale collection fast | do the primitives coexist | does any of it reach the application |
-| Measurable now | baseline column only | baseline column only | baseline column only | baseline column only |
-
-Predicted columns follow from §3. Measured columns stay empty until the model carries multicast
-and reduction. Baseline columns can be filled now.
-
-## 2. What the workload demands of the fabric
-
-### 2.1 The same GEMM, written twice
-
-Tiled GEMM `C = A x B`, output-stationary, on a group `G` of `Gx x Gy` tiles. Node `(gx, gy)` owns
-output tile `C[gy][gx]`. The group is an aligned submesh and a collective never crosses its
-boundary, so a row means a row of `G`, not a row of the mesh.
-
-**Unicast. Every node fetches its own operands.**
-
-```text
-parallel for each node (gx, gy) in G:
-    for kt in 0 .. steps-1:
-        a = hbm_read(A[gy][kt])          # the Gx nodes of row gy each issue this same read
-        b = hbm_read(B[kt][gx])          # the Gy nodes of column gx each issue this same read
-        c[gy][gx] += matmul(a, b)
-
-off-chip reads per step:  Gx Gy (|a| + |b|)
-```
-
-**Multicast. One node fetches, the group shares.**
-
-```text
-for kt in 0 .. steps-1:
-    parallel for gy in 0 .. Gy-1:
-        at node (0, gy):
-            a = hbm_read(A[gy][kt])
-            multicast(a, to = row gy of G)
-
-    parallel for gx in 0 .. Gx-1:
-        at node (gx, 0):
-            b = hbm_read(B[kt][gx])
-            multicast(b, to = column gx of G)
-
-    barrier(G)
-
-    parallel for each node (gx, gy) in G:
-        c[gy][gx] += matmul(a, b)
-
-off-chip reads per step:  Gy |a| + Gx |b|
-```
-
-The two programs compute the same result. The only difference is who reads memory.
-
-| | Unicast | Multicast | Square group, `Gx = Gy = G` |
+| Communication type | Producer-to-consumer mapping | AI traffic represented | Directions |
 |---|---|---|---|
-| Off-chip reads per step | `Gx Gy (|a| + |b|)` | `Gy |a| + Gx |b|` | **`G` times fewer** |
-| Reads of one `A` tile | `Gx`, one per node in the row | 1 | |
-| Injections to distribute one `A` tile | 0, nothing is shared | 1 | `Gx - 1` without multicast |
+| Broadcast - Row | Nodes 0, 4, 8, and 12 each distribute to the four members of their row | Row operand or activation distribution | Write |
+| Broadcast - Column | Nodes 0, 1, 2, and 3 each distribute to the four members of their column | Column operand or activation distribution | Write |
+| Broadcast - Local 2x2 | Nodes 0, 2, 8, and 10 each distribute inside one 2x2 region | Local tensor distribution | Write |
+| Broadcast - Global | Node 0 distributes to all 16 mesh members | Global parameter or activation distribution | Write |
+| Gather - Global, root 0 | Nodes 1 through 15 send to node 0 | Global result collection | Read, Write |
+| Gather - Local 2x2 | Each 2x2 region sends to root 5, 6, 9, or 10 | Local result collection | Read, Write |
+| All-to-All | Every node sends once to every other node per round | Token or expert exchange | Read, Write |
+| Neighbor Exchange | Every node sends to each valid west, east, north, and south neighbor | Halo or boundary exchange | Read, Write |
+| Pipeline P2P | Nodes follow the row-snake path `0,1,2,3,7,6,5,4,8,9,10,11,15,14,13,12` | Feature or tensor transfer between pipeline stages | Read, Write |
+| Regional Exchange | Four 2x2 regions perform complete clockwise exchange to the next region | Grouped many-to-many exchange | Read, Write |
 
-The third column is the arithmetic case for multicast. Everything below measures whether a real
-fabric delivers it.
+Broadcast destination count includes the producer's local member. Local delivery does not inject a
+flit into the mesh. Broadcast Read is excluded because the current collective operation is a
+one-to-many Write.
 
-**Where reduction enters.** Neither program above needs one, because each node accumulates its own
-output tile locally across steps. A reduction appears when the contraction dimension is split
-across nodes instead, which is what decoding does. See §2.2.
+## 3. Common workload
 
-**Axis asymmetry.** The two multicasts are not equivalent under XY routing. A row multicast travels
-only in X and never turns. A column multicast from a source outside the destination column turns
-once. Benchmarks measure the axes separately for this reason.
+### 3.1 Native-width runs
 
-### 2.2 Reduction follows from partitioning the contraction dimension
+| Setting | Value |
+|---|---:|
+| Topology and routing | 4x4 mesh, XY |
+| AXI data width | 512 bits |
+| Bytes per beat | 64 B |
+| Logical payload per flow per round | 4096 B |
+| Rounds | 16 |
+| Source Outstanding Depth | 32 transactions/initiator |
+| Max Transactions/ID | 32 transactions/ID |
+| Read and Write | Separate runs |
+| Read data | Memory and checker prefilled before the measurement window |
+| Seed | 1; deterministic mappings and no random endpoint or memory stalls |
 
-Plain output-stationary GEMM needs no reduction. Each node accumulates its own output tile locally
-across steps. Reduction appears only when the contraction dimension `K` is split across nodes,
-which happens when the output is too small to occupy the mesh.
+The reference point uses Burst Length 64 beats, or one 4096 B transaction per flow per round.
+Burst Length is the number of AXI transfers, not the encoded `AxLEN` value.
 
-The case that matters is autoregressive decoding. One query token attends to `S_kv` cached keys, so
-`QK^T` is `[1,D] x [D,S_kv]` and `PV` is `[1,S_kv] x [S_kv,D]`. The KV cache is distributed along
-`S_kv`, every node holds a slice, and every node produces a partial `[1,D]` output. Those partials
-must be summed.
+| Burst Length (beats) | Transactions per flow per round | Payload per flow per round |
+|---:|---:|---:|
+| 1 | 64 | 4096 B |
+| 4 | 16 | 4096 B |
+| 16 | 4 | 4096 B |
+| 64 | 1 | 4096 B |
 
-| Phase | Output shape per layer | Dominant collective |
-|---|---|---|
-| Prefill and training | `S x D` per head, large | multicast, both axes |
-| Decode | `1 x D` per head, tiny | reduction along the partitioned axis |
+### 3.2 Baseline DUT
 
-### 2.3 The two collectives sit in different regimes
+| DUT parameter | Baseline value |
+|---|---:|
+| DAT VCs | 2 |
+| Router VC depth | 8 flits/VC |
+| NI RX DAT depth | 8 flits/VC |
+| NI TX DAT depth | 8 entries |
+| Read RoB | 128 beat slots |
 
-| | Multicast | Reduction |
-|---|---|---|
-| Payload | one operand tile, kilobytes | one output row, hundreds of bytes |
-| Frequency | once per tile step | once per decoded token |
-| Limited by | injection bandwidth at the source port | round-trip latency across the set |
-| Right metric | accepted throughput, port occupancy | tail completion latency |
+Burst Length and Outstanding Depth are workload conditions. DAT VCs, Router VC depth, NI RX DAT
+depth, NI TX DAT depth, and Read RoB depth are DUT configuration or cost dimensions. The report
+does not rank Burst Length as hardware.
 
-B1 and B2 therefore carry different primary metrics.
+## 4. Measurement window and metrics
 
-## 3. The overlap criterion
-
-Per node, per tile step, with `T x T` output tile, contraction depth `K_t`, element size `b` bytes,
-tile compute rate `F` FLOP per cycle, and network interface injection bandwidth `B_inj` bytes per
-cycle:
-
-```text
-T_comp = 2 T^2 K_t / F              cycles of compute
-T_recv = 2 T K_t b / B_inj          cycles to receive both operand sub-tiles
-rho    = T_recv / T_comp = b F / (T B_inj)
-```
-
-Compute grows with the square of the tile edge and traffic grows linearly, so `rho` falls as tiles
-grow. Setting `rho <= 1` gives the smallest tile at which the fabric keeps up:
-
-```text
-T* = b F / B_inj
-```
-
-`T*` does not depend on `K_t` or on mesh size. At `b` = 2 bytes and `B_inj` = 64 B per cycle, which
-is the 512 b wide class at one flit per cycle:
-
-| Tile compute rate `F` | `T*` | Local operand working set at `T*` |
-|---:|---:|---|
-| 512 FLOP/cycle | 16 | small |
-| 1024 | 32 | reference point |
-| 2048 | 64 | |
-| 4096 | 128 | |
-
-**Source-side constraint under unicast.** The constraint moves from the receiving node to the
-sourcing node, which injects the same sub-tile `Gx - 1` times:
+One common workload window gates Completion Time, Accepted Throughput, flit counts, Link
+Utilization, stall counters, and Buffer Occupancy HWM.
 
 ```text
-T_send = (Gx - 1) T K_t b / B_inj
-rho_send <= 1   requires   T >= (Gx - 1) / 2 * T*
+Workload Completion Time = last active-source B or RLAST cycle
+                           - common workload start cycle
+
+Transaction bytes = Burst Length * 64 B/beat
+
+Logical delivered bytes = payload deliveries * Transaction bytes
+
+Accepted Throughput (B/cycle) = Logical delivered bytes
+                                / Workload Completion Time
+
+DAT Link Utilization (%) = transferred DAT flits
+                           / measured link cycles * 100
 ```
 
-At `Gx` = 16 the tile edge must be 7.5 times larger, so the local operand memory grows by a factor
-of 56 for the same overlap.
+The window opens when all active sources are ready to issue and closes when the last active source
+completes. Reset, Read prefill, warm-up, and post-run settling are outside the window.
 
-**Off-chip access.** Each shared operand is fetched once per group axis rather than once per node,
-so external traffic for that operand falls by the axis length. This is arithmetic on the mapping
-and holds for any fabric that can multicast.
+### 4.1 Ideal Throughput Bound
 
-**Check against published measurement.** FlatAttention (arXiv 2505.18824) runs FP16 on a 32 x 32
-mesh at roughly 1000 FLOP per cycle per tile with 1024 b links, which is 128 B per cycle. The
-formula gives `T*` = 2 x 1000 / 128, near 16. That work reports a per-tile slice of exactly 16 at a
-sequence length of 512 on that mesh, with matrix engine utilization at 20 percent.
+The analytic model enumerates the actual mapping and XY routes. REQ, RSP, and DAT are independent
+physical resources and are not added together.
 
-`rho` counts operand transfer against compute and omits fixed per-step costs, synchronization and
-external memory latency among them, which that work names as the reason for the remaining gap.
-`T*` is therefore a lower bound and the measured crossing sits above it. B3 measures the distance.
+```text
+Resource serialization cycles(r) = flits carried by resource r
+                                   / resource capacity in flits/cycle
 
-## 4. Benchmark set
+Ideal serialization cycles = max over every resource r
+                             of Resource serialization cycles(r)
 
-Four benchmarks. The first two isolate a primitive, the third checks that they compose, the fourth
-is the system claim.
+Ideal Throughput Bound (B/cycle) = Logical delivered bytes
+                                   / Ideal serialization cycles
 
-### B1 Operand multicast
+% of Ideal Throughput = Accepted Throughput at Outstanding Depth 32
+                        / Ideal Throughput Bound * 100
+```
 
-**INPUT.** One source node, destination set is one axis of the group, payload swept from one flit
-to one full operand sub-tile. Run both axes and both a source at the end of the set and a source at
-its centre.
+Ideal Throughput Bound is pattern-specific. Absolute Accepted Throughput and `% of Ideal
+Throughput` must be read together: one states delivered work per cycle, while the other states how
+closely that mapping approaches its own resource bound.
 
-**MEASURE.** Tail completion time at the farthest member, source port occupancy in flits, peak link
-utilization, accepted throughput.
+Zero-load Latency and Saturation Throughput require a latency-versus-offered-load curve. They are
+not inferred from this fixed-Outstanding campaign.
 
-**BASELINE.** Repeated unicast from the same source on the same fabric.
+## 5. Campaign matrix
 
-**PASSES WHEN.** Source port occupancy is independent of the set size, and tail completion is
-within the zero-load bound plus measured queueing.
+| Campaign | Result root | Cells | Purpose |
+|---|---|---:|---|
+| Main baseline | `output/baseline` | 16 | One reference row for every supported communication type and direction |
+| Burst Length characterization | `output/burst` | 28 | Sensitivity to 1, 4, 16, and 64 beats on the baseline DUT |
+| Multicast comparison | `output/multicast_compare` | 8 | Hardware multicast versus repeated unicast for four Broadcast shapes |
+| RR/RRD comparison | `output/rr_vs_rrd` | 4 | Mean Control Completion Time under matched Pipeline P2P Read or Write background |
+| DUT configuration trade-off | `output/tradeoff` | 35 | Five stress workloads on seven DUT candidates; baseline is read from the main campaign |
 
-### B2 Partial-sum reduction
+### 5.1 Burst Length characterization
 
-**INPUT.** All members of one group axis hold a partial result, one root collects. Payload swept
-across the decode-sized range, hundreds of bytes, up to one full output tile. Root at the end of
-the set and at its centre.
+Compare Accepted Throughput and Completion Time across Burst Length values while holding logical
+payload, mapping, configuration, and Outstanding Depth fixed. A short-Burst loss identifies
+request/response overhead or admission behavior; Burst Length is not a DUT candidate.
 
-**MEASURE.** Tail completion latency, root port occupancy, local port traffic at each combining
-node, and the offload round trip per hop.
+### 5.2 Hardware multicast versus repeated unicast
 
-**BASELINE.** Unicast gather to the root, summed at the root.
+Both modes use the same producers, destination members, issue order, AXI-ID policy, logical
+payload, and baseline DUT.
 
-**PASSES WHEN.** Root port occupancy is independent of the set size, and total latency beats
-unicast gather across the whole swept payload range, not only at large payloads.
+```text
+Hardware speedup = repeated-unicast Completion Time
+                   / hardware-multicast Completion Time
+```
 
-### B3 GEMM tile step
+`Source injected flits` counts forward producer-side AW and W flits. It excludes B and CollectB
+traffic injected by destinations. The raw flit counts remain visible; no aggregate
+flit-reduction score is introduced.
 
-**INPUT.** B1 on both axes and B2 running as one step of a real tiled GEMM, with compute time
-modelled at rate `F`. Sweep tile edge `T` across `T*`.
+### 5.3 RR versus RRD
 
-**MEASURE.** `rho`, and the tile edge at which `rho` crosses one.
+`RR` is the 2-channel REQ/RSP mapping. `RRD` is the 3-channel REQ/RSP/DAT mapping. Both use the
+same three physical networks; RR leaves DAT idle for the background traffic. This comparison does
+not provide area or power evidence for a two-network implementation.
 
-**BASELINE.** The same step with every collective replaced by repeated unicast.
+RR/RRD is an independent 64-bit common-payload experiment:
 
-**PASSES WHEN.** The measured crossing point is within a stated tolerance of the predicted `T*`.
-A crossing far above `T*` means queueing or arbitration is eating the margin, and the diagnostic
-metrics say where.
+- Node 0 issues 64 single-transaction Control probes to node 3.
+- Fourteen active Pipeline P2P initiators run 16 rounds.
+- Each background flow sends two 256-beat transactions per round at 8 B/beat, or 4096 B/round.
+- Each background initiator uses one AXI ID and one destination with Outstanding Depth 32.
+- RR must prove shared directed REQ/RSP use. RRD must prove background DAT use on the same
+  directed geometric edge.
+- Every background interval must contain the complete Control-probe interval.
 
-### B4 Attention layer
+Control Completion Time starts at the first request `VALID` assertion and ends at its B/R
+handshake, so source admission backpressure is included. The reported metric is node 0's mean
+Control Completion Time in cycles/transaction. These 64-bit results do not enter the native
+512-bit throughput or DUT Pareto comparison.
 
-**INPUT.** A full attention layer, both phases. Prefill exercises the multicast path across the
-sequence. Decode exercises the reduction path across the partitioned KV cache.
+## 6. DUT configuration trade-off
 
-**MEASURE.** Compute tile utilization, external bytes per token, and end-to-end layer time.
+The measured set contains the baseline `(VC 2, depth 8)` and seven sweep candidates:
 
-**BASELINE.** Repeated unicast on the same fabric, and the ideal-fabric bound of §6.
+```text
+(VC 1, depth 8)   (VC 4, depth 8)   (VC 8, depth 8)
+(VC 1, depth 32)  (VC 2, depth 16)  (VC 2, depth 32)  (VC 4, depth 16)
+```
 
-**PASSES WHEN.** Utilization stays above the stated target across the swept sequence lengths, and
-external bytes per token match the `1/Gx` prediction of §3.
+For every sweep candidate, NI RX DAT depth equals Router VC depth. Outstanding Depth and Max
+Transactions/ID remain 32. NI TX DAT stays at 8 entries and Read RoB stays at 128 beat slots.
 
-## 5. Metrics
+The Pareto comparison keeps these costs separate:
 
-**Primary.** These state the goal and appear in any summary.
+1. Router DAT entries per input = DAT VCs * Router VC depth.
+2. NI RX DAT entries per NI = DAT VCs * NI RX DAT depth.
+3. NI TX DAT entries per NI.
+4. Read RoB beat slots per NI.
 
-| Metric | Definition |
-|---|---|
-| Overlap ratio `rho` | communication time over compute time for one tile step |
-| Minimum viable tile `T*` | smallest tile edge at which `rho <= 1` |
-| Compute tile utilization | compute cycles over total cycles |
-| External bytes per token | off-chip traffic normalized to work done |
+Each stress workload's Accepted Throughput and Completion Time is also an independent objective.
+A candidate is dominated only when another measured candidate is no worse in every cost and every
+workload objective, and strictly better in at least one. No scalar score combines unlike storage
+or workloads.
 
-**Diagnostic.** These explain a primary metric that misses, and are not targets themselves.
+Read RoB is extended only when its HWM reaches capacity and a resource-specific admission-stall
+counter is non-zero. Router depth is attributed only when the selected input VC reaches capacity
+and eligible traffic is blocked by zero credit. More VCs require head-of-line-blocking evidence.
 
-Source and root port occupancy in flits, peak and mean link utilization, tail completion latency
-against the zero-load bound, queueing latency by component, and accepted throughput against offered
-load.
+Area, Power, and Timing remain `[TBD]` until synthesis results and limits are approved. The report
+therefore lists measured-set Pareto candidates but does not select a final configuration.
 
-**Correctness gates.** A benchmark result is void unless these hold.
+## 7. Compute overlap
 
-| Gate | Statement |
-|---|---|
-| Result equivalence | Both programs produce the same output to a stated tolerance. They sum in different orders, so floating-point results differ in the last bits and the tolerance is part of the benchmark definition |
-| Response conformance | One write response per write request, and an error response dominates a combined one |
-| Ordering | Same-ID responses reach the master in AXI order in every configuration |
-| Completion | Every issued transaction completes. No benchmark passes with outstanding work at the end |
+Compute overlap is a workload-specific check, not a DUT score. It requires an approved PE workload
+and Compute Time for the same unit of work.
 
-## 6. Baselines
+```text
+Communication Time = Workload Completion Time
+Communication is fully hidden only when Communication Time <= Compute Time
+```
 
-Three, and each answers a different question.
+The current benchmark has no approved PE Compute Time, so Compute overlap coverage remains
+`[TBD]`. No PE latency or utilization is guessed.
 
-| Baseline | Question it answers |
-|---|---|
-| Repeated unicast, same fabric | What did the collective buy, with everything else held constant |
-| Ideal fabric, `T_ideal = D/v + L/b` | How much of the physically achievable is delivered |
-| Zero-load latency | How much of the measured latency is queueing rather than structure |
+## 8. Validity and reproducibility
 
-The published convention for a well-built single-cycle virtual channel router is roughly 80 percent
-of ideal throughput, and saturation is conventionally read where latency reaches three times the
-low-load value. Both are reference lines for reading the curves, not pass criteria.
+A result is accepted only when all checks pass:
 
-## 7. Targets
+1. The scoreboard reaches one non-vacuous PASS and every issued transaction completes.
+2. Read data matches the documented prefill image.
+3. Compared modes deliver the same logical bytes to the same consumers.
+4. The common workload window is non-zero and matches the source-start and final-completion
+   markers.
+5. Analytic resource counts match emitted flit counters.
+6. The result row records topology, direction, workload geometry, DUT configuration, seed, and
+   units.
+7. Its `manifest.json` records git revision, config-file hash, generated-parameter hash, simulator
+   version, seed, exact reproduction command, and the repository-relative path and SHA-256 of the
+   campaign `source.patch`. The patch applies to the recorded git revision and contains the
+   relevant tracked and untracked build/test source changes under `ref_model/`, `sim/`, and
+   `specgen/`; generated run/output artifacts are excluded.
 
-The table below is the goal statement. Predicted values follow from §3 and from the target
-specification. Measured values are empty because they have not been measured, and filling them is
-the work.
+## 9. Out of scope
 
-| Item | Predicted | Measured | Unicast baseline |
-|---|---|---|---|
-| B1 source port flits, `Gx` = 16, source at end | `L`, independent of `Gx` | | `15 L` |
-| B1 tail completion, row axis | `L + H t_wire + (H+1) t_router` | | `15 L + same transport` |
-| B1 row versus column axis penalty | one turn on the column axis | | not applicable |
-| B2 root port arrivals | one at an end root, two at an interior root | | `Gx - 1` |
-| B2 latency crossover payload | where `H C_offload` falls below `(Gx-2) L` | | not applicable |
-| B3 crossing tile edge | `T* = b F / B_inj` | | `(Gx-1)/2 * T*` |
-| B4 external bytes per token | `1/Gx` of per-node fetch | | per-node fetch |
-| B4 compute tile utilization | [TBD], set once `F` is fixed | | |
-
-Two entries need a decision before they can be predicted. `F`, the per-tile compute rate, is not
-in the target specification and every utilization number depends on it. The utilization target
-itself has no basis yet and is marked `[TBD]` rather than guessed.
-
-## 8. Parameters
-
-| Parameter | Swept over | Fixed by |
-|---|---|---|
-| Group size `Gx x Gy` | 4, 8, 16 per axis | software submesh assignment |
-| Wide class width | 256, 512, 1024 b | target specification §7 |
-| Tile edge `T` | across `T*`, both sides | B3 |
-| Payload | one flit to one operand sub-tile | B1, B2 |
-| Sequence length | short enough to reach `T = T*` at the chosen group | B4 |
-| Head dimension | 64, 128 | B4 |
-| Element size `b` | 2 bytes | B4 |
-| Source or root position | end of set, centre of set | B1, B2 |
-| Virtual channels | 1 and the configured maximum | result equivalence gate |
-
-The stress point in B4 is the short-sequence end. Sequence length sets the output tile edge as
-`T = S / Gx`, so the fabric stops hiding below `S = Gx T*`. At `Gx` = 16 and `T*` = 32 that is a
-sequence of 512. Sweeping through this point locates the design's lower bound.
-
-## 9. Open items
-
-| Item | Needed for |
-|---|---|
-| Per-tile compute rate `F` | every utilization and `T*` number |
-| Reduction operator set | attention also needs a maximum reduction for its softmax statistics, and the target specification allows addition only |
-| Which FlatAttention mapping variant to align with | the conference and journal versions place the K and V sources differently, on the south edge and on the diagonal |
-| Collective support in the model | B1 to B4 have no measured column until multicast and reduction exist in the C model and the fabric |
-
-The unicast baseline column can be filled now. It needs no new hardware and it is the reference
-every other number is read against.
+- Compute execution, PE utilization, and end-to-end model accuracy.
+- In-network reduction; Gather measures transport to a root, not arithmetic combination.
+- Broadcast Read.
+- A full Cartesian product of workload and DUT parameters.
+- Frequency, area, power, or timing claims without synthesis evidence.

@@ -45,6 +45,7 @@
 #include "wrap/flit_bytes.hpp"      // FlitBytes, FLIT_BYTES
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "wrap/nsu_wrap_io.hpp"
+#include "ni/channel_mode.hpp"
 #include "ni_params.h"  // NOC_ROUTER_VC_DEPTH — DAT sender credit seed
 #include "flit.hpp"
 #include "nmu/sam_yaml.hpp"  // load_sam_table -- the NSU reads the coordinate field only
@@ -71,11 +72,11 @@ class NsuWrap {
     // rebase_). Empty means "no address map", and the NSU forwards addresses
     // untouched, which is what the pure-C++ fixtures want.
     void init(uint8_t src_id = 0, uint8_t port_id = 0, uint8_t dat_num_vc = ::ni::NOC_DAT_NUM_VC,
-              std::size_t queue_depth = ni::NSU_QUEUE_DEPTH,
-              std::size_t max_unique_ids = ni::NSU_META_BUFFER_MAX_UNIQUE_IDS,
-              std::size_t max_outstanding = ni::NSU_META_BUFFER_MAX_OUTSTANDING,
+              std::size_t queue_depth = ::ni::NSU_QUEUE_DEPTH,
+              std::size_t max_unique_ids = ::ni::NSU_META_BUFFER_MAX_UNIQUE_IDS,
+              std::size_t max_outstanding = ::ni::NSU_META_BUFFER_MAX_OUTSTANDING,
               const char* config_path = nullptr) {
-        using namespace ni::cmodel::nsu;
+        using namespace ::ni::cmodel::nsu;
         if (port_id > 2) {
             throw std::invalid_argument(
                 "NsuWrap::init: port_id must be 0, 1 or 2 (0 = LOCAL, 1 = x face, 2 = y face)");
@@ -115,8 +116,8 @@ class NsuWrap {
         cfg.port_params.r_queue_depth = queue_depth;
         cfg.port_params.meta_buffer_max_outstanding = max_outstanding;
         cfg.port_params.meta_buffer_max_unique_ids = max_unique_ids;
-        cfg.wormhole_per_input_depth = ni::NSU_ARBITER_FIFO_DEPTH;
-        cfg.vc_allocator_pending_depth = ni::NSU_ARBITER_FIFO_DEPTH;
+        cfg.wormhole_per_input_depth = ::ni::NSU_ARBITER_FIFO_DEPTH;
+        cfg.vc_allocator_pending_depth = ::ni::NSU_ARBITER_FIFO_DEPTH;
         nsu_ = std::make_unique<nsu::NsuStandalone>(std::move(cfg));
         // RSP egress: ready/valid, no credit (spec §4.3) — set_inputs feeds
         // the live ready flag from tx_rsp_ready every tick.
@@ -142,12 +143,21 @@ class NsuWrap {
         w_pop_budget_ = 0;
         w_expect_.clear();
         w_seen_ = 0;
+        ticked_ = false;
     }
 
     void set_inputs(const NsuInputs& in) { in_ = in; }
 
+    void set_channel_mode(::ni::cmodel::ni::ChannelMode mode) {
+        if (ticked_) {
+            throw std::logic_error("NsuWrap::set_channel_mode: must be configured before first tick");
+        }
+        nsu_->set_channel_mode(mode);
+    }
+
     void tick() {
         if (!nsu_) return;
+        ticked_ = true;
         auto& port = nsu_->axi_master_port();
 
         // Step 1: inject REQ/DAT req flits (if valid) BEFORE nsu_.tick() so
@@ -353,6 +363,7 @@ class NsuWrap {
     uint32_t outstanding_w_ = 0;     // writes issued, B response still owed
     uint32_t expected_r_beats_ = 0;  // R beats owed from issued ARs
     uint32_t w_pop_budget_ = 0;      // W beats presentable (AWs already handshaken)
+    bool ticked_ = false;
 
     // Burst-boundary agreement between the two streams. w_pop_budget_ is a beat
     // COUNT, so it silently assumes the AW queue and the W queue are ordered the

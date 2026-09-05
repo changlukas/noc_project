@@ -26,6 +26,8 @@ extern "C" void cmodel_nmu_set_inputs(
 
 extern "C" void cmodel_nmu_tick(unsigned long long) {}
 
+extern "C" void cmodel_nmu_set_channel_mode(unsigned long long, int) {}
+
 extern "C" void cmodel_nmu_get_outputs(
     unsigned long long, svBit* awready, svBit* wready, svBit* arready, svBit* bvalid,
     svBitVecVal* bid, svBitVecVal* bresp, svBit* rvalid, svBitVecVal* rid,

@@ -22,6 +22,7 @@
 // Narrow class, dat_r_out_ (DAT) for Data class -- the only asymmetry.
 #include "axi/types.hpp"
 #include "flit.hpp"
+#include "ni/channel_mode.hpp"
 #include "router/rsp_out.hpp"
 #include "ni/pipeline_stage.hpp"
 #include "nsu/meta_buffer.hpp"
@@ -38,12 +39,22 @@ class Packetize : public ResponsePacketizer {
     // counterpart -- b_out_ (RSP) is the only B sink, both classes.
     Packetize(router::NocRspOut& b_out, router::NocRspOut& r_out, router::NocRspOut& dat_r_out,
               MetaBuffer& meta, uint8_t src_id, uint8_t port_id = 0)
+        : Packetize(b_out, r_out, dat_r_out, dat_r_out, dat_r_out, meta, src_id, port_id) {}
+
+    Packetize(router::NocRspOut& b_out, router::NocRspOut& r_out,
+              router::NocRspOut& native_dat_r_out, router::NocRspOut& dat_b_out,
+              router::NocRspOut& dat_r_out, MetaBuffer& meta, uint8_t src_id,
+              uint8_t port_id = 0)
         : b_out_(b_out),
           r_out_(r_out),
+          native_dat_r_out_(native_dat_r_out),
+          dat_b_out_(dat_b_out),
           dat_r_out_(dat_r_out),
           meta_(meta),
           src_id_(src_id),
           port_id_(port_id) {}
+
+    void set_channel_mode(ni::ChannelMode mode) noexcept { channel_mode_ = mode; }
 
     // ---- ResponsePacketizer interface (S1 accept) ----
     // Accepts ≤1 beat/channel into the S1 stage register.
@@ -64,11 +75,14 @@ class Packetize : public ResponsePacketizer {
   private:
     router::NocRspOut& b_out_;
     router::NocRspOut& r_out_;
+    router::NocRspOut& native_dat_r_out_;
+    router::NocRspOut& dat_b_out_;
     router::NocRspOut& dat_r_out_;
     MetaBuffer& meta_;
     uint8_t src_id_;
     // This NI's own endpoint at src_id, stamped into every response it issues.
     uint8_t port_id_ = 0;
+    ni::ChannelMode channel_mode_ = ni::ChannelMode::Native;
 
     // S1 stage registers: one per response channel. push_b/r() fills them;
     // tick() (S2) drains and transforms into Flits toward the arbiter.
@@ -78,7 +92,7 @@ class Packetize : public ResponsePacketizer {
     static Flit build_b_flit(const axi::BBeat& b, const MetaEntry& m, uint8_t src_id,
                              uint8_t port_id);
     static Flit build_r_flit(const axi::RBeat& b, const MetaEntry& m, uint8_t src_id,
-                             uint8_t port_id, uint16_t beat_idx);
+                             uint8_t port_id, uint16_t beat_idx, ni::ChannelMode mode);
 };
 
 // S1 accept: write into stage register (backpressure if full).
@@ -101,7 +115,7 @@ inline bool Packetize::push_r(const axi::RBeat& b) {
 inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uint8_t src_id,
                                     uint8_t port_id) {
     Flit f;
-    f.set_header_field("axi_ch", m.cls == AxiClass::Data ? ni::AXI_CH_DataB : ni::AXI_CH_NarrowB);
+    f.set_header_field("axi_ch", m.cls == AxiClass::Data ? ::ni::AXI_CH_DataB : ::ni::AXI_CH_NarrowB);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", m.src_id);
     f.set_header_field("dst_port_id", m.src_port);
@@ -125,11 +139,12 @@ inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uin
 }
 
 inline Flit Packetize::build_r_flit(const axi::RBeat& b, const MetaEntry& m, uint8_t src_id,
-                                    uint8_t port_id, uint16_t beat_idx) {
+                                    uint8_t port_id, uint16_t beat_idx, ni::ChannelMode mode) {
     const bool is_data = (m.cls == AxiClass::Data);
-    const char* ch = is_data ? "DATA_R" : "NARROW_R";
+    const bool narrow_payload = !is_data || mode != ni::ChannelMode::Native;
+    const char* ch = narrow_payload ? "NARROW_R" : "DATA_R";
     Flit f;
-    f.set_header_field("axi_ch", is_data ? ni::AXI_CH_DataR : ni::AXI_CH_NarrowR);
+    f.set_header_field("axi_ch", is_data ? ::ni::AXI_CH_DataR : ::ni::AXI_CH_NarrowR);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", m.src_id);
     f.set_header_field("dst_port_id", m.src_port);
@@ -142,17 +157,17 @@ inline Flit Packetize::build_r_flit(const axi::RBeat& b, const MetaEntry& m, uin
     f.set_payload_field(ch, "rresp", static_cast<uint64_t>(b.resp));
     f.set_payload_field(ch, "ruser", b.user);
     f.set_payload_field(ch, "rlast", b.last ? 1u : 0u);
-    if (is_data) {
-        f.set_payload_bytes(ch, "rdata", b.data.data(), ni::width::NOC_DATA_WIDTH);
+    if (!narrow_payload) {
+        f.set_payload_bytes(ch, "rdata", b.data.data(), ::ni::width::NOC_DATA_WIDTH);
     } else {
-        // Narrow: the slave already placed this beat's data at its natural
+        // Narrow payload: the slave already placed this beat's data at its natural
         // byte lane (AXI4 IHI 0022 A3.4.2); the MetaEntry's AR basis + the
         // per-id running beat index (m is a snapshot -- the index lives in
         // MetaBuffer, threaded in by the caller) recompute that lane here.
         const uint64_t addr = axi::beat_addr(m.local_addr, m.len, m.size, m.burst, beat_idx);
         const unsigned lane = axi::narrow_lane(addr);
         f.set_payload_bytes(ch, "rdata", b.data.data() + lane * axi::NARROW_DATA_BYTES,
-                            ni::width::NOC_NARROW_DATA_WIDTH);
+                            ::ni::width::NOC_NARROW_DATA_WIDTH);
     }
     return f;
 }
@@ -172,7 +187,11 @@ inline void Packetize::tick() {
             std::abort();
         }
         Flit f = build_b_flit(b, *meta_opt, src_id_, port_id_);
-        if (b_out_.push_flit(f)) {
+        router::NocRspOut& sink = meta_opt->cls == AxiClass::Data &&
+                                          channel_mode_ == ni::ChannelMode::ThreeChannel64
+                                      ? dat_b_out_
+                                      : b_out_;
+        if (sink.push_flit(f)) {
             s1_b_.take();
             meta_.commit_write(b.id);  // commit on successful S2→S3 push
         }
@@ -188,8 +207,13 @@ inline void Packetize::tick() {
             assert(false && "Packetize::tick: R in S1 with no matching AR MetaBuffer entry");
             std::abort();
         }
-        Flit f = build_r_flit(b, *meta_opt, src_id_, port_id_, meta_.read_beat_index(b.id));
-        router::NocRspOut& r_sink = (meta_opt->cls == AxiClass::Data) ? dat_r_out_ : r_out_;
+        Flit f = build_r_flit(b, *meta_opt, src_id_, port_id_, meta_.read_beat_index(b.id),
+                                  channel_mode_);
+        router::NocRspOut& r_sink =
+            meta_opt->cls != AxiClass::Data || channel_mode_ == ni::ChannelMode::TwoChannel64
+                ? r_out_
+                : channel_mode_ == ni::ChannelMode::ThreeChannel64 ? dat_r_out_
+                                                                   : native_dat_r_out_;
         if (r_sink.push_flit(f)) {
             s1_r_.take();
             meta_.advance_read_beat(b.id);

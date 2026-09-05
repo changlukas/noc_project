@@ -28,7 +28,7 @@
 #pragma once
 #include "wrap/flit_bytes.hpp"  // FlitBytes, FLIT_BYTES
 #include "router/router.hpp"    // ROUTER_PORT_COUNT
-#include "ni_flit_constants.h"  // ni::header::VC_ID_WIDTH
+#include "ni_flit_constants.h"  // ::ni::header::VC_ID_WIDTH
 #include <array>
 #include <cstdint>
 
@@ -39,7 +39,7 @@ namespace ni::cmodel::wrap {
 // ROUTER_NUM_VC_MAX: DAT credit vectors carry up to 2^VC_ID_WIDTH VCs; only
 // the low dat_num_vc entries are live.
 inline constexpr std::size_t ROUTER_LINK_PORTS = router::ROUTER_PORT_COUNT;
-inline constexpr std::size_t ROUTER_NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;
+inline constexpr std::size_t ROUTER_NUM_VC_MAX = 1u << ::ni::header::VC_ID_WIDTH;
 
 using VcCreditVec = std::array<bool, ROUTER_NUM_VC_MAX>;
 

@@ -1,7 +1,9 @@
 import glob
+import json
 import os
 import random
 import re
+from pathlib import Path
 
 import pytest
 
@@ -65,6 +67,18 @@ def _parse_write(path):
         beats = [next(it) for _ in range(length + 1)]
         txns.append({"id": axid, "addr": addr, "len": length, "size": size,
                      "burst": burst, "beats": beats})
+    return txns
+
+
+def _parse_read(path):
+    toks = [t for t in Path(path).read_text().splitlines() if t]
+    txns = []
+    for i in range(0, len(toks), 11):
+        fields = toks[i:i + 11]
+        assert len(fields) == 11
+        txns.append({"id": int(fields[0]), "addr": int(fields[1], 16),
+                     "len": int(fields[2]), "size": int(fields[3]),
+                     "burst": int(fields[4])})
     return txns
 
 
@@ -715,6 +729,359 @@ def test_all_to_all_is_deterministic():
     assert g.all_to_all_dsts(3, 16, 40) == g.all_to_all_dsts(3, 16, 40)
 
 
+def test_global_gather_defaults_to_corner_root_zero():
+    assert g.gather_dsts(0, 4, 4, 2, "global", 0) == []
+    assert g.gather_dsts(7, 4, 4, 2, "global", 0) == [0, 0]
+
+
+def test_global_gather_accepts_non_default_root_and_rejects_bad_roots():
+    assert g.gather_dsts(0, 4, 4, 1, "global", 15) == [15]
+    with pytest.raises(ValueError, match="root-node"):
+        g.gather_dsts(0, 4, 4, 1, "global", 16)
+
+
+def test_local_gather_uses_approved_region_leaders():
+    expected = {0: 5, 1: 5, 4: 5, 2: 6, 3: 6, 7: 6,
+                8: 9, 12: 9, 13: 9, 11: 10, 14: 10, 15: 10}
+    for source, leader in expected.items():
+        assert g.gather_dsts(source, 4, 4, 1, "submesh", 0) == [leader]
+    for leader in (5, 6, 9, 10):
+        assert g.gather_dsts(leader, 4, 4, 1, "submesh", 0) == []
+
+    with pytest.raises(ValueError, match="4x4"):
+        g.gather_dsts(0, 2, 2, 1, "submesh", 0)
+
+
+def test_neighbor_exchange_is_non_periodic_cartesian():
+    assert g.neighbor_exchange_dsts(0, 4, 4, 1) == [1, 4]
+    assert g.neighbor_exchange_dsts(5, 4, 4, 1) == [4, 6, 1, 9]
+    assert sum(len(g.neighbor_exchange_dsts(n, 4, 4, 1)) for n in range(16)) == 48
+
+
+def test_pipeline_uses_one_hop_row_snake():
+    order = [0, 1, 2, 3, 7, 6, 5, 4, 8, 9, 10, 11, 15, 14, 13, 12]
+    assert g.pipeline_order(4, 4) == order
+    for source, destination in zip(order, order[1:]):
+        assert g.pipeline_dsts(source, 4, 4, 1) == [destination]
+    assert g.pipeline_dsts(order[-1], 4, 4, 1) == []
+
+
+def test_ai_alltoall_expands_one_round_to_every_remote_node():
+    assert g.ai_alltoall_dsts(0, 16, 1) == list(range(1, 16))
+    assert sum(len(g.ai_alltoall_dsts(n, 16, 1)) for n in range(16)) == 240
+
+
+def test_global_broadcast_has_one_source_and_all_members():
+    assert g.mcast_groups("global", 4, 4) == [
+        ((0, 0), [(x, y) for y in range(4) for x in range(4)])
+    ]
+
+
+@pytest.mark.parametrize("shape", ["row", "col", "submesh", "global"])
+def test_repeated_unicast_broadcast_keeps_group_order_and_local_member(
+        tmp_path, shape):
+    out = tmp_path / shape
+    nodes, x_dim, y_dim, bases, _config_bases, _sizes, _peripherals = \
+        g._load_topology("mesh_4x4")
+    source_dsts = g.emit_repeated_unicast_broadcast_pattern(
+        out, nodes, x_dim, y_dim, bases, shape, 2,
+        axi_size=6, axi_len=0, data_width=512,
+        base_local=0x1000, region_bytes=16 * 32 * g._SLOT_STRIDE)
+
+    expected = {node: [] for node in range(16)}
+    for source, members in g.mcast_groups(shape, x_dim, y_dim):
+        src = source[1] * x_dim + source[0]
+        expected[src] = [y * x_dim + x for x, y in members] * 2
+    assert source_dsts == expected
+    for source, expected_dsts in expected.items():
+        writes = _parse_write(out / f"node{source}" / "write.txt")
+        destinations = [next(
+            idx for idx, _x, _y, cid in nodes
+            if bases[cid] <= txn["addr"] < bases[cid] + 0x100000000)
+            for txn in writes]
+        assert destinations == expected_dsts
+        assert all(txn["id"] == source % (1 << g.axi_widths()["id"])
+                   for txn in writes)
+    assert all((out / f"node{node}" / "read.txt").read_text() == ""
+               for node in range(16))
+
+
+@pytest.mark.parametrize(("shape", "active", "writes", "destinations_per_source"), [
+    ("row", 4, 4, 4), ("col", 4, 4, 4),
+    ("submesh", 4, 4, 4), ("global", 1, 1, 16),
+])
+def test_broadcast_metadata_counts_exact_group_members(
+        tmp_path, shape, active, writes, destinations_per_source):
+    out = tmp_path / shape
+    g.main(["--pattern", "broadcast", "--topology", "mesh_4x4",
+            "--out", str(out), "--rounds", "1", "--mcast-shape", shape])
+    assert json.loads((out / "traffic_meta.json").read_text()) == {
+        "direction": "write",
+        "rounds": 1,
+        "transactions_per_flow": 1,
+        "burst_beats": 1,
+        "bytes_per_beat": 4,
+        "bytes_per_flow_round": 4,
+        "data_producers": active,
+        "consumers": 16,
+        "axi_initiators": active,
+        "source_requests": writes,
+        "payload_deliveries": 16,
+        "multicast_mode": "hardware",
+        "destinations_per_source": destinations_per_source,
+    }
+
+
+@pytest.mark.parametrize("pattern", ["alltoall", "neighbor_exchange"])
+def test_expanded_ai_cli_addresses_stay_in_destination_windows(tmp_path, pattern):
+    out = tmp_path / pattern
+    g.main(["--pattern", pattern, "--topology", "mesh_4x4",
+            "--out", str(out), "--rounds", "1"])
+    nodes, x_dim, y_dim, bases, _config_bases, sizes, _peripherals = \
+        g._load_topology("mesh_4x4")
+    expected = {
+        src: (g.ai_alltoall_dsts(src, len(nodes), 1) if pattern == "alltoall"
+              else g.neighbor_exchange_dsts(src, x_dim, y_dim, 1))
+        for src in range(len(nodes))
+    }
+    for src, destinations in expected.items():
+        writes = _parse_write(out / f"node{src}" / "write.txt")
+        assert len(writes) == len(destinations)
+        for txn, destination in zip(writes, destinations):
+            cid = nodes[destination][3]
+            assert bases[cid] <= txn["addr"] < bases[cid] + sizes["memory"][cid]
+
+
+@pytest.mark.parametrize(("pattern", "extra", "active", "consumers", "writes", "deliveries"), [
+    ("broadcast", ["--mcast-shape", "global"], 1, 16, 2, 32),
+    ("gather", ["--gather-shape", "global", "--root-node", "0"], 15, 1, 30, 30),
+    ("gather", ["--gather-shape", "submesh"], 12, 4, 24, 24),
+    ("alltoall", [], 16, 16, 480, 480),
+    ("neighbor_exchange", [], 16, 16, 96, 96),
+    ("pipeline", [], 15, 15, 30, 30),
+    ("many_to_many", [], 16, 16, 128, 128),
+])
+def test_ai_cli_emits_two_write_only_rounds_and_metadata(
+        tmp_path, pattern, extra, active, consumers, writes, deliveries):
+    out = tmp_path / f"{pattern}_{active}"
+    g.main(["--pattern", pattern, "--topology", "mesh_4x4",
+            "--out", str(out), "--rounds", "2", "--size", "5", "--len", "7",
+            *extra])
+
+    txns = []
+    for source in range(16):
+        txns.extend(_parse_write(out / f"node{source}" / "write.txt"))
+        assert (out / f"node{source}" / "read.txt").read_text() == ""
+    assert len(txns) == writes
+    assert all(t["size"] == 5 and t["len"] == 7 and len(t["beats"]) == 8
+               for t in txns)
+    assert json.loads((out / "traffic_meta.json").read_text()) == {
+        "direction": "write",
+        "rounds": 2,
+        "transactions_per_flow": 1,
+        "burst_beats": 8,
+        "bytes_per_beat": 32,
+        "bytes_per_flow_round": 256,
+        "data_producers": active,
+        "consumers": consumers,
+        "axi_initiators": active,
+        "source_requests": writes,
+        "payload_deliveries": deliveries,
+        **({"multicast_mode": "hardware", "destinations_per_source": 16}
+           if pattern == "broadcast" else {}),
+    }
+
+
+def test_ai_rounds_reject_invalid_pattern_and_value(tmp_path):
+    with pytest.raises(SystemExit):
+        g.main(["--pattern", "neighbor", "--topology", "mesh_4x4",
+                "--out", str(tmp_path / "synthetic"), "--rounds", "1"])
+    with pytest.raises(SystemExit):
+        g.main(["--pattern", "pipeline", "--topology", "mesh_4x4",
+                "--out", str(tmp_path / "zero"), "--rounds", "0"])
+
+
+def test_read_direction_reverses_gather_request_edges_and_emits_prefill(tmp_path):
+    out = tmp_path / "gather_read"
+    g.main(["--pattern", "gather", "--direction", "read",
+            "--gather-shape", "global", "--root-node", "0",
+            "--topology", "mesh_4x4", "--out", str(out),
+            "--rounds", "1", "--size", "6", "--len", "63"])
+
+    nodes, _x, _y, bases, _config_bases, _sizes, _peripherals = \
+        g._load_topology("mesh_4x4")
+    assert (out / "node0" / "write.txt").read_text() == ""
+    root_reads = _parse_read(out / "node0" / "read.txt")
+    assert len(root_reads) == 15
+    expected_bases = {bases[nodes[i][3]] for i in range(1, 16)}
+    assert {next(base for base in expected_bases if base <= t["addr"] < base + 0x100000000)
+            for t in root_reads} == expected_bases
+    for producer in range(1, 16):
+        assert _parse_read(out / f"node{producer}" / "read.txt") == []
+        init_lines = (out / f"node{producer}" / "memory_init.txt").read_text().splitlines()
+        assert len(init_lines) == 1
+        assert init_lines[0].endswith(" 4096")
+    assert json.loads((out / "traffic_meta.json").read_text()) == {
+        "direction": "read",
+        "rounds": 1,
+        "transactions_per_flow": 1,
+        "burst_beats": 64,
+        "bytes_per_beat": 64,
+        "bytes_per_flow_round": 4096,
+        "data_producers": 15,
+        "consumers": 1,
+        "axi_initiators": 1,
+        "source_requests": 15,
+        "payload_deliveries": 15,
+    }
+
+
+def test_read_direction_rejects_broadcast(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        g.main(["--pattern", "broadcast", "--direction", "read",
+                "--topology", "mesh_4x4", "--out", str(tmp_path),
+                "--rounds", "1", "--size", "6", "--len", "63"])
+    assert "Broadcast Read is not supported" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("burst_beats", [1, 4, 16, 64])
+@pytest.mark.parametrize(("pattern", "extra", "direction"), [
+    ("broadcast", ["--mcast-shape", "global"], "write"),
+    ("gather", ["--gather-shape", "global"], "write"),
+    ("gather", ["--gather-shape", "global"], "read"),
+    ("alltoall", [], "write"),
+    ("alltoall", [], "read"),
+    ("pipeline", [], "write"),
+    ("pipeline", [], "read"),
+])
+def test_burst_characterization_keeps_4096_bytes_per_flow_round(
+        tmp_path, burst_beats, pattern, extra, direction):
+    transactions_per_flow = 64 // burst_beats
+    out = tmp_path / f"{pattern}_{direction}_{burst_beats}"
+    g.main([
+        "--pattern", pattern, "--topology", "mesh_4x4", "--out", str(out),
+        "--rounds", "2", "--direction", direction,
+        "--transactions-per-flow", str(transactions_per_flow),
+        "--size", "6", "--len", str(burst_beats - 1), *extra,
+    ])
+
+    meta = json.loads((out / "traffic_meta.json").read_text())
+    assert meta["rounds"] == 2
+    assert meta["transactions_per_flow"] == transactions_per_flow
+    assert meta["burst_beats"] == burst_beats
+    assert meta["bytes_per_beat"] == 64
+    assert meta["bytes_per_flow_round"] == 4096
+    assert burst_beats * transactions_per_flow == 64
+
+
+@pytest.mark.parametrize(("shape", "destinations_per_source"), [
+    ("row", 4), ("col", 4), ("submesh", 4), ("global", 16),
+])
+def test_repeated_unicast_broadcast_is_exposed_by_cli(
+        tmp_path, shape, destinations_per_source):
+    out = tmp_path / shape
+    g.main([
+        "--pattern", "broadcast", "--multicast-mode", "repeated_unicast",
+        "--mcast-shape", shape, "--topology", "mesh_4x4", "--out", str(out),
+        "--rounds", "2", "--direction", "write", "--size", "6", "--len", "63",
+    ])
+
+    meta = json.loads((out / "traffic_meta.json").read_text())
+    assert meta["multicast_mode"] == "repeated_unicast"
+    assert meta["destinations_per_source"] == destinations_per_source
+    assert meta["source_requests"] == meta["payload_deliveries"]
+    nodes = g._load_topology("mesh_4x4")[0]
+    node_at = {(x, y): node for node, x, y, _cid in nodes}
+    expected = {
+        node_at[source]: [node_at[member] for member in members] * 2
+        for source, members in g.mcast_groups(shape, 4, 4)
+    }
+    for source, destinations in expected.items():
+        writes = _parse_write(out / f"node{source}" / "write.txt")
+        assert len(writes) == len(destinations)
+        assert {txn["id"] for txn in writes} == {
+            source % (1 << g.axi_widths()["id"])}
+
+
+def test_make_wires_ai_mapping_arguments_and_unique_tags():
+    makefile = (Path(__file__).parents[1] / "verilator/Makefile").read_text(encoding="utf-8")
+
+    assert "$(filter multicast broadcast,$(PATTERN))" in makefile
+    assert "--gather-shape $(GATHER_SHAPE) --root-node $(ROOT_NODE)" in makefile
+    assert "$(if $(AI_ROUNDS),--rounds $(AI_ROUNDS))" in makefile
+    assert "gather_$(GATHER_SHAPE)" in makefile
+    assert "root$(ROOT_NODE)" in makefile
+    assert "$(if $(filter multicast broadcast,$(PATTERN)),_$(MCAST_SHAPE))" in makefile
+    assert "_AI_META_ARGS  := $(if $(_AI_PATTERN),--traffic-meta $(STIM_ROOT)/traffic_meta.json --traffic-mapping $(_TRAFFIC_MAPPING))" in makefile
+
+
+def test_make_adds_isolated_fixed_outstanding_experiment_targets():
+    makefile = (Path(__file__).parents[1] / "verilator/Makefile").read_text(encoding="utf-8")
+
+    for target, root in (
+            ("sim-ai-burst-sweep", "output/burst"),
+            ("sim-ai-multicast-compare", "output/multicast_compare"),
+            ("sim-ai-rr-rrd", "output/rr_vs_rrd")):
+        assert f"{target}:" in makefile
+        assert f"OUTPUT_ROOT={root}" in makefile
+    assert "SOURCE_OUTSTANDING_DEPTH=32" in makefile
+    assert "MAX_TXNS_PER_ID=32" in makefile
+    assert "--transactions-per-flow $(AI_TXNS_PER_FLOW)" in makefile
+    assert "--multicast-mode $(MULTICAST_MODE)" in makefile
+    assert "--max-txns-per-id $(MAX_TXNS_PER_ID) || exit 1;" in " ".join(makefile.split())
+
+
+def test_many_to_many_maps_each_source_to_the_next_clockwise_region():
+    expected = {
+        0: [2, 3, 6, 7], 1: [2, 3, 6, 7], 4: [2, 3, 6, 7], 5: [2, 3, 6, 7],
+        2: [10, 11, 14, 15], 3: [10, 11, 14, 15],
+        6: [10, 11, 14, 15], 7: [10, 11, 14, 15],
+        10: [8, 9, 12, 13], 11: [8, 9, 12, 13],
+        14: [8, 9, 12, 13], 15: [8, 9, 12, 13],
+        8: [0, 1, 4, 5], 9: [0, 1, 4, 5],
+        12: [0, 1, 4, 5], 13: [0, 1, 4, 5],
+    }
+    for src, destinations in expected.items():
+        assert g.many_to_many_dsts(src, 4, 4, 4) == destinations
+
+
+@pytest.mark.parametrize(("axi_size", "axi_len", "beats"), [(6, 63, 64), (5, 7, 8)])
+def test_many_to_many_uses_requested_burst_geometry(tmp_path, axi_size, axi_len, beats):
+    g.main(["--pattern", "many_to_many", "--topology", "mesh_4x4",
+            "--out", str(tmp_path), "--transactions-per-node", "4",
+            "--size", str(axi_size), "--len", str(axi_len),
+            "--ids-per-initiator", "1"])
+    _nodes, _x, _y, bases, _config_bases, sizes, _peripherals = \
+        g._load_topology("mesh_4x4")
+    destinations = {base: idx for idx, base in enumerate(sorted(bases.values()))}
+    for src in range(16):
+        writes = _parse_write(tmp_path / f"node{src}" / "write.txt")
+        assert len(writes) == 4
+        assert all(t["len"] == axi_len and t["size"] == axi_size and
+                   len(t["beats"]) == beats
+                   for t in writes)
+        assert (tmp_path / f"node{src}" / "read.txt").read_text() == ""
+        actual = []
+        for txn in writes:
+            base = next(base for base in destinations
+                        if base <= txn["addr"] < base + sizes["memory"][g.coord_id(
+                            destinations[base] % 4, destinations[base] // 4)])
+            actual.append(destinations[base])
+        assert actual == g.many_to_many_dsts(src, 4, 4, 4)
+
+
+def test_many_to_many_rejects_partial_round(tmp_path):
+    with pytest.raises(SystemExit, match="multiple of 4"):
+        g.main(["--pattern", "many_to_many", "--topology", "mesh_4x4",
+                "--out", str(tmp_path / "partial"), "--transactions-per-node", "3"])
+
+
+def test_many_to_many_rejects_non_4x4_mesh(tmp_path):
+    with pytest.raises(SystemExit, match="requires a 4x4 mesh"):
+        g.main(["--pattern", "many_to_many", "--topology", "mesh_2x2",
+                "--out", str(tmp_path / "wrong_mesh"), "--transactions-per-node", "4"])
+
+
 def test_address_map_pack_rejects_a_member_outside_the_mesh():
     """A peripheral shares a router's coordinate, so a dst_idx past the router
     array names no router to hang off and the member has no coordinate at all."""
@@ -1174,3 +1541,78 @@ def test_space_config_rejects_a_wide_size(tmp_path):
         g.main(["--pattern", "neighbor", "--topology", "mesh_2x2",
                 "--out", str(tmp_path), "--transactions-per-node", "4",
                 "--size", "5", "--len", "0", "--space", "config"])
+
+
+@pytest.mark.parametrize("channel_case", ["write", "read"])
+def test_channel_compare_emits_control_and_pipeline_background(tmp_path, channel_case):
+    g.main(["--pattern", "channel_compare", "--channel-case", channel_case,
+            "--topology", "mesh_4x4", "--out", str(tmp_path),
+            "--rounds", "16"])
+
+    _nodes, _x, _y, memory_bases, config_bases, _sizes, _peripherals = \
+        g._load_topology("mesh_4x4")
+    control_writes = _parse_write(tmp_path / "node0" / "write.txt")
+    control_reads = (tmp_path / "node0" / "read.txt").read_text().splitlines()
+
+    assert len(control_writes) == 64
+    assert [(t["addr"], t["len"], t["size"]) for t in control_writes] == [
+        (config_bases[3] + seq * 8, 0, 3) for seq in range(64)
+    ]
+    assert len(control_reads) == (64 * 11 if channel_case == "read" else 0)
+    if channel_case == "read":
+        assert (int(control_reads[1], 16), int(control_reads[2]), int(control_reads[3])) == \
+            (config_bases[3], 0, 3)
+
+    order = g.pipeline_order(4, 4)
+    payload_edges = list(zip(order[1:-1], order[2:]))
+    request_map = dict(payload_edges)
+    for node in range(1, 16):
+        selected = (_parse_write(tmp_path / f"node{node}" / "write.txt")
+                    if channel_case == "write" else
+                    _parse_read(tmp_path / f"node{node}" / "read.txt"))
+        if node in request_map:
+            assert len(selected) == 32
+            assert all(txn["len"] == 255 and txn["size"] == 3 for txn in selected)
+            destination = request_map[node]
+            cid = g._load_topology("mesh_4x4")[0][destination][3]
+            assert all(memory_bases[cid] <= txn["addr"] < memory_bases[cid] + 0x10000000
+                       for txn in selected)
+        else:
+            assert selected == []
+
+    meta = json.loads((tmp_path / "traffic_meta.json").read_text())
+    assert meta["control_probes"] == 64
+    assert meta["rounds"] == 16
+    assert meta["transactions_per_flow"] == 2
+    assert meta["background_bursts_per_flow"] == 32
+    assert meta["background_beats_per_flow"] == 8192
+    assert meta["shared_directed_edge"] == "1to2"
+    assert meta["control_resource"] == "req_1to2"
+    assert meta["rr_background_resource"] == "req_1to2"
+    assert meta["rrd_background_resource"] == "dat_1to2"
+
+
+def test_channel_compare_derives_shared_resource_from_2x2_routes(tmp_path):
+    g.main(["--pattern", "channel_compare", "--channel-case", "read",
+            "--topology", "mesh_2x2", "--out", str(tmp_path),
+            "--rounds", "16"])
+
+    meta = json.loads((tmp_path / "traffic_meta.json").read_text())
+    assert meta["shared_directed_edge"] == "1to3"
+    assert meta["control_resource"] == "req_1to3"
+    assert meta["rr_background_resource"] == "req_1to3"
+    assert meta["rrd_background_resource"] == "dat_1to3"
+
+
+def test_channel_compare_requires_case_and_both_sam_ranges(tmp_path):
+    with pytest.raises(SystemExit):
+        g.main(["--pattern", "channel_compare", "--topology", "mesh_4x4",
+                "--out", str(tmp_path / "missing_case")])
+
+    topology = tmp_path / "memory_only.yml"
+    topology.write_text(_uniform_config_yaml("memory_only", 2, 2).replace(
+        "      - { base: 0x100000000, size: 0x1000, stride: 0x200000000, space: config }\n",
+        ""))
+    with pytest.raises(SystemExit):
+        g.main(["--pattern", "channel_compare", "--channel-case", "write",
+                "--topology", str(topology), "--out", str(tmp_path / "missing_config")])

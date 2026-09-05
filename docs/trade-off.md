@@ -369,6 +369,31 @@ The current C++ model remains a known divergence: it is single-clock, its `VcAll
 per-VC pending queues, and its LOCAL DAT receive path returns per-VC credits. Target alignment is a
 separate implementation task.
 
+## Deterministic channel-mapping comparison
+
+The performance experiment keeps the three physical networks and changes only the runtime NI
+mapping. Native mode is unchanged.
+
+| Mapping | Control request/response | Data request/response |
+|---|---|---|
+| 2-channel mapping | REQ / RSP | REQ / RSP; DAT idle |
+| 3-channel mapping | REQ / RSP | DAT / DAT |
+
+Both comparison modes encode Data beats as 64-bit values while retaining the Data AXI class, so
+node 3 still selects its Data-memory SAM range. The normalization applies only to this experiment;
+native performance traffic remains 64-bit Control and 512-bit Data.
+
+The 2-channel result includes contention in the shared REQ/RSP arbitration and ready/valid paths.
+The 3-channel result instead includes DAT credit flow control, VC selection, DAT queues, and DAT
+pipeline latency. The measured difference therefore represents the two mappings as implemented,
+including their flow-control, buffering, arbitration, and VC-configuration differences. It is not
+a channel-count-only PPA result, and it supports no frequency, area, or power claim.
+
+The directed event issues one Control transaction and one Data transaction from separate sources,
+so it does not exercise or relax the same-ID multi-transaction ordering limitation recorded in
+`docs/known-limitations.md`. Broader workload conclusions require native-width traffic curves; the
+comparison itself reports only Control completion cycles.
+
 ## NSU downstream ID mapping consequences
 
 For writes, the class selected by AW selects REQ or DAT Write for the whole burst. Existing

@@ -40,9 +40,9 @@ namespace ni::cmodel::router {
 // The uint8_t node-id/mask API below assumes a mask is exactly one node id
 // wide and that an id fits a byte. Both are specgen facts today; catch drift
 // at compile time rather than in silently truncated coordinates.
-static_assert(ni::width::COLLECTIVE_MASK_WIDTH == ni::width::X_WIDTH + ni::width::Y_WIDTH,
+static_assert(::ni::width::COLLECTIVE_MASK_WIDTH == ::ni::width::X_WIDTH + ::ni::width::Y_WIDTH,
               "collective_mask must be one node id wide (X|Y) — specgen drift");
-static_assert(ni::width::COLLECTIVE_MASK_WIDTH <= 8,
+static_assert(::ni::width::COLLECTIVE_MASK_WIDTH <= 8,
               "node id / collective_mask no longer fit uint8_t — widen the route_mask API");
 
 // Multi-hot port set: bit p set means RouterPort p is a member.
@@ -66,8 +66,8 @@ struct NodeCoord {
 
 // dst_id, src_id and collective_mask share one composition (router.hpp:71-73).
 inline NodeCoord split_node_id(uint8_t id) {
-    return {static_cast<uint8_t>(id & ((1u << ni::width::X_WIDTH) - 1)),
-            static_cast<uint8_t>((id >> ni::width::X_WIDTH) & ((1u << ni::width::Y_WIDTH) - 1))};
+    return {static_cast<uint8_t>(id & ((1u << ::ni::width::X_WIDTH) - 1)),
+            static_cast<uint8_t>((id >> ::ni::width::X_WIDTH) & ((1u << ::ni::width::Y_WIDTH) - 1))};
 }
 
 // Reduction-AND of (mask | ~(a ^ b)) — floo_route_xymask.sv:117-118, :121-122.

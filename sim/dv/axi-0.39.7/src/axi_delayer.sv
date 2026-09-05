@@ -32,6 +32,7 @@ module axi_delayer #(
 ) (
   input  logic      clk_i,      // Clock
   input  logic      rst_ni,     // Asynchronous reset active low
+  input  logic      bypass_i,
   // slave port
   input  axi_req_t  slv_req_i,
   output axi_resp_t slv_resp_o,
@@ -39,6 +40,12 @@ module axi_delayer #(
   output axi_req_t  mst_req_o,
   input  axi_resp_t mst_resp_i
 );
+  axi_req_t  delayed_mst_req;
+  axi_resp_t delayed_slv_resp;
+
+  assign mst_req_o  = bypass_i ? slv_req_i  : delayed_mst_req;
+  assign slv_resp_o = bypass_i ? mst_resp_i : delayed_slv_resp;
+
   // AW
   stream_delay #(
     .StallRandom ( StallRandomInput ),
@@ -48,11 +55,11 @@ module axi_delayer #(
     .clk_i,
     .rst_ni,
     .payload_i ( slv_req_i.aw        ),
-    .ready_o   ( slv_resp_o.aw_ready ),
+    .ready_o   ( delayed_slv_resp.aw_ready ),
     .valid_i   ( slv_req_i.aw_valid  ),
-    .payload_o ( mst_req_o.aw        ),
+    .payload_o ( delayed_mst_req.aw  ),
     .ready_i   ( mst_resp_i.aw_ready ),
-    .valid_o   ( mst_req_o.aw_valid  )
+    .valid_o   ( delayed_mst_req.aw_valid )
   );
 
   // AR
@@ -64,11 +71,11 @@ module axi_delayer #(
     .clk_i,
     .rst_ni,
     .payload_i ( slv_req_i.ar        ),
-    .ready_o   ( slv_resp_o.ar_ready ),
+    .ready_o   ( delayed_slv_resp.ar_ready ),
     .valid_i   ( slv_req_i.ar_valid  ),
-    .payload_o ( mst_req_o.ar        ),
+    .payload_o ( delayed_mst_req.ar  ),
     .ready_i   ( mst_resp_i.ar_ready ),
-    .valid_o   ( mst_req_o.ar_valid  )
+    .valid_o   ( delayed_mst_req.ar_valid )
   );
 
   // W
@@ -80,11 +87,11 @@ module axi_delayer #(
     .clk_i,
     .rst_ni,
     .payload_i ( slv_req_i.w        ),
-    .ready_o   ( slv_resp_o.w_ready ),
+    .ready_o   ( delayed_slv_resp.w_ready ),
     .valid_i   ( slv_req_i.w_valid  ),
-    .payload_o ( mst_req_o.w        ),
+    .payload_o ( delayed_mst_req.w  ),
     .ready_i   ( mst_resp_i.w_ready ),
-    .valid_o   ( mst_req_o.w_valid  )
+    .valid_o   ( delayed_mst_req.w_valid )
   );
 
   // B
@@ -96,11 +103,11 @@ module axi_delayer #(
     .clk_i,
     .rst_ni,
     .payload_i ( mst_resp_i.b       ),
-    .ready_o   ( mst_req_o.b_ready  ),
+    .ready_o   ( delayed_mst_req.b_ready ),
     .valid_i   ( mst_resp_i.b_valid ),
-    .payload_o ( slv_resp_o.b       ),
+    .payload_o ( delayed_slv_resp.b ),
     .ready_i   ( slv_req_i.b_ready  ),
-    .valid_o   ( slv_resp_o.b_valid )
+    .valid_o   ( delayed_slv_resp.b_valid )
   );
 
   // R
@@ -112,11 +119,11 @@ module axi_delayer #(
     .clk_i,
     .rst_ni,
     .payload_i ( mst_resp_i.r       ),
-    .ready_o   ( mst_req_o.r_ready  ),
+    .ready_o   ( delayed_mst_req.r_ready ),
     .valid_i   ( mst_resp_i.r_valid ),
-    .payload_o ( slv_resp_o.r       ),
+    .payload_o ( delayed_slv_resp.r ),
     .ready_i   ( slv_req_i.r_ready  ),
-    .valid_o   ( slv_resp_o.r_valid )
+    .valid_o   ( delayed_slv_resp.r_valid )
   );
 endmodule
 
@@ -137,6 +144,7 @@ module axi_delayer_intf #(
 ) (
   input  logic    clk_i,
   input  logic    rst_ni,
+  input  logic    bypass_i,
   AXI_BUS.Slave   slv,
   AXI_BUS.Master  mst
 );
@@ -179,6 +187,7 @@ module axi_delayer_intf #(
   ) i_axi_delayer (
     .clk_i,   // Clock
     .rst_ni,  // Asynchronous reset active low
+    .bypass_i,
     .slv_req_i  ( slv_req  ),
     .slv_resp_o ( slv_resp ),
     .mst_req_o  ( mst_req  ),

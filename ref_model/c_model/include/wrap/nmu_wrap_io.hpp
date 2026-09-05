@@ -19,14 +19,14 @@
 // node's transmit side (`noc_req_*` before this stage), rx_* = receive side
 // (`noc_rsp_*` before this stage).
 //
-// FLIT_BYTES = 80 (ni::FLIT_WIDTH = 633 bits, rounded to bytes; stays the max
+// FLIT_BYTES = 80 (::ni::FLIT_WIDTH = 633 bits, rounded to bytes; stays the max
 // over networks, per-network widths bite only at the DPI/SV wire).
 // AXI_DATA_BYTES = 64 (512-bit data bus).
 // All multi-byte fields are byte-array little-endian, matching DPI wire packing.
 #pragma once
 #include "axi/types.hpp"        // axi::DATA_BYTES
 #include "wrap/flit_bytes.hpp"  // FlitBytes, FLIT_BYTES
-#include "ni_flit_constants.h"  // ni::header::VC_ID_WIDTH
+#include "ni_flit_constants.h"  // ::ni::header::VC_ID_WIDTH
 #include <array>
 #include <cstdint>
 
@@ -34,7 +34,7 @@ namespace ni::cmodel::wrap {
 
 // Per-VC credit pulse vector (bit/entry vc = one credit pulse on VC vc). Sized to
 // the max VC count; only [0 .. dat_num_vc) live. Mirrors router_wrap_io VcCreditVec.
-inline constexpr std::size_t NMU_NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;
+inline constexpr std::size_t NMU_NUM_VC_MAX = 1u << ::ni::header::VC_ID_WIDTH;
 using NmuVcCreditVec = std::array<bool, NMU_NUM_VC_MAX>;
 
 // 512-bit data bus = 64 bytes. Aliased from axi::DATA_BYTES so the DPI/SV

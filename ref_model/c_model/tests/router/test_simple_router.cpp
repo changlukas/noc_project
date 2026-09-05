@@ -142,8 +142,9 @@ TEST(SimpleRouterDatapath, ZeroLoadLatencyDirectModeTwoTicks) {
     ASSERT_EQ(east.received.size(), 1u);
 }
 
-// floo_router.sv:448-465 (gen_out_fifo): with output_fifo_depth>0, delivery matches
-// router::Router's 3-tick pipeline depth.
+// floo_router.sv:448-465 (gen_out_fifo): with output_fifo_depth>0, SimpleRouter
+// delivers in 3 ticks -- BW, grant, output-FIFO push. router::Router's DAT head
+// pays 4, the same three stages plus its own VA stage.
 TEST(SimpleRouterDatapath, ZeroLoadLatencyBufferedModeThreeTicks) {
     SimpleRouterConfig cfg = center_cfg();
     cfg.output_fifo_depth = 2;

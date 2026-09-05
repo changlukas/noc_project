@@ -249,7 +249,7 @@ inline SamTable load_config_table(const YAML::Node& root) {
                 const unsigned x = attach[k].idx & (x_dim - 1);
                 const unsigned y = attach[k].idx >> x_bits;
                 es.push_back({base + stride * k, size,
-                              static_cast<uint8_t>((y << ni::width::X_WIDTH) | x),
+                              static_cast<uint8_t>((y << ::ni::width::X_WIDTH) | x),
                               axi::class_of(space), attach[k].port, space});
             }
         }

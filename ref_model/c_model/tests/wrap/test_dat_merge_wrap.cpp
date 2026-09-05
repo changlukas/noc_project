@@ -49,6 +49,16 @@ Flit make_data_r(uint8_t rid, uint8_t vc) {
     return f;
 }
 
+Flit make_data_b(uint8_t bid, uint8_t vc) {
+    Flit f;
+    f.set_header_field("axi_ch", ni::AXI_CH_DataB);
+    f.set_header_field("dst_id", 0x02);
+    f.set_header_field("vc_id", vc);
+    f.set_header_field("flit_tail", 1);
+    f.set_payload_field("B", "bid", bid);
+    return f;
+}
+
 }  // namespace
 
 // Egress worm-atomicity: NMU pushes a DataAw+DataW pair (its own
@@ -155,6 +165,23 @@ TEST(DatMergeWrap, IngressDemuxesByAxiCh) {
     m.get_outputs(out);
     EXPECT_TRUE(out.nsu_rx_dat_valid) << "DataAw must demux to NSU";
     EXPECT_FALSE(out.nmu_rx_dat_valid) << "DataAw must not also reach NMU";
+}
+
+TEST(DatMergeWrap, ThreeChannelDataBDemuxesToNmu) {
+    DatMergeWrap m;
+    m.init(/*dat_num_vc=*/1);
+
+    DatMergeInputs in{};
+    in.rx_dat_valid = true;
+    in.rx_dat_flit = flit_to_bytes(make_data_b(/*bid=*/0x04, /*vc=*/0));
+    m.set_inputs(in);
+    m.tick();
+
+    DatMergeOutputs out{};
+    m.get_outputs(out);
+    EXPECT_TRUE(out.nmu_rx_dat_valid) << "DataB response must demux to NMU";
+    EXPECT_FALSE(out.nsu_rx_dat_valid) << "DataB response must not reach NSU request ingress";
+    EXPECT_TRUE(out.rx_dat_crdvalid[0]) << "NMU-bound DataB must return DAT credit immediately";
 }
 
 // NSU-bound ingress (DataAw/DataW) returns credit when the NSU reports it

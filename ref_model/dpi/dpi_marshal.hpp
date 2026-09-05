@@ -1,6 +1,6 @@
 // DPI wire-format marshal helpers — svBitVecVal[] <-> c_model byte/word types.
 //
-// Word counts are derived from ni::FLIT_WIDTH / axi::DATA_WIDTH, not pinned to
+// Word counts are derived from ::ni::FLIT_WIDTH / axi::DATA_WIDTH, not pinned to
 // today's values (633-bit flit, 512-bit data bus): S2 T2d widened both constants
 // and this header kept producing the right word count / tail mask without
 // editing a single formula here. Extracted out of cmodel_dpi.cpp (rather than
@@ -9,10 +9,10 @@
 // ref_model/c_model/include/wrap/ (whose other headers stay DPI-agnostic).
 #pragma once
 #include "svdpi.h"
-#include "axi/types.hpp"        // ni::cmodel::axi::DATA_BYTES / DATA_WIDTH
+#include "axi/types.hpp"        // ::ni::cmodel::axi::DATA_BYTES / DATA_WIDTH
 #include "wrap/flit_bytes.hpp"  // FlitBytes, FLIT_BYTES, FLIT_VEC_WORDS
-#include "ni_flit_constants.h"  // ni::FLIT_WIDTH, ni::width::AXI_ADDR_WIDTH
-#include "ni_params.h"          // ni::NOC_{REQ,RSP,DAT}_FLIT_WIDTH
+#include "ni_flit_constants.h"  // ::ni::FLIT_WIDTH, ::ni::width::AXI_ADDR_WIDTH
+#include "ni_params.h"          // ::ni::NOC_{REQ,RSP,DAT}_FLIT_WIDTH
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -30,7 +30,7 @@ constexpr int WSTRB_VEC_WORDS = (axi::DATA_BYTES + 31) / 32;
 //
 // Each physical network has its own flit width (REQ 136 b, RSP 126 b, DAT
 // 633 b, docs/noc-target-spec.md §6); the C++ Flit/FlitBytes container stays
-// fixed at the max (ni::FLIT_WIDTH = DAT's width, S3a stage design §6) --
+// fixed at the max (::ni::FLIT_WIDTH = DAT's width, S3a stage design §6) --
 // only the DPI wire word count narrows per network. FlitMarshalT<WIDTH_BITS>
 // VEC_WORDS * 32 bits are reserved on the wire, but only WIDTH_BITS of them
 // are real flit content; pack() masks the tail word explicitly instead of
@@ -101,17 +101,17 @@ struct FlitMarshalT {
     }
 };
 
-// Per-network flit marshallers (S3a T5). DAT's width equals ni::FLIT_WIDTH
+// Per-network flit marshallers (S3a T5). DAT's width equals ::ni::FLIT_WIDTH
 // (the max), so DatFlitMarshal and the legacy FLIT_VEC_WORDS/unpack_flit/
 // pack_flit names below are the same instantiation.
-using ReqFlitMarshal = FlitMarshalT<ni::NOC_REQ_FLIT_WIDTH>;
-using RspFlitMarshal = FlitMarshalT<ni::NOC_RSP_FLIT_WIDTH>;
-using DatFlitMarshal = FlitMarshalT<ni::NOC_DAT_FLIT_WIDTH>;
+using ReqFlitMarshal = FlitMarshalT<::ni::NOC_REQ_FLIT_WIDTH>;
+using RspFlitMarshal = FlitMarshalT<::ni::NOC_RSP_FLIT_WIDTH>;
+using DatFlitMarshal = FlitMarshalT<::ni::NOC_DAT_FLIT_WIDTH>;
 
 // Legacy names, kept for source compatibility with existing callers/tests
 // (test_cmodel_dpi.cpp): the DAT-width instantiation, since DAT carries
-// ni::FLIT_WIDTH end to end. FLIT_VEC_WORDS itself is already defined in
-// flit_bytes.hpp (ni::FLIT_WIDTH-derived) and equals DatFlitMarshal::VEC_WORDS;
+// ::ni::FLIT_WIDTH end to end. FLIT_VEC_WORDS itself is already defined in
+// flit_bytes.hpp (::ni::FLIT_WIDTH-derived) and equals DatFlitMarshal::VEC_WORDS;
 // not redefined here.
 static_assert(FLIT_VEC_WORDS == DatFlitMarshal::VEC_WORDS,
               "flit_bytes.hpp FLIT_VEC_WORDS must match the DAT-width marshal instantiation");
@@ -173,7 +173,7 @@ inline void pack_wstrb(uint64_t strb, svBitVecVal* vec) {
 // this stage (S2 T2c widens data/flit only, per specgen/source/constants.yaml);
 // the 2-word split stays exact for any ADDR_WIDTH in (32, 64].
 inline void pack_addr64(uint64_t addr, svBitVecVal* vec) {
-    static_assert(ni::width::AXI_ADDR_WIDTH > 32 && ni::width::AXI_ADDR_WIDTH <= 64,
+    static_assert(::ni::width::AXI_ADDR_WIDTH > 32 && ::ni::width::AXI_ADDR_WIDTH <= 64,
                   "pack_addr64 hardcodes a 2-word (64-bit) split; widen it if "
                   "ADDR_WIDTH moves outside (32, 64]");
     vec[0] = static_cast<uint32_t>(addr & 0xFFFF'FFFFu);

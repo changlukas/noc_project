@@ -155,7 +155,7 @@
     {
       "name": "ROUTER",
       "fullname": "NoC Router",
-      "role": "Per-node wormhole switch, one instance per physical network: REQ/RSP are 2-stage ready/valid single-VC SimpleRouters, DAT is a 3-stage credit Router with per-hop VC assignment",
+      "role": "Per-node wormhole switch, one instance per physical network: REQ/RSP are 2-stage ready/valid single-VC SimpleRouters, DAT is a 4-stage credit Router with per-hop VC assignment",
       "features": [
         {"id": "FEAT-ROUTER-ROUTE_COMPUTATION", "summary": "XY dimension-order route computation on the head flit; minimal, deterministic, no Y-to-X turns.", "modes": []},
         {"id": "FEAT-ROUTER-WORMHOLE_ARBITRATION", "summary": "Per-output packet-level lock ACROSS VCs, head grant to tail grant; RR advances per packet. A credit-starved worm idles the whole output. AW+W is the only packet whose lock spans cycles.", "modes": []},

@@ -101,6 +101,7 @@ class NmuStandalone {
     NmuStandalone& operator=(NmuStandalone&&) = delete;
 
     AxiSlavePort& axi_slave_port() noexcept { return nmu_.axi_slave_port(); }
+    void set_channel_mode(ni::ChannelMode mode) noexcept { nmu_.set_channel_mode(mode); }
     void tick() { nmu_.tick(); }
     const Rob& rob() const noexcept { return nmu_.rob(); }
     const VcAllocator& vc_allocator() const noexcept { return nmu_.vc_allocator(); }

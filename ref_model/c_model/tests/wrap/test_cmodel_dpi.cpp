@@ -27,15 +27,15 @@ void check_and_clear_error(int expected_code) {
     const char* msg = nullptr;
     int code = cmodel_check_error(&msg);
     EXPECT_EQ(code, expected_code) << "msg: " << (msg ? msg : "<null>");
-    ni::cmodel::wrap::g_dpi_error_code.store(CMODEL_DPI_OK);
-    ni::cmodel::wrap::g_dpi_error_msg.clear();
+    ::ni::cmodel::wrap::g_dpi_error_code.store(CMODEL_DPI_OK);
+    ::ni::cmodel::wrap::g_dpi_error_msg.clear();
 }
 
 // One NMU handle at the testbench's own defaults (noc_tb_top.sv passes the
 // same specgen values into cmodel_nmu_create_ex).
 unsigned long long make_nmu(const char* name, const char* config_path) {
-    return cmodel_nmu_create_ex(name, /*src_id=*/0, /*num_vc=*/1, ni::NMU_READ_ROB_ENABLED,
-                                ni::NMU_ROB_B_DEPTH, ni::NMU_ROB_R_DEPTH, ni::NMU_MAX_TXNS_PER_ID,
+    return cmodel_nmu_create_ex(name, /*src_id=*/0, /*num_vc=*/1, ::ni::NMU_READ_ROB_ENABLED,
+                                ::ni::NMU_ROB_B_DEPTH, ::ni::NMU_ROB_R_DEPTH, ::ni::NMU_MAX_TXNS_PER_ID,
                                 /*port_id=*/0, config_path);
 }
 
@@ -71,6 +71,16 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     EXPECT_NE(nmu_a, nmu_b);
     check_and_clear_error(CMODEL_DPI_OK);
 
+    // Channel mapping is a pre-enable configuration register: valid modes
+    // program each NI, invalid values and writes after the first tick fail
+    // through the DPI error latch.
+    EXPECT_NO_FATAL_FAILURE(cmodel_nmu_set_channel_mode(nmu_a, 2));
+    check_and_clear_error(CMODEL_DPI_OK);
+    EXPECT_NO_FATAL_FAILURE(cmodel_nmu_set_channel_mode(nmu_b, 3));
+    check_and_clear_error(CMODEL_DPI_OK);
+    cmodel_nmu_set_channel_mode(nmu_a, 1);
+    check_and_clear_error(CMODEL_DPI_ERR_GENERIC);
+
     // Case: create with no topology → no handle, and the reason reaches the
     // latch the SV side polls. The wrap used to invent a 16x16 / 4 GB SAM
     // here, so a testbench that dropped its config_path ran to completion
@@ -92,6 +102,25 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
                                                       /*config_path=*/"");
     ASSERT_NE(nsu_handle, 0ull);
     check_and_clear_error(CMODEL_DPI_OK);
+
+    unsigned int nsu_write_hwm = 99;
+    unsigned int nsu_read_hwm = 99;
+    cmodel_nsu_meta_buffer_hwm(nsu_handle, &nsu_write_hwm, &nsu_read_hwm);
+    EXPECT_EQ(nsu_write_hwm, 0u);
+    EXPECT_EQ(nsu_read_hwm, 0u);
+    check_and_clear_error(CMODEL_DPI_OK);
+
+    EXPECT_NO_FATAL_FAILURE(cmodel_nsu_set_channel_mode(nsu_handle, 3));
+    check_and_clear_error(CMODEL_DPI_OK);
+    cmodel_nsu_set_channel_mode(nsu_handle, 1);
+    check_and_clear_error(CMODEL_DPI_ERR_GENERIC);
+
+    cmodel_nmu_tick(nmu_a);
+    cmodel_nmu_set_channel_mode(nmu_a, 2);
+    check_and_clear_error(CMODEL_DPI_ERR_GENERIC);
+    cmodel_nsu_tick(nsu_handle);
+    cmodel_nsu_set_channel_mode(nsu_handle, 3);
+    check_and_clear_error(CMODEL_DPI_ERR_GENERIC);
 
     // Case: port_id 3 → no handle. The field is 2 b, so 3 fits on the wire but
     // names no endpoint; the wrap's guard must reach the latch the SV side
@@ -127,12 +156,12 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
 // pipeline: a word swap, lane slip, tail-bit leak, or strb truncation changes
 // a compared byte here exactly as it would through a full co-sim readback.
 
-using namespace ni::cmodel::wrap;
+using namespace ::ni::cmodel::wrap;
 
 TEST(DpiMarshalTest, PackUnpackFlit_RoundTrip_PerByteDistinctPattern) {
     // Every flit byte gets a distinct value; the last byte's padding bits
     // (beyond FLIT_WIDTH) are left at 0, as a real Flit::raw() produces.
-    constexpr int kLastByteValidBits = ni::FLIT_WIDTH - (FLIT_BYTES - 1) * 8;  // 633-632=1
+    constexpr int kLastByteValidBits = ::ni::FLIT_WIDTH - (FLIT_BYTES - 1) * 8;  // 633-632=1
     FlitBytes b{};
     for (int i = 0; i < FLIT_BYTES; ++i) b[i] = static_cast<uint8_t>(i * 7 + 3);
     b[FLIT_BYTES - 1] &= static_cast<uint8_t>((1u << kLastByteValidBits) - 1u);
@@ -149,7 +178,7 @@ TEST(DpiMarshalTest, PackFlit_TailWordExplicitlyMasked_RegardlessOfInputPadding)
     // the tail word and no padding bit.
     FlitBytes b{};
     b.fill(0xFF);
-    constexpr int kLastByteValidBits = ni::FLIT_WIDTH - (FLIT_BYTES - 1) * 8;
+    constexpr int kLastByteValidBits = ::ni::FLIT_WIDTH - (FLIT_BYTES - 1) * 8;
     b[FLIT_BYTES - 1] = static_cast<uint8_t>((1u << kLastByteValidBits) - 1u);
 
     svBitVecVal vec[FLIT_VEC_WORDS];
@@ -165,7 +194,7 @@ TEST(DpiMarshalTest, Fits_RejectsFlitWiderThanTheNetworkWire) {
     // flit carrying live payload up there is lost with no symptom until the AXI
     // data comes back wrong. fits() is what makes that loud (pack asserts on it).
     FlitBytes narrow_ok{};
-    for (int bit = 0; bit < ni::NOC_RSP_FLIT_WIDTH; ++bit)
+    for (int bit = 0; bit < ::ni::NOC_RSP_FLIT_WIDTH; ++bit)
         narrow_ok[bit / 8] |= static_cast<uint8_t>(1u << (bit % 8));
     EXPECT_TRUE(RspFlitMarshal::fits(narrow_ok));
     EXPECT_TRUE(ReqFlitMarshal::fits(narrow_ok)) << "RSP width < REQ width, must still fit";
@@ -173,15 +202,15 @@ TEST(DpiMarshalTest, Fits_RejectsFlitWiderThanTheNetworkWire) {
     // One bit just above the REQ wire width — the shape of a data-class payload
     // riding a narrow network.
     FlitBytes one_over = narrow_ok;
-    one_over[ni::NOC_REQ_FLIT_WIDTH / 8] |=
-        static_cast<uint8_t>(1u << (ni::NOC_REQ_FLIT_WIDTH % 8));
+    one_over[::ni::NOC_REQ_FLIT_WIDTH / 8] |=
+        static_cast<uint8_t>(1u << (::ni::NOC_REQ_FLIT_WIDTH % 8));
     EXPECT_FALSE(ReqFlitMarshal::fits(one_over));
     EXPECT_TRUE(DatFlitMarshal::fits(one_over));
 }
 
 TEST(DpiMarshalTest, PackUnpackAxiData_RoundTrip_PerLaneDistinctBytes) {
-    std::array<uint8_t, ni::cmodel::axi::DATA_BYTES> data{};
-    for (int i = 0; i < ni::cmodel::axi::DATA_BYTES; ++i) data[i] = static_cast<uint8_t>(i);
+    std::array<uint8_t, ::ni::cmodel::axi::DATA_BYTES> data{};
+    for (int i = 0; i < ::ni::cmodel::axi::DATA_BYTES; ++i) data[i] = static_cast<uint8_t>(i);
 
     svBitVecVal vec[DATA_VEC_WORDS];
     pack_axi_data(data, vec);
@@ -189,7 +218,7 @@ TEST(DpiMarshalTest, PackUnpackAxiData_RoundTrip_PerLaneDistinctBytes) {
 }
 
 TEST(DpiMarshalTest, PackUnpackWstrb_RoundTrip_WalkingOne) {
-    for (int lane = 0; lane < ni::cmodel::axi::DATA_BYTES; ++lane) {
+    for (int lane = 0; lane < ::ni::cmodel::axi::DATA_BYTES; ++lane) {
         const uint64_t strb = uint64_t{1} << lane;
         svBitVecVal vec[WSTRB_VEC_WORDS];
         pack_wstrb(strb, vec);
@@ -198,7 +227,7 @@ TEST(DpiMarshalTest, PackUnpackWstrb_RoundTrip_WalkingOne) {
 }
 
 TEST(DpiMarshalTest, PackUnpackWstrb_RoundTrip_FullStrobe) {
-    const uint64_t full = ni::cmodel::axi::kFullStrbMask;
+    const uint64_t full = ::ni::cmodel::axi::kFullStrbMask;
     svBitVecVal vec[WSTRB_VEC_WORDS];
     pack_wstrb(full, vec);
     EXPECT_EQ(unpack_wstrb(vec), full);

@@ -65,9 +65,10 @@ TEST(EjectAdapter, BuffersEjectedFlitAndReturnsCredit) {
     const std::size_t local_out_seed = r.credit(LOCAL, 0);  // full before any grant
     EXPECT_TRUE(inj.push_flit(req_flit(/*dst=*/0, /*vc=*/0)));
     inj.on_tick();
-    r.tick();  // stage1: input register -> fifo
-    r.tick();  // stage2: grant->output fifo (LOCAL), LOCAL output credit--
-    r.tick();  // stage3: output fifo -> downstream (ej buffers)
+    r.tick();  // stage1 BW: input register -> fifo
+    r.tick();  // stage2 VA: LOCAL output VC assigned
+    r.tick();  // stage3 SA: grant->output fifo (LOCAL), LOCAL output credit--
+    r.tick();  // stage4 LT: output fifo -> downstream (ej buffers)
     EXPECT_EQ(r.credit(LOCAL, 0), local_out_seed - 1) << "LOCAL output credit spent on eject";
     auto out = ej.pop_flit();
     ASSERT_TRUE(out.has_value());
@@ -87,8 +88,9 @@ TEST(CreditRelay, DecrementThenRelayRestoresUpstreamCredit) {
     const std::size_t seed = up.credit(WEST, 0);
     ASSERT_TRUE(inj.push_flit(req_flit(/*dst=*/0x00, /*vc=*/0)));
     inj.on_tick();
-    up.tick();  // stage1
-    up.tick();  // stage2: grant -> WEST output FIFO, WEST credit--
+    up.tick();  // stage1 BW
+    up.tick();  // stage2 VA: WEST output VC assigned
+    up.tick();  // stage3 SA: grant -> WEST output FIFO, WEST credit--
     EXPECT_EQ(up.credit(WEST, 0), seed - 1) << "WEST output credit spent on grant";
     relay.receive_credit(0);  // downstream EAST input freed -> relay restores WEST
     EXPECT_EQ(up.credit(WEST, 0), seed) << "relay must restore the upstream WEST output credit";

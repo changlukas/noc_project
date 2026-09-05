@@ -84,7 +84,18 @@ module user_node_endpoint #(
     input  ni_signals_pkg::axi_req_t   slave_axi_req_i,
     output ni_signals_pkg::axi_rsp_t   slave_axi_rsp_o,
     output logic                       end_of_sim_o,
-    output int unsigned                txn_cnt_o
+    output int unsigned                txn_cnt_o,
+    output int unsigned                expected_txn_cnt_o,
+    output int unsigned                expected_write_cnt_o,
+    output longint unsigned            stimulus_start_cycle_o,
+    output longint unsigned            stimulus_done_cycle_o,
+    output logic                       compare_ready_o,
+    input  logic                       compare_start_i,
+    input  logic                       compare_finish_i,
+    output logic                       compare_work_done_o,
+    output logic                       compare_done_o,
+    output logic                       compare_background_o,
+    output logic                       source_done_o
 );
 
     localparam time ApplTime = 2ns;   // FlooNoC values; clk is 10 ns
@@ -146,6 +157,7 @@ module user_node_endpoint #(
     ) i_mst_backpressure (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
+        .bypass_i(channel_compare_mode),
         .slv(mst_pre_delay),
         .mst(mst_post_delay)
     );
@@ -527,7 +539,7 @@ module user_node_endpoint #(
             .FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),
             .FIXED_DELAY_OUTPUT(MEM_FIXED_DELAY_OUTPUT)
         ) i_delayer (
-            .clk_i(clk_i), .rst_ni(rst_ni),
+            .clk_i(clk_i), .rst_ni(rst_ni), .bypass_i(channel_compare_mode),
             .slv(tile_mst[t]), .mst(tile_mem[t])
         );
 
@@ -651,6 +663,16 @@ module user_node_endpoint #(
     // through a clocked register because Verilator does not reliably propagate
     // a procedurally-assigned output-port variable to the instantiating scope.
     logic run_done = 1'b0;
+    logic channel_compare_mode = 1'b0;
+    logic compare_started = 1'b0;
+    bit compare_is_read = 1'b0;
+    bit compare_is_background = 1'b0;
+    bit channel_compare_fault = 1'b0;
+    int unsigned compare_data_beats = 0;
+    int unsigned compare_expected_bursts = 0;
+    int unsigned compare_expected_beats = 0;
+
+    initial void'($value$plusargs("channel_compare_fault=%d", channel_compare_fault));
 
     always_ff @(posedge clk_i or negedge rst_ni) begin
         if (!rst_ni) end_of_sim_o <= 1'b0;
@@ -659,6 +681,9 @@ module user_node_endpoint #(
 
     file_master_t file_master;
     mcast_preload_scoreboard scoreboard;
+    bit scoreboard_ready = 1'b0;
+    bit read_prefill_fault = 1'b0;
+    string traffic_direction = "write";
 
     // Stimulus root: <stim_dir>/node<NODE_ID>/{write,read}.txt (emitter output).
     string stim_dir = "sim/test_patterns/directed";
@@ -676,6 +701,21 @@ module user_node_endpoint #(
         return m;
     endfunction
 
+    initial channel_compare_mode = get_injection_mode() == 3;
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
+            compare_data_beats <= 0;
+        end else if (compare_started) begin
+            if (compare_is_background && !compare_is_read &&
+                mst_flat_req.wvalid && mst_flat_rsp.wready)
+                compare_data_beats <= compare_data_beats + 1;
+            if (compare_is_background && compare_is_read &&
+                mst_flat_rsp.rvalid && mst_flat_req.rready)
+                compare_data_beats <= compare_data_beats + 1;
+        end
+    end
+
     // The one "not an error response" predicate, {OKAY, EXOKAY}, the set pulp
     // uses (axi_test.sv:2133-2134). Both readers below call it -- the RRESP
     // fatal and the multicast replica compare -- so the two can never disagree
@@ -688,6 +728,7 @@ module user_node_endpoint #(
     initial begin
         scoreboard = new(master_dv);
         scoreboard.reset();
+        scoreboard_ready = 1'b1;
         @(posedge rst_ni);
         // Mode 1 interleaves reads and writes with no pairing, so a read may
         // precede the write to its address and the scoreboard's
@@ -706,26 +747,112 @@ module user_node_endpoint #(
     // the case dispatch in the stimulus initial below). Pacing uses
     // $urandom_range (PRNG, no constraint solver => no z3): one Bernoulli
     // trial per cycle at p = injection_rate (booksim2 injection process).
-    // Paced copies of run_aw/run_ar: same body as axi_test.sv:2540-2565 plus a
-    // per-cycle idle before each send.
+    // Paced copies of run_aw/run_ar: same body as axi_test.sv:2540-2565 driven
+    // by the open-loop source queue below instead of by an inline idle.
+    //
+    // Open loop, per booksim2's _qtime (trafficmanager.cpp:922-945). The trial
+    // runs every cycle whether or not a send is blocked on awready/arready, so
+    // the intended issue time survives backpressure: a hit appends the current
+    // cycle to the channel's slot queue, and the send task takes the oldest
+    // slot and issues when the channel is ready. Handshake cycle minus slot is
+    // the source queue delay -- the part of packet latency the third-party
+    // axi_bw_monitor cannot see, because it starts its clock at the AX
+    // handshake. The earlier form put the trial inside the send loop, so the
+    // clock stopped while a send was blocked: closed loop, and offered load
+    // could never exceed what the network accepted.
+    //
+    // Basis points, not percent. A real-to-int cast rounds to nearest (LRM
+    // 6.12.2), so percent did not stall at the report's lowest rate, it
+    // silently doubled it: int'(0.005 * 100.0) is 1, one percent. The floor is
+    // where percent breaks outright, int'(0.001 * 100.0) being 0. Basis points
+    // carry both cases.
     real injection_rate;
-    int  unsigned injection_rate_pct;
+    int  unsigned injection_rate_bp;
+
+    // Free-running cycle counter. Read in the Active region (before the
+    // nonblocking update lands) both by the slot producer and by the send
+    // tasks resuming from @(posedge clk_i), so the two share one numbering.
+    longint unsigned cycle_cnt;
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) cycle_cnt <= '0;
+        else         cycle_cnt <= cycle_cnt + 1;
+    end
+
+    // Set by the paced task that owns each channel, so a mode that does not
+    // pace a channel (mode 2 gates AR on the paired B, not on a rate) produces
+    // no slots for it and reports N: 0.
+    bit pacing_aw, pacing_ar;
+    longint unsigned aw_slots[$], ar_slots[$];
+    longint unsigned srcq_w_sum, srcq_r_sum;
+    int      unsigned srcq_w_n,  srcq_r_n;
+
+    always_ff @(posedge clk_i) begin
+        if (rst_ni) begin
+            // cycle_cnt + 1 names the cycle beginning at this edge, the first
+            // one in which the slot can be issued: a send that starts right
+            // away drives AxVALID after this edge and is sampled at the next,
+            // so it occupies exactly this cycle and scores 0. The consumers
+            // take the slot with a level-sensitive wait rather than a clocked
+            // one, so a slot produced at this edge is visible in this same time
+            // step; polling on @(posedge clk_i) instead lost the race against
+            // this block and charged every transaction a flat extra cycle.
+            if (pacing_aw && $urandom_range(0, 9999) < injection_rate_bp)
+                aw_slots.push_back(cycle_cnt + 1);
+            if (pacing_ar && $urandom_range(0, 9999) < injection_rate_bp)
+                ar_slots.push_back(cycle_cnt + 1);
+        end
+    end
 
     task automatic run_aw_paced();
+        longint unsigned slot;
+        pacing_aw = 1'b1;
         while (file_master.aw_queue.size() > 0) begin
-            while ($urandom_range(0, 99) >= injection_rate_pct) @(posedge clk_i);
+            wait (aw_slots.size() > 0);
+            slot = aw_slots.pop_front();
             file_master.drv.send_aw(file_master.aw_queue[0]);
+            // Both are unsigned: a handshake before its own slot would wrap to
+            // a huge delay and quietly poison the mean, so abort instead.
+            assert (cycle_cnt >= slot)
+                else $fatal(1, "[SrcQueue] node%0d: AW handshake at %0d precedes slot %0d",
+                            NODE_ID, cycle_cnt, slot);
+            srcq_w_sum += cycle_cnt - slot;
+            srcq_w_n++;
             void'(file_master.aw_queue.pop_front());
         end
+        pacing_aw = 1'b0;
     endtask
 
     task automatic run_ar_paced();
+        longint unsigned slot;
+        pacing_ar = 1'b1;
         while (file_master.ar_queue.size() > 0) begin
-            while ($urandom_range(0, 99) >= injection_rate_pct) @(posedge clk_i);
+            wait (ar_slots.size() > 0);
+            slot = ar_slots.pop_front();
             file_master.drv.send_ar(file_master.ar_queue[0]);
+            assert (cycle_cnt >= slot)
+                else $fatal(1, "[SrcQueue] node%0d: AR handshake at %0d precedes slot %0d",
+                            NODE_ID, cycle_cnt, slot);
+            srcq_r_sum += cycle_cnt - slot;
+            srcq_r_n++;
             void'(file_master.ar_queue.pop_front());
         end
+        pacing_ar = 1'b0;
     endtask
+
+    // End of sim, beside the [mst_bp] line above. emit_result_csv.py adds this
+    // mean to the monitor's to get packet latency (mean_latency_open).
+    final begin
+        $display("[SrcQueue node%0d][Read] mean: %0.2f, N: %0d", NODE_ID,
+                 (srcq_r_n == 0) ? 0.0 : real'(srcq_r_sum) / real'(srcq_r_n), srcq_r_n);
+        $display("[SrcQueue node%0d][Write] mean: %0.2f, N: %0d", NODE_ID,
+                 (srcq_w_n == 0) ? 0.0 : real'(srcq_w_sum) / real'(srcq_w_n), srcq_w_n);
+        if (get_injection_mode() == 4) begin
+            $display("[SourceWindow node%0d] depth=%0d max_outstanding=%0d",
+                     NODE_ID, source_outstanding_depth,
+                     (file_master.num_reads != 0)
+                         ? source_read_outstanding_hwm : source_outstanding_hwm);
+        end
+    end
 
     // Mode-2 interlock state: B responses returned per AXI id, snooped off the
     // flat wires (same sampling pattern as txn_cnt_o). Per-id, not total: with
@@ -734,20 +861,199 @@ module user_node_endpoint #(
     // write's B exactly.
     int unsigned b_returned[2**XBAR_SLV_ID_W];
 
+    // Mode 4 models a finite AXI Manager issue window. Local admission releases
+    // AW and the matching W burst independently, so WVALID never depends on
+    // AWREADY. An accepted AW occupies a slot until its B handshake.
+    int unsigned source_outstanding_depth;
+    int unsigned channel_rounds;
+    int unsigned source_aw_admitted, source_w_started, source_ar_admitted;
+    int unsigned source_aw_accepted, source_b_returned;
+    int unsigned source_ar_accepted, source_r_completed;
+    int unsigned source_outstanding_hwm;
+    int unsigned source_read_outstanding_hwm;
+
+    always_comb begin
+        source_done_o = expected_txn_cnt_o == 0;
+        if (traffic_direction == "read" && expected_txn_cnt_o > 0)
+            source_done_o = source_r_completed >= expected_txn_cnt_o ||
+                (mst_flat_rsp.rvalid && mst_flat_req.rready && mst_flat_rsp.rlast &&
+                 source_r_completed + 1 >= expected_txn_cnt_o);
+        else if (traffic_direction == "write" && expected_txn_cnt_o > 0)
+            source_done_o = source_b_returned >= expected_txn_cnt_o ||
+                (mst_flat_rsp.bvalid && mst_flat_req.bready &&
+                 source_b_returned + 1 >= expected_txn_cnt_o);
+    end
+
     always_ff @(posedge clk_i or negedge rst_ni) begin
         if (!rst_ni) begin
             b_returned <= '{default: '0};
-        end else if (mst_flat_rsp.bvalid && mst_flat_req.bready) begin
-            b_returned[mst_bid] <= b_returned[mst_bid] + 1;
-            // axi_sim_mem answers every mapped access OKAY, so any error
-            // response here is a fabric bug (e.g. a corrupted merged B), or a
-            // write that missed every tile window. +decerr_fault_wr=1 proves it
-            // fires.
-            if (mst_flat_rsp.bresp != axi_pkg::RESP_OKAY)
-                $fatal(1, "[mcast_sb] node%0d: BRESP=%0h on id=%0h, expected OKAY",
-                       NODE_ID, mst_flat_rsp.bresp, mst_bid);
+            source_aw_accepted <= 0;
+            source_b_returned <= 0;
+            source_ar_accepted <= 0;
+            source_r_completed <= 0;
+            source_outstanding_hwm <= 0;
+            source_read_outstanding_hwm <= 0;
+        end else begin
+            if (mst_flat_req.awvalid && mst_flat_rsp.awready) begin
+                source_aw_accepted <= source_aw_accepted + 1;
+                if (!(mst_flat_rsp.bvalid && mst_flat_req.bready) &&
+                    source_aw_accepted + 1 - source_b_returned > source_outstanding_hwm)
+                    source_outstanding_hwm <= source_aw_accepted + 1 - source_b_returned;
+            end
+            if (mst_flat_rsp.bvalid && mst_flat_req.bready) begin
+                source_b_returned <= source_b_returned + 1;
+                b_returned[mst_bid] <= b_returned[mst_bid] + 1;
+                // axi_sim_mem answers every mapped access OKAY, so any error
+                // response here is a fabric bug (e.g. a corrupted merged B), or a
+                // write that missed every tile window. +decerr_fault_wr=1 proves it
+                // fires.
+                if (mst_flat_rsp.bresp != axi_pkg::RESP_OKAY)
+                    $fatal(1, "[mcast_sb] node%0d: BRESP=%0h on id=%0h, expected OKAY",
+                           NODE_ID, mst_flat_rsp.bresp, mst_bid);
+            end
+            if (mst_flat_req.arvalid && mst_flat_rsp.arready) begin
+                source_ar_accepted <= source_ar_accepted + 1;
+                if (!(mst_flat_rsp.rvalid && mst_flat_req.rready && mst_flat_rsp.rlast) &&
+                    source_ar_accepted + 1 - source_r_completed > source_read_outstanding_hwm)
+                    source_read_outstanding_hwm <= source_ar_accepted + 1 - source_r_completed;
+            end
+            if (mst_flat_rsp.rvalid && mst_flat_req.rready && mst_flat_rsp.rlast)
+                source_r_completed <= source_r_completed + 1;
         end
     end
+
+    task automatic run_aw_outstanding();
+        longint unsigned admitted_cycle;
+        while (file_master.aw_queue.size() > 0) begin
+            wait (source_aw_admitted - source_b_returned < source_outstanding_depth);
+            admitted_cycle = cycle_cnt + 1;
+            if (compare_started && source_aw_admitted == 0)
+                stimulus_start_cycle_o = admitted_cycle;
+            source_aw_admitted += 1;
+            file_master.drv.send_aw(file_master.aw_queue[0]);
+            srcq_w_sum += cycle_cnt - admitted_cycle;
+            srcq_w_n++;
+            void'(file_master.aw_queue.pop_front());
+        end
+    endtask
+
+    task automatic run_w_admitted();
+        bit last;
+        while (file_master.w_queue.size() > 0) begin
+            wait (source_aw_admitted > source_w_started);
+            do begin
+                last = file_master.w_queue[0].w_last;
+                file_master.drv.send_w(file_master.w_queue[0]);
+                void'(file_master.w_queue.pop_front());
+            end while (!last);
+            source_w_started += 1;
+        end
+    endtask
+
+    task automatic run_ar_outstanding();
+        longint unsigned admitted_cycle;
+        while (file_master.ar_queue.size() > 0) begin
+            wait (source_ar_admitted - source_r_completed < source_outstanding_depth);
+            admitted_cycle = cycle_cnt + 1;
+            if (compare_started && source_ar_admitted == 0)
+                stimulus_start_cycle_o = admitted_cycle;
+            file_master.drv.send_ar(file_master.ar_queue[0]);
+            source_ar_admitted += 1;
+            if (compare_started) begin
+                srcq_r_sum += cycle_cnt - admitted_cycle;
+                srcq_r_n++;
+            end
+            void'(file_master.ar_queue.pop_front());
+        end
+    endtask
+
+    // Mode 3's Pipeline background preserves the generated two transactions
+    // per round and waits for their real responses before issuing the next
+    // round. The configured source window remains 32; this scheduling makes
+    // all 16 generated rounds real traffic rather than a lifetime delay.
+    task automatic run_aw_channel_rounds();
+        int unsigned target;
+        int unsigned transactions_per_round;
+        transactions_per_round = compare_expected_bursts / channel_rounds;
+        for (int unsigned round = 0; round < channel_rounds; round++) begin
+            target = (round + 1) * transactions_per_round;
+            while (source_aw_admitted < target) begin
+                wait (source_aw_admitted - source_b_returned < source_outstanding_depth);
+                source_aw_admitted += 1;
+                file_master.drv.send_aw(file_master.aw_queue[0]);
+                if (source_aw_admitted == 1)
+                    stimulus_start_cycle_o = cycle_cnt;
+                void'(file_master.aw_queue.pop_front());
+            end
+            wait (source_b_returned >= target);
+        end
+    endtask
+
+    task automatic run_ar_channel_rounds();
+        int unsigned target;
+        int unsigned transactions_per_round;
+        transactions_per_round = compare_expected_bursts / channel_rounds;
+        for (int unsigned round = 0; round < channel_rounds; round++) begin
+            target = (round + 1) * transactions_per_round;
+            while (source_ar_admitted < target) begin
+                wait (source_ar_admitted - source_r_completed < source_outstanding_depth);
+                file_master.drv.send_ar(file_master.ar_queue[0]);
+                source_ar_admitted += 1;
+                if (source_ar_admitted == 1)
+                    stimulus_start_cycle_o = cycle_cnt;
+                void'(file_master.ar_queue.pop_front());
+            end
+            wait (source_r_completed >= target);
+        end
+    endtask
+
+    function automatic logic [7:0] read_data_pattern(
+        input logic [ADDR_WIDTH-1:0] addr
+    );
+        return addr[7:0] ^ addr[15:8] ^ addr[23:16] ^ 8'ha5;
+    endfunction
+
+    task automatic preload_read_memory();
+        string path;
+        int fd;
+        int parsed;
+        logic [ADDR_WIDTH-1:0] addr;
+        int unsigned n_bytes;
+        bit fault_applied = 1'b0;
+        path = $sformatf("%s/node%0d/memory_init.txt", stim_dir, NODE_ID);
+        fd = $fopen(path, "r");
+        if (!fd)
+            $fatal(1, "Mode 4 Read memory prefill file %s not found", path);
+        while (!$feof(fd)) begin
+            parsed = $fscanf(fd, "0x%h %d\n", addr, n_bytes);
+            if (parsed == 2) begin
+                for (int unsigned k = 0; k < n_bytes; k++) begin
+                    logic [7:0] data = read_data_pattern(addr + k);
+                    if (read_prefill_fault && !fault_applied) begin
+                        data ^= 8'h01;
+                        fault_applied = 1'b1;
+                    end
+                    g_tile_mem[DATA_TARGET].i_mem.i_sim_mem.mem[addr + k] = data;
+                end
+            end else if (!$feof(fd)) begin
+                $fatal(1, "Malformed Mode 4 Read memory prefill file %s", path);
+            end
+        end
+        $fclose(fd);
+    endtask
+
+    task automatic preload_read_scoreboard();
+        logic [ADDR_WIDTH-1:0] addr;
+        int unsigned n_bytes;
+        wait (scoreboard_ready);
+        foreach (file_master.ar_queue[i]) begin
+            addr = file_master.ar_queue[i].ax_addr;
+            n_bytes = (int'(file_master.ar_queue[i].ax_len) + 1)
+                      << file_master.ar_queue[i].ax_size;
+            for (int unsigned k = 0; k < n_bytes; k++)
+                scoreboard.preload_byte(addr + k, read_data_pattern(addr + k));
+        end
+    endtask
 
     // RRESP twin of the BRESP fatal above, and the read half of the tile-window
     // gate: the tile crossbar DECERRs any address outside every window, so a
@@ -910,6 +1216,9 @@ module user_node_endpoint #(
                     mcast_rd_beat[rid]   = 0;
                     mcast_rd_busy[rid]   = 1'b1;
                 end
+                if (mst_flat_rsp.rlast != (mcast_rd_beat[rid] == mcast_rd_active[rid].len))
+                    $fatal(1, "[mcast_sb] node%0d: RLAST mismatch id=%0d beat=%0d len=%0d",
+                           NODE_ID, rid, mcast_rd_beat[rid], mcast_rd_active[rid].len);
                 beat_address = longint'(axi_pkg::aligned_addr(
                     axi_pkg::beat_addr(axi_pkg::largest_addr_t'(mcast_rd_active[rid].addr),
                                        mcast_rd_active[rid].size, mcast_rd_active[rid].len,
@@ -963,15 +1272,98 @@ module user_node_endpoint #(
     // queues, spec Two-phase). join (not join_none) everywhere so B/R are
     // consumed and the pass terminates cleanly.
     initial begin
+        string channel_case;
+        expected_txn_cnt_o = 0;
+        expected_write_cnt_o = 0;
+        stimulus_start_cycle_o = 0;
+        stimulus_done_cycle_o = 0;
+        source_aw_admitted = 0;
+        source_w_started = 0;
+        source_ar_admitted = 0;
         void'($value$plusargs("stim_dir=%s", stim_dir));
         write_path = $sformatf("%s/node%0d/write.txt", stim_dir, NODE_ID);
         read_path  = $sformatf("%s/node%0d/read.txt",  stim_dir, NODE_ID);
         file_master = new(master_dv);
         file_master.load_files(read_path, write_path);
+        expected_txn_cnt_o = int'(file_master.num_writes + file_master.num_reads);
+        expected_write_cnt_o = int'(file_master.num_writes);
         injection_rate = 1.0;
         void'($value$plusargs("injection_rate=%f", injection_rate));
-        injection_rate_pct = int'(injection_rate * 100.0);
+        injection_rate_bp = int'(injection_rate * 10000.0);
+        compare_ready_o = 1'b0;
+        compare_work_done_o = 1'b0;
+        compare_done_o = 1'b0;
+        compare_background_o = 1'b0;
+        if (get_injection_mode() == 3) begin
+            if (!$value$plusargs("source_outstanding_depth=%d", source_outstanding_depth) ||
+                source_outstanding_depth == 0)
+                $fatal(1, "injection_mode=3 requires +source_outstanding_depth=<positive integer>");
+            if (!$value$plusargs("channel_case=%s", channel_case) ||
+                (channel_case != "write" && channel_case != "read"))
+                $fatal(1, "injection_mode=3 requires +channel_case=write|read");
+            if (!$value$plusargs("channel_rounds=%d", channel_rounds) ||
+                channel_rounds == 0)
+                $fatal(1, "injection_mode=3 requires +channel_rounds=<positive integer>");
+            compare_is_read = channel_case == "read";
+            compare_expected_bursts = (compare_is_read ?
+                                       file_master.ar_queue.size() :
+                                       file_master.aw_queue.size());
+            compare_is_background = NODE_ID != 0 && compare_expected_bursts > 0;
+            compare_background_o = compare_is_background;
+            if (compare_expected_bursts > 0 &&
+                compare_expected_bursts % channel_rounds != 0)
+                $fatal(1, "injection_mode=3 loaded transaction count is not divisible by channel_rounds");
+            compare_expected_beats = 0;
+            if (compare_is_read) begin
+                foreach (file_master.ar_queue[i])
+                    compare_expected_beats += int'(file_master.ar_queue[i].ax_len) + 1;
+            end else begin
+                foreach (file_master.aw_queue[i])
+                    compare_expected_beats += int'(file_master.aw_queue[i].ax_len) + 1;
+            end
+            if (compare_is_background && channel_compare_fault) begin
+                if (compare_is_read) begin
+                    if (file_master.ar_queue.size() == 0 ||
+                        file_master.ar_queue[$].ax_len != 8'd255)
+                        $fatal(1, "[ChannelCompare] read fault requires a 256-beat AR");
+                    file_master.ar_queue[$].ax_len = 8'd254;
+                end else begin
+                    if (file_master.aw_queue.size() == 0 ||
+                        file_master.aw_queue[$].ax_len != 8'd255 ||
+                        file_master.w_queue.size() != compare_expected_beats)
+                        $fatal(1, "[ChannelCompare] write fault requires loaded 256-beat AW/W bursts");
+                    file_master.aw_queue[$].ax_len = 8'd254;
+                    file_master.w_queue[$-1].w_last = 1'b1;
+                    void'(file_master.w_queue.pop_back());
+                end
+            end
+            if (MEM_STALL_RANDOM_INPUT || MEM_STALL_RANDOM_OUTPUT ||
+                MEM_FIXED_DELAY_INPUT != 0 || MEM_FIXED_DELAY_OUTPUT != 0)
+                $fatal(1, "injection_mode=3 requires ideal tile-memory timing");
+        end
+        if (get_injection_mode() == 4) begin
+            if (!$value$plusargs("source_outstanding_depth=%d", source_outstanding_depth) ||
+                source_outstanding_depth == 0)
+                $fatal(1, "injection_mode=4 requires +source_outstanding_depth=<positive integer>");
+            void'($value$plusargs("traffic_direction=%s", traffic_direction));
+            void'($value$plusargs("read_prefill_fault=%d", read_prefill_fault));
+            if (traffic_direction != "write" && traffic_direction != "read")
+                $fatal(1, "injection_mode=4 requires +traffic_direction=write|read");
+            if (file_master.num_reads != 0 && file_master.num_writes != 0)
+                $fatal(1, "injection_mode=4 does not support mixed Read/Write stimulus");
+            if (traffic_direction == "read") begin
+                if (file_master.num_writes != 0)
+                    $fatal(1, "injection_mode=4 Read run contains Write stimulus");
+                preload_read_memory();
+                preload_read_scoreboard();
+            end else if (file_master.num_reads != 0) begin
+                $fatal(1, "injection_mode=4 Write run contains Read stimulus");
+            end
+            compare_ready_o = 1'b1;
+        end
         @(posedge rst_ni);
+        if (get_injection_mode() != 3 && get_injection_mode() != 4)
+            stimulus_start_cycle_o = cycle_cnt;
         case (get_injection_mode())
             0: begin
                 // Directed two-phase: phase 1 drains all writes (wait_b =>
@@ -995,6 +1387,9 @@ module user_node_endpoint #(
                 // Checked-continuous: AW paced as mode 1; each read waits for
                 // its paired write's B, so the armed scoreboard checks exact
                 // data under continuous write load.
+                // run_aw_paced is mode 1's open loop AW pacing, shared as is, so
+                // the write side is unpaced only at the default injection_rate
+                // 1.0. Any lower rate paces mode 2's AWs exactly as mode 1.
                 fork
                     run_aw_paced();
                     file_master.run_w();
@@ -1003,11 +1398,79 @@ module user_node_endpoint #(
                     file_master.wait_r();
                 join
             end
+            3: begin
+                if (compare_expected_bursts == 0) begin
+                    compare_ready_o = 1'b1;
+                    compare_work_done_o = 1'b1;
+                    wait (compare_finish_i === 1'b1);
+                    compare_done_o = 1'b1;
+                end else begin
+                    if (compare_is_read)
+                        fork file_master.run_aw(); file_master.run_w(); file_master.wait_b(); join
+                    compare_ready_o = 1'b1;
+                    wait (compare_start_i === 1'b1);
+                    compare_started = 1'b1;
+                    if (compare_is_read) begin
+                        fork
+                            begin
+                                if (compare_is_background) run_ar_channel_rounds();
+                                else run_ar_outstanding();
+                            end
+                            file_master.wait_r();
+                        join
+                    end else begin
+                        fork
+                            begin
+                                if (compare_is_background) run_aw_channel_rounds();
+                                else run_aw_outstanding();
+                            end
+                            run_w_admitted();
+                            file_master.wait_b();
+                        join
+                    end
+                    stimulus_done_cycle_o = cycle_cnt;
+                    if (compare_is_background) @(posedge clk_i);
+                    if (compare_is_background && compare_data_beats != compare_expected_beats)
+                        $fatal(1, "[ChannelCompare] case=%s node=%0d expected %0d data beats, got %0d",
+                               channel_case, NODE_ID, compare_expected_beats, compare_data_beats);
+                    if (compare_is_background)
+                        $display("[ChannelCompare] case=%s node=%0d bursts=%0d data_beats=%0d",
+                                 channel_case, NODE_ID, compare_expected_bursts,
+                                 compare_data_beats);
+                    compare_work_done_o = 1'b1;
+                    wait (compare_finish_i === 1'b1);
+                    if (compare_is_background)
+                        $display("[ChannelCompareInterval] role=background node=%0d start_cycle=%0d completion_cycle=%0d",
+                                 NODE_ID, stimulus_start_cycle_o, stimulus_done_cycle_o);
+                    else
+                        $display("[ChannelCompareInterval] role=control node=%0d start_cycle=%0d completion_cycle=%0d",
+                                 NODE_ID, stimulus_start_cycle_o, stimulus_done_cycle_o);
+                    compare_done_o = 1'b1;
+                end
+            end
+            4: begin
+                wait (compare_start_i === 1'b1);
+                stimulus_start_cycle_o = cycle_cnt;
+                if (traffic_direction == "read") begin
+                    fork
+                        run_ar_outstanding();
+                        file_master.wait_r();
+                    join
+                end else begin
+                    fork
+                        run_aw_outstanding();
+                        run_w_admitted();
+                        file_master.wait_b();
+                    join
+                end
+            end
             default: begin
-                $fatal(1, "unknown +injection_mode=%0d (0, 1, 2 supported)",
+                $fatal(1, "unknown +injection_mode=%0d (0, 1, 2, 3, 4 supported)",
                     get_injection_mode());
             end
         endcase
+        if (get_injection_mode() != 3)
+            stimulus_done_cycle_o = cycle_cnt;
         run_done = 1'b1;
         // Single-merged-B invariant (S4 collectives): exactly one B reached
         // the initiator per issued AW -- a multicast AW's member Bs must have
@@ -1027,15 +1490,44 @@ module user_node_endpoint #(
             if (mst_flat_rsp.bvalid)
                 $fatal(1, "[mcast_sb] node%0d: B still asserted after all writes retired -- extra B",
                        NODE_ID);
-            // Non-vacuity: a node that captured multicast golden read its own
-            // member replicas back (the pattern's readback phase), so zero
-            // compares means the checker never saw the readback -- vacuous.
-            if (mcast_mem.num() > 0 && mcast_checked == 0)
+            // Non-vacuity applies only when the stimulus declares a readback
+            // phase. Pure write-only Broadcast is checked by the AW/B counts
+            // above and has no R beats to compare.
+            if (file_master.num_reads > 0 && mcast_mem.num() > 0 && mcast_checked == 0)
                 $fatal(1, "[mcast_sb] node%0d: multicast golden captured but zero replica bytes compared",
                        NODE_ID);
-            if (mcast_mem.num() > 0)
+            if (file_master.num_reads > 0 && mcast_mem.num() > 0)
                 $display("[mcast_sb] node%0d: %0d replica byte compares against %0d golden bytes",
                          NODE_ID, mcast_checked, mcast_mem.num());
+            if (get_injection_mode() == 4) begin
+                if (file_master.num_reads != 0) begin
+                    if (source_ar_accepted != int'(file_master.num_reads) ||
+                        source_r_completed != int'(file_master.num_reads))
+                        $fatal(1, "[SourceWindow] node%0d Read accepted=%0d completed=%0d expected=%0d",
+                               NODE_ID, source_ar_accepted, source_r_completed,
+                               file_master.num_reads);
+                    if (source_aw_accepted != 0 || source_b_returned != 0)
+                        $fatal(1, "[SourceWindow] node%0d Read-only run observed Write traffic",
+                               NODE_ID);
+                    if (source_read_outstanding_hwm > source_outstanding_depth)
+                        $fatal(1, "[SourceWindow] node%0d Read HWM=%0d exceeds depth=%0d",
+                               NODE_ID, source_read_outstanding_hwm,
+                               source_outstanding_depth);
+                end else begin
+                    if (source_aw_accepted != int'(file_master.num_writes) ||
+                        source_b_returned != int'(file_master.num_writes))
+                        $fatal(1, "[SourceWindow] node%0d Write accepted=%0d completed=%0d expected=%0d",
+                               NODE_ID, source_aw_accepted, source_b_returned,
+                               file_master.num_writes);
+                    if (source_ar_accepted != 0 || source_r_completed != 0)
+                        $fatal(1, "[SourceWindow] node%0d Write-only run observed Read traffic",
+                               NODE_ID);
+                    if (source_outstanding_hwm > source_outstanding_depth)
+                        $fatal(1, "[SourceWindow] node%0d Write HWM=%0d exceeds depth=%0d",
+                               NODE_ID, source_outstanding_hwm,
+                               source_outstanding_depth);
+                end
+            end
         end
     end
 

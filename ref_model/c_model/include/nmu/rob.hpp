@@ -1,5 +1,6 @@
 #pragma once
 #include "axi/types.hpp"
+#include "ni/channel_mode.hpp"
 #include "ni_flit_constants.h"
 #include "ni_params.h"
 #include "nmu/addr_trans.hpp"
@@ -25,7 +26,7 @@ enum class RobMode { Disabled, Enabled };
 // reads the SV half of the same definition, so a build cannot come out with
 // the model in one mode and the top in the other.
 inline constexpr RobMode DEFAULT_ROB_MODE =
-    ni::NMU_READ_ROB_ENABLED ? RobMode::Enabled : RobMode::Disabled;
+    ::ni::NMU_READ_ROB_ENABLED ? RobMode::Enabled : RobMode::Disabled;
 
 // In-line layer between AxiSlavePort and {Packetize, Depacketize}.
 // Implements RequestPacketizer (request gate: push_aw/w/ar) and
@@ -67,9 +68,9 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // their meaning; every assembly site (Nmu's constructor) passes cfg_.port_id,
     // and the default names the router's LOCAL port, which is a tile.
     Rob(NmuPacketizeSink& next_pkt, ResponseDepacketizer& next_depkt, RobMode mode_r,
-        addr_trans::SamTable sam, std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
-        std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
-        std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID, uint8_t port_id = 0)
+        addr_trans::SamTable sam, std::size_t b_rob_depth = ::ni::NMU_ROB_B_DEPTH,
+        std::size_t r_rob_depth = ::ni::NMU_ROB_R_DEPTH,
+        std::size_t max_txns_per_id = ::ni::NMU_MAX_TXNS_PER_ID, uint8_t port_id = 0)
         : next_pkt_(next_pkt),
           next_depkt_(next_depkt),
           mode_r_(mode_r),
@@ -92,6 +93,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     bool push_aw(const axi::AwBeat& b) override;
     bool push_w(const axi::WBeat& b) override;
     bool push_ar(const axi::ArBeat& b) override;
+    void set_channel_mode(ni::ChannelMode mode) noexcept { channel_mode_ = mode; }
 
     // ===== ResponseDepacketizer interface =====
     std::optional<axi::BBeat> pop_b() override;
@@ -130,7 +132,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // === Enabled mode public constants (for testing + caller info) ===
     // Addressable range of the ordering_tag header field, NOT the pool depth.
     // Pool depths are b_rob_depth_ / r_rob_depth_ and may be smaller.
-    static constexpr std::size_t ORDERING_TAG_SPACE = 1u << ni::header::ORDERING_TAG_WIDTH;  // 256
+    static constexpr std::size_t ORDERING_TAG_SPACE = 1u << ::ni::header::ORDERING_TAG_WIDTH;  // 256
     // AXI ID space alias — single source of truth lives in axi::NOC_ID_SPACE.
     static constexpr std::size_t NOC_ID_SPACE = axi::NOC_ID_SPACE;  // 8
 
@@ -204,6 +206,10 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::size_t r_rob_depth_;
     std::size_t max_txns_per_id_;
     uint8_t port_id_;
+    ni::ChannelMode channel_mode_ = ni::ChannelMode::Native;
+    bool uses_narrow_payload_(axi::AxiClass cls) const noexcept {
+        return cls == axi::AxiClass::Narrow || channel_mode_ != ni::ChannelMode::Native;
+    }
 
     // In-flight transaction count, one per direction, summed over all AXI ids.
     // Incremented on an accepted request, decremented at response retire. Admits
@@ -240,9 +246,9 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         bool ready = false;
         uint8_t axi_id = 0;
         axi::RBeat r_beat = {};
-        // Narrow-class byte lane for this beat (axi::narrow_lane, computed at
+        // Narrow-payload byte lane for this beat (axi::narrow_lane, computed at
         // push_ar from the AR basis -- all n beats' addresses are known
-        // upfront for a robbed burst). 0 / unused for Data class.
+        // upfront for a robbed burst). 0 / unused for native-width Data.
         uint8_t lane = 0;
     };
     std::array<WriteEntry, ORDERING_TAG_SPACE> write_entries_;
@@ -342,8 +348,9 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::size_t write_txns_hwm_ = 0;
     std::size_t read_txns_hwm_ = 0;
 
-    // Narrow-class lane re-anchor for read beats that never touch
-    // read_entries_ -- Enabled-mode bypass and Disabled/RoBless reads. Both
+    // Lane re-anchor for 64-bit read payloads that never touch read_entries_:
+    // Narrow in every mode and normalized Data; Native Data is full-width.
+    // Enabled-mode bypass and Disabled/RoBless reads both
     // stream FIFO-order per id (AXI4 IHI 0022 §A5.3), so a per-id FIFO of the
     // AR basis (populated at push_ar, drained beat by beat, popped on last)
     // recovers each beat's address the same way read_entries_[].lane does for
@@ -543,10 +550,10 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         fallen_back_read_[b.id] = fallen_back;
         if (needs_rob) {
             for (std::size_t i = 0; i < n; ++i) {
-                // Robbed: every beat's address (and so its narrow-class lane)
+                // Robbed: every beat's address (and so its narrow-payload lane)
                 // is known upfront, unlike the bypass/RoBless FIFO below.
                 uint8_t lane = 0;
-                if (t.cls == axi::AxiClass::Narrow) {
+                if (uses_narrow_payload_(t.cls)) {
                     const uint64_t addr = axi::beat_addr(t.local_addr, b.len, b.size, b.burst, i);
                     lane = static_cast<uint8_t>(axi::narrow_lane(addr));
                 }
@@ -557,7 +564,7 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
             read_slot_hwm_ =
                 std::max<std::size_t>(read_slot_hwm_, r_rob_depth_ - read_free_space());
             read_range_len_[base] = static_cast<uint16_t>(n);
-        } else if (t.cls == axi::AxiClass::Narrow) {
+        } else if (uses_narrow_payload_(t.cls)) {
             // Bypass: no read_entries_ slot, so pop_r_staged's bypass branch
             // needs its own AR basis (see ar_lane_meta_'s comment).
             ar_lane_meta_[b.id].push_back({t.local_addr, b.len, b.size, b.burst, 0});
@@ -589,7 +596,7 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
     if (!next_pkt_.push_ar_with_meta(b, meta)) {
         return false;
     }
-    if (t.cls == axi::AxiClass::Narrow) {
+    if (uses_narrow_payload_(t.cls)) {
         ar_lane_meta_[b.id].push_back({t.local_addr, b.len, b.size, b.burst, 0});
     }
     if (idle) {
@@ -634,7 +641,7 @@ inline std::optional<axi::RBeat> Rob::pop_r_robless() {
     auto opt = next_depkt_.pop_r_with_meta();
     if (!opt) return std::nullopt;
     auto [r, meta] = *opt;
-    if (meta.cls == axi::AxiClass::Narrow) reanchor_from_fifo_(r);
+    if (uses_narrow_payload_(meta.cls)) reanchor_from_fifo_(r);
     return r;
 }
 
@@ -643,7 +650,7 @@ inline std::optional<axi::RBeat> Rob::pop_r_robless() {
 // per-id ar_lane_meta_ FIFO pushed at push_ar.
 inline void Rob::reanchor_from_fifo_(axi::RBeat& r) {
     auto& fifo = ar_lane_meta_[r.id];
-    assert(!fifo.empty() && "nmu::Rob: narrow R beat with no staged AR basis");
+    assert(!fifo.empty() && "nmu::Rob: narrow-payload R beat with no staged AR basis");
     ArLaneMeta& am = fifo.front();
     const uint64_t addr = axi::beat_addr(am.local_addr, am.len, am.size, am.burst, am.beat_counter);
     axi::reanchor_narrow_lane(r.data, axi::narrow_lane(addr));
@@ -761,7 +768,7 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
             assert(false && "bypassed R does not match the head of its id's order list");
             std::abort();
         }
-        if (meta.cls == axi::AxiClass::Narrow) reanchor_from_fifo_(r);
+        if (uses_narrow_payload_(meta.cls)) reanchor_from_fifo_(r);
         if (r.last) {
             read_order_by_id_[id].pop_front();
             drain_ready_read_heads_(id);
@@ -790,7 +797,7 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
         assert(false && "computed read slot unallocated or already filled");
         std::abort();
     }
-    if (meta.cls == axi::AxiClass::Narrow) axi::reanchor_narrow_lane(r.data, slot.lane);
+    if (uses_narrow_payload_(meta.cls)) axi::reanchor_narrow_lane(r.data, slot.lane);
     slot.r_beat = r;
     slot.ready = true;
     ++read_arrival_offset_[base];

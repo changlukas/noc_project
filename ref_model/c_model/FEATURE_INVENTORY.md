@@ -42,7 +42,7 @@ _Role_: NoC-side reception / AXI-side master
 
 ## ROUTER — NoC Router
 
-_Role_: Per-node wormhole switch, one instance per physical network: REQ/RSP are 2-stage ready/valid single-VC SimpleRouters, DAT is a 3-stage credit Router with per-hop VC assignment
+_Role_: Per-node wormhole switch, one instance per physical network: REQ/RSP are 2-stage ready/valid single-VC SimpleRouters, DAT is a 4-stage credit Router with per-hop VC assignment
 
 | Feature ID | Summary | Modes | Expected c_model header |
 |---|---|---|---|

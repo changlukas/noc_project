@@ -1,38 +1,79 @@
 #include "nmu/depacketize.hpp"
 #include "common/channel_model.hpp"
 #include "axi/types.hpp"
+#include "ni/channel_mode.hpp"
+#include <array>
 #include <gtest/gtest.h>
 
 using ni::cmodel::nmu::Depacketize;
+using ni::cmodel::ni::ChannelMode;
 using ni::cmodel::testing::ChannelModel;
 namespace axi = ni::cmodel::axi;
 
 namespace {
 ni::cmodel::Flit make_b_flit(uint8_t bid, axi::Resp resp = axi::Resp::OKAY) {
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("axi_ch", ::ni::AXI_CH_NarrowB);
     f.set_header_field("dst_id", 0x10);
     f.set_header_field("flit_tail", 1);
     f.set_payload_field("B", "bid", bid);
     f.set_payload_field("B", "bresp", static_cast<uint64_t>(resp));
     return f;
 }
-ni::cmodel::Flit make_r_flit(uint8_t rid, bool rlast, uint8_t axi_ch = ni::AXI_CH_NarrowR) {
+ni::cmodel::Flit make_r_flit(uint8_t rid, bool rlast, uint8_t axi_ch = ::ni::AXI_CH_NarrowR) {
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", axi_ch);
     f.set_header_field("dst_id", 0x10);
     f.set_header_field("flit_tail", 1);
-    const char* ch = (axi_ch == ni::AXI_CH_DataR) ? "DATA_R" : "NARROW_R";
+    const char* ch = (axi_ch == ::ni::AXI_CH_DataR) ? "DATA_R" : "NARROW_R";
     f.set_payload_field(ch, "rid", rid);
     f.set_payload_field(ch, "rlast", rlast ? 1u : 0u);
     return f;
 }
+
+ni::cmodel::Flit make_normalized_data_r(uint8_t rid) {
+    ni::cmodel::Flit f;
+    f.set_header_field("axi_ch", ::ni::AXI_CH_DataR);
+    f.set_header_field("flit_tail", 1);
+    f.set_payload_field("NARROW_R", "rid", rid);
+    f.set_payload_field("NARROW_R", "rlast", 1);
+    std::array<uint8_t, axi::NARROW_DATA_BYTES> data{};
+    for (std::size_t i = 0; i < data.size(); ++i) data[i] = static_cast<uint8_t>(0x90 + i);
+    f.set_payload_bytes("NARROW_R", "rdata", data.data(), ::ni::width::NOC_NARROW_DATA_WIDTH);
+    return f;
+}
+
+void expect_normalized_data_r(ChannelMode mode, bool use_dat) {
+    ChannelModel rsp(16, 16);
+    ChannelModel dat(16, 16);
+    Depacketize depkt(rsp.rsp_in(), 16, 16, dat.rsp_in());
+    depkt.set_channel_mode(mode);
+    auto& ingress = use_dat ? dat.rsp_out() : rsp.rsp_out();
+    ASSERT_TRUE(ingress.push_flit(make_normalized_data_r(0x07)));
+    depkt.tick();
+    auto r = depkt.pop_r();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->id, 0x07);
+    EXPECT_TRUE(r->last);
+    for (std::size_t i = 0; i < axi::NARROW_DATA_BYTES; ++i)
+        EXPECT_EQ(r->data[i], static_cast<uint8_t>(0x90 + i));
+    for (std::size_t i = axi::NARROW_DATA_BYTES; i < r->data.size(); ++i)
+        EXPECT_EQ(r->data[i], 0u);
+}
 }  // namespace
+
+TEST(NmuDepacketize, TwoChannel64DecodesDataRFromRspNarrowPayload) {
+    expect_normalized_data_r(ChannelMode::TwoChannel64, /*use_dat=*/false);
+}
+
+TEST(NmuDepacketize, ThreeChannel64DecodesDataRFromDatNarrowPayload) {
+    expect_normalized_data_r(ChannelMode::ThreeChannel64, /*use_dat=*/true);
+}
 
 TEST(NmuDepacketize, PopRDecodesDataRFromDataRChannel) {
     ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), /*b*/ 16, /*r*/ 16);
-    ASSERT_TRUE(noc.rsp_out().push_flit(make_r_flit(0x01, /*rlast*/ true, ni::AXI_CH_DataR)));
+    ASSERT_TRUE(noc.rsp_out().push_flit(make_r_flit(0x01, /*rlast*/ true, ::ni::AXI_CH_DataR)));
     depkt.tick();
     auto r = depkt.pop_r();
     ASSERT_TRUE(r.has_value());
@@ -103,13 +144,13 @@ TEST(NmuDepacketize, RPayloadBytesDecoded) {
     ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+    f.set_header_field("axi_ch", ::ni::AXI_CH_NarrowR);
     f.set_header_field("dst_id", 0x10);
     f.set_payload_field("NARROW_R", "rid", 0x07);
     f.set_payload_field("NARROW_R", "rlast", 1);
     std::array<uint8_t, axi::NARROW_DATA_BYTES> lane_data;
     for (int i = 0; i < axi::NARROW_DATA_BYTES; ++i) lane_data[i] = static_cast<uint8_t>(0xE0 + i);
-    f.set_payload_bytes("NARROW_R", "rdata", lane_data.data(), ni::width::NOC_NARROW_DATA_WIDTH);
+    f.set_payload_bytes("NARROW_R", "rdata", lane_data.data(), ::ni::width::NOC_NARROW_DATA_WIDTH);
     ASSERT_TRUE(noc.rsp_out().push_flit(f));
     depkt.tick();
     auto r = depkt.pop_r();
@@ -127,7 +168,7 @@ TEST(NmuDepacketize, AcceptsAResponseAddressedToItsOwnPort) {
     nmu::Depacketize depkt(channel.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16,
                            router::null_rsp_in(), /*port_id=*/1);
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("axi_ch", ::ni::AXI_CH_NarrowB);
     f.set_header_field("src_id", 0x10);
     f.set_header_field("dst_id", 0x01);
     f.set_header_field("dst_port_id", 1);
@@ -143,7 +184,7 @@ TEST(NmuDepacketizeDeath, RejectsAResponseAddressedToAnotherPort) {
     nmu::Depacketize depkt(channel.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16,
                            router::null_rsp_in(), /*port_id=*/1);
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("axi_ch", ::ni::AXI_CH_NarrowB);
     f.set_header_field("src_id", 0x10);
     f.set_header_field("dst_id", 0x01);
     f.set_header_field("dst_port_id", 2);
@@ -157,7 +198,7 @@ TEST(NmuDepacketize, PopBWithMeta_ExtractsOrderingTagAndOrderingReq) {
     nmu::Depacketize depkt(channel.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);
 
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("axi_ch", ::ni::AXI_CH_NarrowB);
     f.set_header_field("src_id", 0x10);
     f.set_header_field("dst_id", 0x01);
     f.set_header_field("vc_id", 0);
@@ -186,7 +227,7 @@ TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatOrderingTag) {
 
     for (uint8_t i = 0; i < 4; ++i) {
         Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        f.set_header_field("axi_ch", ::ni::AXI_CH_NarrowR);
         f.set_header_field("src_id", 0x10);
         f.set_header_field("dst_id", 0x01);
         f.set_header_field("vc_id", 0);
@@ -199,7 +240,8 @@ TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatOrderingTag) {
         f.set_payload_field("NARROW_R", "rlast", (i == 3) ? 1u : 0u);
         std::array<uint8_t, axi::NARROW_DATA_BYTES> data{};
         data[0] = static_cast<uint8_t>(0xA0 + i);
-        f.set_payload_bytes("NARROW_R", "rdata", data.data(), ni::width::NOC_NARROW_DATA_WIDTH);
+        f.set_payload_bytes("NARROW_R", "rdata", data.data(),
+                            ::ni::width::NOC_NARROW_DATA_WIDTH);
         ASSERT_TRUE(channel.rsp_out().push_flit(f));
     }
     depkt.tick();

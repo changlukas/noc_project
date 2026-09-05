@@ -189,7 +189,7 @@ class WormholeArbiter {
 
     // Worm ownership per VC (vc_id is a 3 b header field): which input, if
     // any, holds this VC mid-worm. nullopt = free.
-    static constexpr std::size_t kNumVcSlots = 1u << ni::header::VC_ID_WIDTH;
+    static constexpr std::size_t kNumVcSlots = 1u << ::ni::header::VC_ID_WIDTH;
 
     Downstream& downstream_;
     std::size_t num_inputs_;

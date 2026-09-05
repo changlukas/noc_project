@@ -641,7 +641,7 @@ TEST(NiRouterChain, DeadFabricProducesNoResponses) {
 // (Narrow) rides REQ out / RSP back; memory (Data) rides REQ out / DAT back.
 // Without the guard's class term, both take the same-destination bypass and
 // race independently-arbitrated networks -- and per stage design §8 the DAT
-// credit Router is a deeper pipeline than RSP's SimpleRouter (2-3 stages vs
+// credit Router is a deeper pipeline than RSP's SimpleRouter (3-4 stages vs
 // 1-2), so the data-class read submitted FIRST could genuinely surface
 // SECOND at the master, an AXI4 IHI 0022 §A5.3 violation. The guard forces
 // the class change onto the RoB path, which retires by submission order

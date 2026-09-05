@@ -23,7 +23,7 @@
 // ---------------------------------------------------------------------------
 // DPI marshalling word counts (<net>FlitMarshal::VEC_WORDS, DATA_VEC_WORDS,
 // WSTRB_VEC_WORDS) and the flit tail mask are derived from
-// ni::NOC_{REQ,RSP,DAT}_FLIT_WIDTH / axi::DATA_WIDTH in dpi_marshal.hpp, not
+// ::ni::NOC_{REQ,RSP,DAT}_FLIT_WIDTH / axi::DATA_WIDTH in dpi_marshal.hpp, not
 // pinned to today's values. Widening any of those constants does not require
 // editing the pack/unpack helpers below.
 // ---------------------------------------------------------------------------
@@ -94,11 +94,11 @@ HandleBlock* validate_handle(unsigned long long ctx, WrapType expected, const ch
 }
 
 // Perf collector — reset on cmodel_init; populated via cmodel_perf_* DPI calls.
-static ni::cmodel::wrap::PerfCollector g_perf;
+static ::ni::cmodel::wrap::PerfCollector g_perf;
 
 }  // namespace ni::cmodel::wrap
 
-using namespace ni::cmodel::wrap;
+using namespace ::ni::cmodel::wrap;
 
 extern "C" void cmodel_init(void) {
     // Session state machine guard.
@@ -113,7 +113,7 @@ extern "C" void cmodel_init(void) {
     g_dpi_error_msg.clear();
 
     DPI_BOUNDARY_BEGIN(cmodel_init) {
-        g_perf = ni::cmodel::wrap::PerfCollector{};
+        g_perf = ::ni::cmodel::wrap::PerfCollector{};
         g_session_state = SessionState::Initialized;
     }
     DPI_BOUNDARY_END(cmodel_init);
@@ -144,7 +144,7 @@ extern "C" int cmodel_check_error(const char** msg) {
 
 // Flit marshalling helpers (ReqFlitMarshal/RspFlitMarshal/DatFlitMarshal) —
 // shared by NMU/NSU/Router DPI handlers, defined in dpi_marshal.hpp (word
-// count + tail mask derived from ni::NOC_{REQ,RSP,DAT}_FLIT_WIDTH, not pinned
+// count + tail mask derived from ::ni::NOC_{REQ,RSP,DAT}_FLIT_WIDTH, not pinned
 // here).
 
 namespace {
@@ -176,11 +176,11 @@ void pack_vc_credit(const CreditVec& v, uint8_t num_vc, svBitVecVal* word) {
 // y_coord) in an NxM mesh. Every network's pins are ONE uniform per-PORT
 // array (ROUTER_LINK_PORTS = LOCAL + N/E/S/W).
 
-using ni::cmodel::wrap::ROUTER_LINK_PORTS;
-using ni::cmodel::wrap::RouterInputs;
-using ni::cmodel::wrap::RouterOutputs;
-using ni::cmodel::wrap::RouterWrap;
-using ni::cmodel::wrap::VcCreditVec;
+using ::ni::cmodel::wrap::ROUTER_LINK_PORTS;
+using ::ni::cmodel::wrap::RouterInputs;
+using ::ni::cmodel::wrap::RouterOutputs;
+using ::ni::cmodel::wrap::RouterWrap;
+using ::ni::cmodel::wrap::VcCreditVec;
 
 extern "C" unsigned long long cmodel_router_create(const char* name, int x_coord, int y_coord,
                                                    int mesh_x_dim, int mesh_y_dim, int dat_num_vc) {
@@ -333,9 +333,9 @@ extern "C" void cmodel_router_dat_get_outputs(unsigned long long ctx, svBitVecVa
 // DatMerge DPI handlers — NI-level DAT LOCAL-port merge point (S3a T5,
 // controller ruling). See wrap/dat_merge_wrap.hpp.
 
-using ni::cmodel::wrap::DatMergeInputs;
-using ni::cmodel::wrap::DatMergeOutputs;
-using ni::cmodel::wrap::DatMergeWrap;
+using ::ni::cmodel::wrap::DatMergeInputs;
+using ::ni::cmodel::wrap::DatMergeOutputs;
+using ::ni::cmodel::wrap::DatMergeWrap;
 
 extern "C" unsigned long long cmodel_dat_merge_create(const char* name, int dat_num_vc) {
     if (g_session_state != SessionState::Initialized) {
@@ -428,11 +428,11 @@ extern "C" void cmodel_dat_merge_get_outputs(unsigned long long ctx,
 //   REQ/RSP flit    : Req/RspFlitMarshal::VEC_WORDS words, tail-masked
 //   DAT flit        : DatFlitMarshal::VEC_WORDS words, tail-masked
 
-using ni::cmodel::wrap::NmuInputs;
-using ni::cmodel::wrap::NmuOutputs;
+using ::ni::cmodel::wrap::NmuInputs;
+using ::ni::cmodel::wrap::NmuOutputs;
 
 static unsigned long long nmu_create_impl(const char* name, int src_id, int dat_num_vc,
-                                          ni::cmodel::nmu::RobMode rob_mode,
+                                          ::ni::cmodel::nmu::RobMode rob_mode,
                                           const char* config_path, std::size_t b_rob_depth,
                                           std::size_t r_rob_depth, std::size_t max_txns_per_id,
                                           int port_id) {
@@ -444,7 +444,7 @@ static unsigned long long nmu_create_impl(const char* name, int src_id, int dat_
     DPI_BOUNDARY_BEGIN_R(nmu_create_impl, 0ull) {
         auto adapter = std::make_unique<NmuWrap>();
         adapter->init(config_path, static_cast<uint8_t>(src_id), static_cast<uint8_t>(port_id),
-                      static_cast<uint8_t>(dat_num_vc), ni::NMU_QUEUE_DEPTH, rob_mode, b_rob_depth,
+                      static_cast<uint8_t>(dat_num_vc), ::ni::NMU_QUEUE_DEPTH, rob_mode, b_rob_depth,
                       r_rob_depth, max_txns_per_id);
         auto* h = new HandleBlock{
             static_cast<uint32_t>(WrapType::Nmu), WrapType::Nmu, HandleState::Live,
@@ -463,9 +463,23 @@ extern "C" unsigned long long cmodel_nmu_create_ex(const char* name, int src_id,
                                                    int port_id, const char* config_path) {
     return nmu_create_impl(
         name, src_id, dat_num_vc,
-        rob_enabled ? ni::cmodel::nmu::RobMode::Enabled : ni::cmodel::nmu::RobMode::Disabled,
+        rob_enabled ? ::ni::cmodel::nmu::RobMode::Enabled : ::ni::cmodel::nmu::RobMode::Disabled,
         config_path, static_cast<std::size_t>(b_rob_depth), static_cast<std::size_t>(r_rob_depth),
         static_cast<std::size_t>(max_txns_per_id), port_id);
+}
+
+extern "C" void cmodel_nmu_set_channel_mode(unsigned long long ctx, int mode) {
+    DPI_BOUNDARY_BEGIN(cmodel_nmu_set_channel_mode) {
+        REQUIRE_HANDLE(ctx, WrapType::Nmu, "cmodel_nmu_set_channel_mode");
+        if (mode != 0 && mode != 2 && mode != 3) {
+            DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_GENERIC,
+                                 "cmodel_nmu_set_channel_mode: mode must be 0, 2 or 3");
+            return;
+        }
+        static_cast<NmuWrap*>(_h->adapter.get())
+            ->set_channel_mode(static_cast<::ni::cmodel::ni::ChannelMode>(mode));
+    }
+    DPI_BOUNDARY_END(cmodel_nmu_set_channel_mode);
 }
 
 extern "C" void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid,
@@ -497,7 +511,7 @@ extern "C" void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svB
         // AWUSER, 2 words little-endian; mask to the field width so SV padding
         // bits above the field never reach axi::AwBeat::user.
         in.awuser = (static_cast<uint64_t>(awuser[0]) | (static_cast<uint64_t>(awuser[1]) << 32)) &
-                    ((uint64_t{1} << ni::AXI_AWUSER_WIDTH) - 1);
+                    ((uint64_t{1} << ::ni::AXI_AWUSER_WIDTH) - 1);
         in.wvalid = static_cast<bool>(wvalid);
         in.wdata = unpack_axi_data(wdata);
         in.wstrb = unpack_wstrb(wstrb);
@@ -573,7 +587,7 @@ extern "C" void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, s
 extern "C" unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx) {
     DPI_BOUNDARY_BEGIN_R(cmodel_nmu_read_slot_hwm, 0u) {
         auto* _h =
-            ni::cmodel::wrap::validate_handle(ctx, WrapType::Nmu, "cmodel_nmu_read_slot_hwm");
+            ::ni::cmodel::wrap::validate_handle(ctx, WrapType::Nmu, "cmodel_nmu_read_slot_hwm");
         if (!_h) return 0u;
         auto* nmu = static_cast<NmuWrap*>(_h->adapter.get());
         auto* sa = nmu->standalone();
@@ -607,7 +621,7 @@ extern "C" void cmodel_nmu_admission_stats(
         *write_txns_hwm = 0u;
         *read_txns_hwm = 0u;
         auto* _h =
-            ni::cmodel::wrap::validate_handle(ctx, WrapType::Nmu, "cmodel_nmu_admission_stats");
+            ::ni::cmodel::wrap::validate_handle(ctx, WrapType::Nmu, "cmodel_nmu_admission_stats");
         if (!_h) return;
         auto* nmu = static_cast<NmuWrap*>(_h->adapter.get());
         auto* sa = nmu->standalone();
@@ -633,8 +647,8 @@ extern "C" void cmodel_nmu_admission_stats(
 //   get_outputs produces tx_rsp_* (RSP egress) + AXI master AW/W/AR beats.
 // Packing conventions mirror cmodel_nmu_* (see the word-count comment above).
 
-using ni::cmodel::wrap::NsuInputs;
-using ni::cmodel::wrap::NsuOutputs;
+using ::ni::cmodel::wrap::NsuInputs;
+using ::ni::cmodel::wrap::NsuOutputs;
 
 extern "C" unsigned long long cmodel_nsu_create(const char* name, int src_id, int dat_num_vc,
                                                 int max_unique_ids, int max_outstanding,
@@ -646,7 +660,7 @@ extern "C" unsigned long long cmodel_nsu_create(const char* name, int src_id, in
     DPI_BOUNDARY_BEGIN_R(cmodel_nsu_create, 0ull) {
         auto adapter = std::make_unique<NsuWrap>();
         adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(port_id),
-                      static_cast<uint8_t>(dat_num_vc), ni::NSU_QUEUE_DEPTH,
+                      static_cast<uint8_t>(dat_num_vc), ::ni::NSU_QUEUE_DEPTH,
                       static_cast<std::size_t>(max_unique_ids),
                       static_cast<std::size_t>(max_outstanding), config_path);
         auto* h = new HandleBlock{
@@ -658,6 +672,20 @@ extern "C" unsigned long long cmodel_nsu_create(const char* name, int src_id, in
         return static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(h));
     }
     DPI_BOUNDARY_END_R(cmodel_nsu_create);
+}
+
+extern "C" void cmodel_nsu_set_channel_mode(unsigned long long ctx, int mode) {
+    DPI_BOUNDARY_BEGIN(cmodel_nsu_set_channel_mode) {
+        REQUIRE_HANDLE(ctx, WrapType::Nsu, "cmodel_nsu_set_channel_mode");
+        if (mode != 0 && mode != 2 && mode != 3) {
+            DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_GENERIC,
+                                 "cmodel_nsu_set_channel_mode: mode must be 0, 2 or 3");
+            return;
+        }
+        static_cast<NsuWrap*>(_h->adapter.get())
+            ->set_channel_mode(static_cast<::ni::cmodel::ni::ChannelMode>(mode));
+    }
+    DPI_BOUNDARY_END(cmodel_nsu_set_channel_mode);
 }
 
 extern "C" void cmodel_nsu_set_inputs(unsigned long long ctx, svBit rx_req_valid,
@@ -700,6 +728,21 @@ extern "C" void cmodel_nsu_tick(unsigned long long ctx) {
         nsu->tick();
     }
     DPI_BOUNDARY_END(cmodel_nsu_tick);
+}
+
+extern "C" void cmodel_nsu_meta_buffer_hwm(unsigned long long ctx, unsigned int* write_hwm,
+                                             unsigned int* read_hwm) {
+    DPI_BOUNDARY_BEGIN(cmodel_nsu_meta_buffer_hwm) {
+        *write_hwm = 0u;
+        *read_hwm = 0u;
+        REQUIRE_HANDLE(ctx, WrapType::Nsu, "cmodel_nsu_meta_buffer_hwm");
+        auto* wrap = static_cast<NsuWrap*>(_h->adapter.get());
+        auto* standalone = wrap->standalone();
+        if (!standalone) return;
+        *write_hwm = static_cast<unsigned int>(standalone->nsu().meta_buffer_write_hwm());
+        *read_hwm = static_cast<unsigned int>(standalone->nsu().meta_buffer_read_hwm());
+    }
+    DPI_BOUNDARY_END(cmodel_nsu_meta_buffer_hwm);
 }
 
 extern "C" void cmodel_nsu_get_outputs(
@@ -763,18 +806,32 @@ extern "C" void cmodel_nsu_get_outputs(
 
 namespace {
 
+constexpr const char* kPerfPortName[] = {"LOCAL", "NORTH", "EAST", "SOUTH", "WEST"};
+
 // Generic occupancy sampler: shared shape between router::SimpleRouter
 // (REQ/RSP, fixed num_vc=1) and router::Router (DAT, real num_vc) — both
 // expose input_fifo_size(port,vc)/output_fifo_size(port).
 template <typename RouterT>
 void sample_one_router(const std::string& node, RouterT& r, const char* plane, uint8_t num_vc) {
-    using ni::cmodel::router::ROUTER_PORT_COUNT;
+    using ::ni::cmodel::router::ROUTER_PORT_COUNT;
     std::size_t in_occ = 0, out_occ = 0;
     for (std::size_t p = 0; p < ROUTER_PORT_COUNT; ++p) {
         out_occ += r.output_fifo_size(p);
         for (uint8_t vc = 0; vc < num_vc; ++vc) in_occ += r.input_fifo_size(p, vc);
     }
     g_perf.sample_router(std::string(plane) + "." + node, in_occ, out_occ);
+}
+
+void sample_one_dat_router(const std::string& node, ::ni::cmodel::router::Router& r) {
+    using ::ni::cmodel::router::ROUTER_PORT_COUNT;
+    for (std::size_t port = 0; port < ROUTER_PORT_COUNT; ++port) {
+        for (uint8_t vc = 0; vc < r.num_vc(); ++vc) {
+            g_perf.sample_router_dat_input_vc(node, kPerfPortName[port], vc,
+                                              r.input_fifo_size(port, vc), r.vc_depth());
+            g_perf.sample_router_dat_output_vc(
+                node, kPerfPortName[port], vc, r.output_vc_credit_blocked(port, vc));
+        }
+    }
 }
 
 }  // namespace
@@ -784,13 +841,14 @@ extern "C" void cmodel_perf_link(const char* name, long long flit_count, long lo
 }
 
 extern "C" void cmodel_perf_sample_tick() {
-    using namespace ni::cmodel::wrap;
+    using namespace ::ni::cmodel::wrap;
+    if (!g_perf.active()) return;
     for (HandleBlock* h : g_handle_registry) {
         if (h->type != WrapType::Router) continue;
         auto* r = static_cast<RouterWrap*>(h->adapter.get());
         sample_one_router(h->name, r->req_router(), "req", 1);
         sample_one_router(h->name, r->rsp_router(), "rsp", 1);
-        sample_one_router(h->name, r->dat_router(), "dat", r->num_vc());
+        sample_one_dat_router(h->name, r->dat_router());
     }
 }
 
@@ -798,9 +856,26 @@ extern "C" void cmodel_perf_dump(const char* path) {
     g_perf.dump(path);
 }
 
+extern "C" void cmodel_perf_begin(long long start_cyc) {
+    DPI_BOUNDARY_BEGIN(cmodel_perf_begin) {
+        g_perf.begin(static_cast<uint64_t>(start_cyc));
+    }
+    DPI_BOUNDARY_END(cmodel_perf_begin);
+}
+
+extern "C" void cmodel_perf_end(long long end_cyc) {
+    DPI_BOUNDARY_BEGIN(cmodel_perf_end) {
+        g_perf.end(static_cast<uint64_t>(end_cyc));
+    }
+    DPI_BOUNDARY_END(cmodel_perf_end);
+}
+
 extern "C" void cmodel_perf_set_run(const char* scenario, long long total_cyc) {
-    g_perf.set_scenario(scenario);
-    g_perf.set_window(0, static_cast<uint64_t>(total_cyc));
+    DPI_BOUNDARY_BEGIN(cmodel_perf_set_run) {
+        g_perf.set_scenario(scenario);
+        if (g_perf.active()) g_perf.end(static_cast<uint64_t>(total_cyc));
+    }
+    DPI_BOUNDARY_END(cmodel_perf_set_run);
 }
 
 // ---------------------------------------------------------------------------
@@ -816,8 +891,8 @@ const char* kPortName[] = {"LOCAL", "N", "E", "S", "W"};
 // REQ/RSP (SimpleRouter, ready/valid, fixed single VC): no credit counter to
 // report — ready(port,0) is the live signal instead.
 void dump_one_simple_router(const std::string& name, const char* net,
-                            ni::cmodel::router::SimpleRouter& r) {
-    for (std::size_t p = 0; p < ni::cmodel::router::ROUTER_PORT_COUNT; ++p) {
+                            ::ni::cmodel::router::SimpleRouter& r) {
+    for (std::size_t p = 0; p < ::ni::cmodel::router::ROUTER_PORT_COUNT; ++p) {
         const std::size_t occ = r.input_fifo_size(p, 0);
         if (occ > 0) {
             std::printf("[FABRIC-DUMP] %s.%s in_fifo[%s]=%zu ready=%d\n", name.c_str(), net,
@@ -837,9 +912,9 @@ void dump_one_simple_router(const std::string& name, const char* net,
 
 // DAT (Router, credit): unchanged shape from pre-S3a.
 void dump_one_credit_router(const std::string& name, const char* net,
-                            ni::cmodel::router::Router& r) {
+                            ::ni::cmodel::router::Router& r) {
     const uint8_t nvc = r.num_vc();
-    for (std::size_t p = 0; p < ni::cmodel::router::ROUTER_PORT_COUNT; ++p) {
+    for (std::size_t p = 0; p < ::ni::cmodel::router::ROUTER_PORT_COUNT; ++p) {
         for (uint8_t vc = 0; vc < nvc; ++vc) {
             const std::size_t occ = r.input_fifo_size(p, vc);
             if (occ > 0) {
@@ -876,7 +951,7 @@ void dump_one_router_wrap(const std::string& name, RouterWrap& rw) {
     dump_one_simple_router(name, "rsp", rw.rsp_router());
     dump_one_credit_router(name, "dat", rw.dat_router());
     const uint8_t nvc = rw.num_vc();
-    for (std::size_t p = 0; p < ni::cmodel::router::ROUTER_PORT_COUNT; ++p) {
+    for (std::size_t p = 0; p < ::ni::cmodel::router::ROUTER_PORT_COUNT; ++p) {
         const std::size_t dat_ej = rw.dat_eject_buffered(p);
         if (dat_ej > 0)
             std::printf("[FABRIC-DUMP] %s.dat eject[%s]=%zu\n", name.c_str(), kPortName[p], dat_ej);
@@ -890,7 +965,7 @@ void dump_one_router_wrap(const std::string& name, RouterWrap& rw) {
 }
 
 void dump_one_nmu(const std::string& name, NmuWrap& nw) {
-    using ni::cmodel::NiPath;
+    using ::ni::cmodel::NiPath;
     auto* sa = nw.standalone();
     if (!sa) return;
     auto& port = sa->axi_slave_port();
@@ -901,20 +976,20 @@ void dump_one_nmu(const std::string& name, NmuWrap& nw) {
         port.r_q_size(), nw.holding_b() ? 1 : 0, nw.holding_r() ? 1 : 0, nw.w_expected());
     std::printf(
         "[FABRIC-DUMP] %s req_stage s0[aw,w,ar]=%zu,%zu,%zu s1[aw,w,ar]=%zu,%zu,%zu s2=%zu\n",
-        name.c_str(), sa->stage_occupancy(NiPath::NmuReq, 0, ni::AXI_CH_NarrowAw),
-        sa->stage_occupancy(NiPath::NmuReq, 0, ni::AXI_CH_NarrowW),
-        sa->stage_occupancy(NiPath::NmuReq, 0, ni::AXI_CH_NarrowAr),
-        sa->stage_occupancy(NiPath::NmuReq, 1, ni::AXI_CH_NarrowAw),
-        sa->stage_occupancy(NiPath::NmuReq, 1, ni::AXI_CH_NarrowW),
-        sa->stage_occupancy(NiPath::NmuReq, 1, ni::AXI_CH_NarrowAr),
+        name.c_str(), sa->stage_occupancy(NiPath::NmuReq, 0, ::ni::AXI_CH_NarrowAw),
+        sa->stage_occupancy(NiPath::NmuReq, 0, ::ni::AXI_CH_NarrowW),
+        sa->stage_occupancy(NiPath::NmuReq, 0, ::ni::AXI_CH_NarrowAr),
+        sa->stage_occupancy(NiPath::NmuReq, 1, ::ni::AXI_CH_NarrowAw),
+        sa->stage_occupancy(NiPath::NmuReq, 1, ::ni::AXI_CH_NarrowW),
+        sa->stage_occupancy(NiPath::NmuReq, 1, ::ni::AXI_CH_NarrowAr),
         sa->stage_occupancy(NiPath::NmuReq, 2, 0));
     std::printf("[FABRIC-DUMP] %s rsp_stage s0[b,r]=%zu,%zu s1[b,r]=%zu,%zu s2[b,r]=%zu,%zu\n",
-                name.c_str(), sa->stage_occupancy(NiPath::NmuRsp, 0, ni::AXI_CH_NarrowB),
-                sa->stage_occupancy(NiPath::NmuRsp, 0, ni::AXI_CH_NarrowR),
-                sa->stage_occupancy(NiPath::NmuRsp, 1, ni::AXI_CH_NarrowB),
-                sa->stage_occupancy(NiPath::NmuRsp, 1, ni::AXI_CH_NarrowR),
-                sa->stage_occupancy(NiPath::NmuRsp, 2, ni::AXI_CH_NarrowB),
-                sa->stage_occupancy(NiPath::NmuRsp, 2, ni::AXI_CH_NarrowR));
+                name.c_str(), sa->stage_occupancy(NiPath::NmuRsp, 0, ::ni::AXI_CH_NarrowB),
+                sa->stage_occupancy(NiPath::NmuRsp, 0, ::ni::AXI_CH_NarrowR),
+                sa->stage_occupancy(NiPath::NmuRsp, 1, ::ni::AXI_CH_NarrowB),
+                sa->stage_occupancy(NiPath::NmuRsp, 1, ::ni::AXI_CH_NarrowR),
+                sa->stage_occupancy(NiPath::NmuRsp, 2, ::ni::AXI_CH_NarrowB),
+                sa->stage_occupancy(NiPath::NmuRsp, 2, ::ni::AXI_CH_NarrowR));
     std::printf("[FABRIC-DUMP] %s rob read_outstanding=%zu req_credit_avail(ready)=%d",
                 name.c_str(), sa->rob().read_occupancy(), sa->req_credit_avail() ? 1 : 0);
     for (uint8_t vc = 0; vc < nw.num_vc(); ++vc) {
@@ -924,7 +999,7 @@ void dump_one_nmu(const std::string& name, NmuWrap& nw) {
 }
 
 void dump_one_nsu(const std::string& name, NsuWrap& nw) {
-    using ni::cmodel::NiPath;
+    using ::ni::cmodel::NiPath;
     auto* sa = nw.standalone();
     if (!sa) return;
     auto& port = sa->axi_master_port();
@@ -935,17 +1010,17 @@ void dump_one_nsu(const std::string& name, NsuWrap& nw) {
         port.r_q_size(), nw.holding_aw() ? 1 : 0, nw.holding_w() ? 1 : 0, nw.holding_ar() ? 1 : 0,
         nw.outstanding_w(), nw.expected_r_beats(), nw.w_pop_budget());
     std::printf("[FABRIC-DUMP] %s req_stage s0[aw,w,ar]=%zu,%zu,%zu s1[aw,w,ar]=%zu,%zu,%zu\n",
-                name.c_str(), sa->stage_occupancy(NiPath::NsuReq, 0, ni::AXI_CH_NarrowAw),
-                sa->stage_occupancy(NiPath::NsuReq, 0, ni::AXI_CH_NarrowW),
-                sa->stage_occupancy(NiPath::NsuReq, 0, ni::AXI_CH_NarrowAr),
-                sa->stage_occupancy(NiPath::NsuReq, 1, ni::AXI_CH_NarrowAw),
-                sa->stage_occupancy(NiPath::NsuReq, 1, ni::AXI_CH_NarrowW),
-                sa->stage_occupancy(NiPath::NsuReq, 1, ni::AXI_CH_NarrowAr));
+                name.c_str(), sa->stage_occupancy(NiPath::NsuReq, 0, ::ni::AXI_CH_NarrowAw),
+                sa->stage_occupancy(NiPath::NsuReq, 0, ::ni::AXI_CH_NarrowW),
+                sa->stage_occupancy(NiPath::NsuReq, 0, ::ni::AXI_CH_NarrowAr),
+                sa->stage_occupancy(NiPath::NsuReq, 1, ::ni::AXI_CH_NarrowAw),
+                sa->stage_occupancy(NiPath::NsuReq, 1, ::ni::AXI_CH_NarrowW),
+                sa->stage_occupancy(NiPath::NsuReq, 1, ::ni::AXI_CH_NarrowAr));
     std::printf("[FABRIC-DUMP] %s rsp_stage s0[b,r]=%zu,%zu s1[b,r]=%zu,%zu s2=%zu", name.c_str(),
-                sa->stage_occupancy(NiPath::NsuRsp, 0, ni::AXI_CH_NarrowB),
-                sa->stage_occupancy(NiPath::NsuRsp, 0, ni::AXI_CH_NarrowR),
-                sa->stage_occupancy(NiPath::NsuRsp, 1, ni::AXI_CH_NarrowB),
-                sa->stage_occupancy(NiPath::NsuRsp, 1, ni::AXI_CH_NarrowR),
+                sa->stage_occupancy(NiPath::NsuRsp, 0, ::ni::AXI_CH_NarrowB),
+                sa->stage_occupancy(NiPath::NsuRsp, 0, ::ni::AXI_CH_NarrowR),
+                sa->stage_occupancy(NiPath::NsuRsp, 1, ::ni::AXI_CH_NarrowB),
+                sa->stage_occupancy(NiPath::NsuRsp, 1, ::ni::AXI_CH_NarrowR),
                 sa->stage_occupancy(NiPath::NsuRsp, 2, 0));
     std::printf(" rsp_credit_avail(ready)=%d", sa->rsp_credit_avail() ? 1 : 0);
     for (uint8_t vc = 0; vc < nw.num_vc(); ++vc) {
@@ -957,7 +1032,7 @@ void dump_one_nsu(const std::string& name, NsuWrap& nw) {
 }  // namespace
 
 extern "C" void cmodel_dump_fabric_state(void) {
-    using namespace ni::cmodel::wrap;
+    using namespace ::ni::cmodel::wrap;
     std::printf("[FABRIC-DUMP] ===== begin (non-idle state only for router lines) =====\n");
     for (HandleBlock* h : g_handle_registry) {
         switch (h->type) {

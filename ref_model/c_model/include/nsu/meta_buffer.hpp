@@ -57,7 +57,7 @@ struct MetaEntry {
 // VC map keys on (dst_id ^ id), so same-id streams from different sources
 // land on distinct keys instead of contending.
 inline uint8_t remap_downstream_id(uint8_t upstream_id, std::size_t max_unique_ids) {
-    constexpr uint8_t collapsed = static_cast<uint8_t>((1u << ni::NOC_ID_WIDTH) - 1u);
+    constexpr uint8_t collapsed = static_cast<uint8_t>((1u << ::ni::NOC_ID_WIDTH) - 1u);
     return max_unique_ids == 1 ? collapsed : upstream_id;
 }
 
@@ -88,7 +88,9 @@ class MetaBuffer {
         assert(!write_full() && "MetaBuffer: allocate_write on a full pool; check write_full()");
         write_[downstream_id].push_back(e);
         ++write_count_;
+        if (write_count_ > write_hwm_) write_hwm_ = write_count_;
     }
+    std::size_t write_hwm() const noexcept { return write_hwm_; }
     std::optional<MetaEntry> peek_write(uint8_t bid) const noexcept {
         if (write_[bid].empty()) return std::nullopt;
         return write_[bid].front();
@@ -106,7 +108,9 @@ class MetaBuffer {
         assert(!read_full() && "MetaBuffer: allocate_read on a full pool; check read_full()");
         read_[downstream_id].push_back(e);
         ++read_count_;
+        if (read_count_ > read_hwm_) read_hwm_ = read_count_;
     }
+    std::size_t read_hwm() const noexcept { return read_hwm_; }
     std::optional<MetaEntry> peek_read(uint8_t rid) const noexcept {
         if (read_[rid].empty()) return std::nullopt;
         return read_[rid].front();
@@ -135,6 +139,8 @@ class MetaBuffer {
     std::size_t max_outstanding_;
     std::size_t write_count_ = 0;
     std::size_t read_count_ = 0;
+    std::size_t write_hwm_ = 0;
+    std::size_t read_hwm_ = 0;
 };
 
 }  // namespace ni::cmodel::nsu

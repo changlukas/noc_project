@@ -302,6 +302,12 @@ classes (upstream reference in Provenance):
 | `uniform_random` | independent uniform draw per transaction | self-traffic permitted by default (`--exclude-self` opts out); seeded |
 | `hotspot` | one or more chosen nodes draw the traffic, weighted by `--hotspot-rates` | many-to-one congestion. `HOTSPOT_PERIPHERALS=1` names the target set off the router array instead: every tile draws from the whole declared peripheral set, weighted by `--hotspot-rates` exactly as the tile target set is. The peripheral keeps its own initiator traffic; the partner tile's extra lines are dropped, since every tile now addresses the peripheral out of the same slot band the partner drew from. Rejected on any other pattern, where it would suppress those lines and steer nothing |
 | `multicast` | source nodes issue masked AW writes over a row, column, or 2x2-submesh member set (`MCAST_SHAPE`, one shape per run), then read back every member replica; other nodes carry unicast filler | AWUSER carries the address mask. `INJECTION_MODE=0` only, since one write answers to N readbacks. On a config topology each source also issues one narrow-class multicast into the members' config tiles, the config-space replication case. Ignores `--ids-per-initiator` |
+| `broadcast` | one leader per selected `MCAST_SHAPE` writes every member; `global` uses node 0 as the sole leader | write-only inference distribution; no filler, config probe, or readback |
+| `gather` | every non-root member writes its root once per round | `global` defaults to corner node 0 and permits `ROOT_NODE`; 4x4 `submesh` groups use roots 5, 6, 9, and 10 |
+| `alltoall` | every node writes every other node once per round | write-only global exchange; self destinations are excluded |
+| `neighbor_exchange` | every node writes its valid west, east, north, and south neighbors once per round | no edge wraparound |
+| `pipeline` | each stage writes the next stage in row-snake order | path is `0,1,2,3,7,6,5,4,8,9,10,11,15,14,13,12`; the final stage is idle |
+| `many_to_many` | four 2x2 regions exchange clockwise: R0 `{0,1,4,5}` to R1 `{2,3,6,7}` to R3 `{10,11,14,15}` to R2 `{8,9,12,13}` to R0 | every node writes each of the four nodes in the next region. One round is four writes per source, 64 writes over the mesh. Write-only: `read.txt` is empty and no config probe is appended. Requires `mesh_4x4`, a positive transaction count divisible by four, and no peripheral endpoints |
 
 The `multicast` schedule is what satisfies restriction R1 (`docs/router-spec.md`
 Section 2.10), which the fabric does not enforce: trees of one shape are pairwise
@@ -345,14 +351,21 @@ The default stimulus (`--size 5`, single beat) is a 32 B half-bus write: 12
 field lines plus 1 beat line; the matching read is the 11 field lines at the
 same address.
 
+AI inference patterns use the requested `--size`, `--len`, and round count.
+The report recipe selects `--size 6 --len 63`: 64 full-width beats and 4 KB
+per write. A unicast write offers 65 DAT flits: one DataAw header and 64
+DataW flits. `traffic_meta.json` records `active_sources`,
+`source_write_bursts`, and `destination_deliveries`; Broadcast counts one
+source write but one delivery per multicast member.
+
 ## Checkers and non-vacuous pass
 
 - `axi_scoreboard.enable_all_checks()` + `.monitor()` arm read-data, B-resp,
   and R-resp checks against the write golden, sampled on `master_dv`. This
   requires the write-before-read precondition (see injection modes below).
-- `tb_top` counts AW/AR handshakes per node (`txn_cnt_o`). `PASS` requires
-  `txn_cnt_o > 0` on every node, so a run where a node completed zero
-  transactions cannot report clean.
+- `tb_top` counts AW/AR handshakes per node (`txn_cnt_o`). `PASS` requires a
+  non-empty loaded stimulus and `txn_cnt_o > 0` on every endpoint whose
+  loaded stimulus is non-empty; intentionally idle AI endpoints are legal.
 - `DIRECTED PASS` (the `make sim` console line) additionally requires the
   scoreboard to report zero mismatches: the run log must reach `PASS: all N
   nodes done, non-vacuous` and carry no scoreboard-mismatch or protocol-error
@@ -394,6 +407,9 @@ same address.
 - The constrained-random axis (a random driver plus a reorder-based checker)
   was retired. No sound data-integrity checker for random traffic
   exists yet; a future random axis is deferred (see Known limitations).
+- `many_to_many` is a write-only performance pattern. Completion is checked by
+  all expected `B` responses returning; it does not claim readback data-integrity
+  coverage.
 
 Per-task verification tiers (which pattern/topology combination a change must
 pass before it counts as done) are not duplicated here: they are a standing,

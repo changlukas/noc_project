@@ -1,6 +1,7 @@
 #pragma once
 #include "axi/types.hpp"
 #include "flit.hpp"
+#include "ni/channel_mode.hpp"
 #include "router/null_adapters.hpp"
 #include "router/rsp_in.hpp"
 #include "response_io.hpp"
@@ -36,6 +37,7 @@ class Depacketize : public ResponseDepacketizer {
           port_id_(port_id) {}
 
     void tick();
+    void set_channel_mode(ni::ChannelMode mode) noexcept { channel_mode_ = mode; }
 
     // ResponseDepacketizer interface — response methods are real
     std::optional<axi::BBeat> pop_b() override;
@@ -66,9 +68,10 @@ class Depacketize : public ResponseDepacketizer {
     uint8_t port_id_ = 0;
     std::optional<Flit> pending_rsp_;
     std::optional<Flit> pending_dat_;
+    ni::ChannelMode channel_mode_ = ni::ChannelMode::Native;
 
     static axi::BBeat decode_b(const Flit& f);
-    static axi::RBeat decode_r(const Flit& f);
+    static axi::RBeat decode_r(const Flit& f, ni::ChannelMode mode);
     void drain_ingress_(router::NocRspIn& src, std::optional<Flit>& pending, bool is_dat_ingress);
 };
 
@@ -80,19 +83,21 @@ inline axi::BBeat Depacketize::decode_b(const Flit& f) {
     return b;
 }
 
-inline axi::RBeat Depacketize::decode_r(const Flit& f) {
+inline axi::RBeat Depacketize::decode_r(const Flit& f, ni::ChannelMode mode) {
     // axi_ch picks which channel namespace the flit was packed into. Narrow's
     // rdata is the 8 B lane; this decode places it at byte offset 0 -- the
     // Rob layer (which holds the AR basis this flit has no address for) moves
     // it to the real lane. Data's rdata is the full width, no re-anchor needed.
-    const bool is_data = f.get_header_field("axi_ch") == ni::AXI_CH_DataR;
-    const char* ch = is_data ? "DATA_R" : "NARROW_R";
+    const bool is_data = f.get_header_field("axi_ch") == ::ni::AXI_CH_DataR;
+    const bool narrow_payload = !is_data || mode != ni::ChannelMode::Native;
+    const char* ch = narrow_payload ? "NARROW_R" : "DATA_R";
     axi::RBeat r{};
     r.id = static_cast<uint8_t>(f.get_payload_field(ch, "rid"));
     r.resp = static_cast<axi::Resp>(f.get_payload_field(ch, "rresp"));
     r.user = static_cast<uint8_t>(f.get_payload_field(ch, "ruser"));
     r.last = f.get_payload_field(ch, "rlast") != 0;
-    const std::size_t bits = is_data ? ni::width::NOC_DATA_WIDTH : ni::width::NOC_NARROW_DATA_WIDTH;
+    const std::size_t bits =
+        narrow_payload ? ::ni::width::NOC_NARROW_DATA_WIDTH : ::ni::width::NOC_DATA_WIDTH;
     f.get_payload_bytes(ch, "rdata", r.data.data(), bits);
     return r;
 }
@@ -119,34 +124,40 @@ inline void Depacketize::drain_ingress_(router::NocRspIn& src, std::optional<Fli
         // DAT carries DataR only (spec :348; NarrowB/NarrowR/DataB stay on
         // RSP). A misrouted flit here would land in the wrong queue with a
         // silently wrong class tag; fail loud instead.
-        assert((!is_dat_ingress || ch == ni::AXI_CH_DataR) &&
+        const bool dat_channel_ok =
+            channel_mode_ == ni::ChannelMode::Native
+                ? ch == ::ni::AXI_CH_DataR
+                : channel_mode_ == ni::ChannelMode::ThreeChannel64
+                      ? ch == ::ni::AXI_CH_DataB || ch == ::ni::AXI_CH_DataR
+                      : false;
+        assert((!is_dat_ingress || dat_channel_ok) &&
                "nmu::Depacketize::drain_ingress_: DAT ingress delivered a channel outside "
                "{DataR} -- spec :348 keeps NarrowB/NarrowR/DataB off DAT");
         switch (ch) {
-            case ni::AXI_CH_NarrowB:
-            case ni::AXI_CH_DataB: {
+            case ::ni::AXI_CH_NarrowB:
+            case ::ni::AXI_CH_DataB: {
                 if (b_q_.size() >= b_q_depth_) {
                     pending = f;
                     return;
                 }
                 const auto cls =
-                    (ch == ni::AXI_CH_DataB) ? axi::AxiClass::Data : axi::AxiClass::Narrow;
+                    (ch == ::ni::AXI_CH_DataB) ? axi::AxiClass::Data : axi::AxiClass::Narrow;
                 ResponseMeta meta{static_cast<uint8_t>(f.get_header_field("ordering_tag")),
                                   static_cast<uint8_t>(f.get_header_field("ordering_req")), cls};
                 b_q_.push_back({decode_b(f), meta});
                 break;
             }
-            case ni::AXI_CH_NarrowR:
-            case ni::AXI_CH_DataR: {
+            case ::ni::AXI_CH_NarrowR:
+            case ::ni::AXI_CH_DataR: {
                 if (r_q_.size() >= r_q_depth_) {
                     pending = f;
                     return;
                 }
                 const auto cls =
-                    (ch == ni::AXI_CH_DataR) ? axi::AxiClass::Data : axi::AxiClass::Narrow;
+                    (ch == ::ni::AXI_CH_DataR) ? axi::AxiClass::Data : axi::AxiClass::Narrow;
                 ResponseMeta meta{static_cast<uint8_t>(f.get_header_field("ordering_tag")),
                                   static_cast<uint8_t>(f.get_header_field("ordering_req")), cls};
-                r_q_.push_back({decode_r(f), meta});
+                r_q_.push_back({decode_r(f, channel_mode_), meta});
                 break;
             }
             default:
@@ -155,7 +166,7 @@ inline void Depacketize::drain_ingress_(router::NocRspIn& src, std::optional<Fli
                        "outside {NarrowB, NarrowR, DataB, DataR} — NMU response path only accepts "
                        "response channels. Likely cause: NSU packetizer stamped wrong axi_ch "
                        "into a response flit, NoC fabric misrouted a request flit into the "
-                       "response ingress, or codegen drift changed ni::AXI_CH_* encoding without "
+                       "response ingress, or codegen drift changed ::ni::AXI_CH_* encoding without "
                        "rebuilding both sides.");
                 std::abort();
         }

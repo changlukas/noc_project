@@ -76,6 +76,7 @@ class NsuStandalone {
     NsuStandalone& operator=(NsuStandalone&&) = delete;
 
     AxiMasterPort& axi_master_port() noexcept { return nsu_.axi_master_port(); }
+    void set_channel_mode(ni::ChannelMode mode) noexcept { nsu_.set_channel_mode(mode); }
     void tick() { nsu_.tick(); }
     std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
         return nsu_.stage_occupancy(path, stage, axi_ch);

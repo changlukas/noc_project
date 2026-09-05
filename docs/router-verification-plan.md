@@ -87,7 +87,7 @@ full-RTL mesh run; a mesh result cannot waive an R0, R1, or R2 failure.
 | SPEC 12, arbitration order | R0-ARB-01/04, R1-TOP-04, RTR-A07 |
 | SPEC 13, VC independence | R0-DAT-05/06, R1-TOP-03, RTR-A14/RTR-A19 |
 | SPEC 14, output FIFO | R0-DAT-08, RTR-A17 |
-| SPEC 15, multi-output evaluation | R1-TOP-14 and RTR-A26 enforce one flit per output and concurrent independent outputs; the model-only same-FIFO multi-read cycle is R2-X02 |
+| SPEC 15, withdrawn | what ended is multiple pops of one input VC FIFO in a tick. A fork still supplies several outputs from one parked head in one tick (`router.hpp:628-635`, a branch grant copies the head and never pops), so R2-X02's collective fanout and M-ALIGN-01 stand unchanged. R1-TOP-14 and RTR-A26 still enforce one flit per output and concurrent independent outputs |
 | SPEC 16, fairness | R0-ARB-05, R1-TOP-04, RTR-A08 |
 | SPEC 17, boundary silence | R1-TOP-13, RTR-A27 |
 | SPEC 18, network independence | R1-TOP-10 through R1-TOP-12, RTR-A23 |
@@ -349,7 +349,7 @@ specific tests used as oracle evidence must pass at the pinned revision.
 | Existing model evidence | Obligation before R2 |
 |---|---|
 | `RouterRouteCompute.*` and `RouteMask*` | retain exhaustive direction/range and fork/join member-set checks |
-| `RouterDatapath.ZeroLoadLatencyIsThreeTicks` and `SimpleRouterDatapath.*Latency*` | retain core timing checks and separately prove the held-output wrapper cycle |
+| `RouterDatapath.ZeroLoadLatencyIsFourTicks`, `RouterDatapath.BodyFlitsFollowHeadOneCycleApart` and `SimpleRouterDatapath.*Latency*` | retain core timing checks and separately prove the held-output wrapper cycle |
 | `RouterWormhole.*`, `SimpleRouterWormhole.*`, and `NocWormholeArbiter.*` | retain lock, gap, tail, frozen-winner, and malformed-worm checks |
 | `RouterVcArbitration.*`, `RouterFairness.*`, and `RouterVa*` | retain exact RR/VA/fixed/overflow/credit cases for the aligned SHARED instance |
 | `RouterCredit.*`, `RouterDatapath.CreditDecrementAtGrantAndPulseAfterDequeue`, and adapter tests | retain per-VC counter and chained conservation checks |
@@ -357,7 +357,7 @@ specific tests used as oracle evidence must pass at the pinned revision.
 | `RouterWrap.*` and `sim/tools/test_model_egress_hold.py` | retain physical direction, LOCAL credit, and REQ/RSP held-egress checks |
 
 Two alignment tests are still obligations rather than existing evidence: M-ALIGN-01 must witness
-the same-input/multiple-output model tick used by R2-X02, and M-ALIGN-02 must drive REQ, RSP, and
+the fork fanout tick used by R2-X02, and M-ALIGN-02 must drive REQ, RSP, and
 DAT simultaneously with independent stalls and prove model-wrapper network independence. R2 may
 not claim either exclusion or alignment property until its named test is non-vacuous.
 
@@ -375,12 +375,12 @@ not claim either exclusion or alignment property until its named test is non-vac
 | parameter widths | current generated model types | other legal widths/geometries use R0/R1 until model containers and wrapper types are aligned |
 | three-network independence | separate Router instances exist in the wrapper | add a focused model test with simultaneous traffic and independent stalls before claiming R2 isolation evidence |
 
-The known optimistic behavior permits one input FIFO to supply different outputs in one model tick.
-It is retained as a model capability and explicit R2 exclusion, not imposed as a multi-read RTL
-microarchitecture. A focused model sentinel must continue to demonstrate this case so that the
-exclusion cannot become vacuous. Any new model/target mismatch stops differential signoff until it
-is either fixed or approved and added to Section 11.4; the harness may not silently widen matching
-windows.
+Fork fanout permits one parked head to be read by several branch outputs in one model tick without
+a pop, until every branch has accepted (`router.hpp:628-635`). It is retained as a model capability
+and explicit R2 exclusion, not imposed as a multi-read RTL microarchitecture. A focused model
+sentinel must continue to demonstrate this case so that the exclusion cannot become vacuous. Any new
+model/target mismatch stops differential signoff until it is either fixed or approved and added to
+Section 11.4. The harness may not silently widen matching windows.
 
 ## 10. Reference classification and license handling
 

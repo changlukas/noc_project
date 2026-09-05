@@ -7,7 +7,7 @@
 
 namespace ni::cmodel::axi {
 
-constexpr int DATA_BYTES = ni::WSTRB_WIDTH;
+constexpr int DATA_BYTES = ::ni::WSTRB_WIDTH;
 constexpr int DATA_WIDTH = DATA_BYTES * 8;
 
 // Full (all-lanes) WSTRB mask for the current DATA_BYTES. Ternary avoids UB
@@ -21,20 +21,20 @@ constexpr int NOC_DATA_WIDTH_BITS = DATA_BYTES * 8;
 // The external AXI port and packet field are intentionally independent.
 // C++/DPI records at the NoC boundary are keyed by the fixed NoC ID; the
 // endpoint's RTL remap restores the external AXI ID before returning a response.
-static_assert(ni::NOC_ID_WIDTH == ni::width::NOC_ID_WIDTH,
+static_assert(::ni::NOC_ID_WIDTH == ::ni::width::NOC_ID_WIDTH,
               "constants.yaml axi.NOC_ID_WIDTH and ni_packet.json flit.field_widths.NOC_ID_WIDTH "
               "must agree; regenerate both after changing either");
-static_assert(ni::NOC_ID_WIDTH == 3,
+static_assert(::ni::NOC_ID_WIDTH == 3,
               "the c_model/DPI boundary is the approved fixed 3-bit NoC ID instance");
 
 // NOC_ID_SPACE sizes per-NoC-ID containers in the NMU RoB and NSU MetaBuffer.
 // It must never be derived from AXI_ID_WIDTH, which is the external port width.
-constexpr std::size_t NOC_ID_SPACE = 1u << ni::width::NOC_ID_WIDTH;
+constexpr std::size_t NOC_ID_SPACE = 1u << ::ni::width::NOC_ID_WIDTH;
 static_assert(NOC_ID_SPACE == 8,
               "NOC_ID_SPACE locked to 8 (NOC_ID_WIDTH=3); update per-NoC-ID "
               "container sizes if NOC_ID_WIDTH changes");
 
-static_assert(DATA_BYTES * 8 == ni::width::NOC_DATA_WIDTH,
+static_assert(DATA_BYTES * 8 == ::ni::width::NOC_DATA_WIDTH,
               "DATA_BYTES (= WSTRB_WIDTH) * 8 must equal NOC_DATA_WIDTH "
               "for byte-level WSTRB semantics");
 
@@ -54,7 +54,7 @@ static_assert(DATA_BYTES <= 64, "WBeat::strb is uint64_t; widen the strb field i
 // Narrow-class data width: the fixed 8 B lane the narrow class occupies on the
 // shared DATA_BYTES-wide port (docs/noc-target-spec.md §5). Independent of
 // DATA_BYTES / DATA_WIDTH, which describe only the data class.
-constexpr int NARROW_DATA_BYTES = ni::width::NOC_NARROW_DATA_WIDTH / 8;
+constexpr int NARROW_DATA_BYTES = ::ni::width::NOC_NARROW_DATA_WIDTH / 8;
 static_assert(NARROW_DATA_BYTES == 8, "narrow class data width is fixed at 64 b (8 B) per spec §5");
 
 enum class Burst : uint8_t { FIXED = 0, INCR = 1, WRAP = 2 };
@@ -151,12 +151,12 @@ struct AwBeat {
 
 // AWUSER[9:8] carries the same encoding as the flit header field of the same
 // name, so both sides read one specgen table (ni_packet.json
-// header_fields[collective_op].encoding, generated into ni::COLLECTIVE_OP_*
+// header_fields[collective_op].encoding, generated into ::ni::COLLECTIVE_OP_*
 // and ni_flit_pkg::COLLECTIVE_OP_* for the SV side). Narrowed to uint8_t here
 // because that is the width every AXI-side field holding one uses. Codes 2-3
 // are absent from the table by design: they are reserved and reject.
-constexpr uint8_t COLLECTIVE_OP_UNICAST = ni::COLLECTIVE_OP_UNICAST;
-constexpr uint8_t COLLECTIVE_OP_MULTICAST = ni::COLLECTIVE_OP_MULTICAST;
+constexpr uint8_t COLLECTIVE_OP_UNICAST = ::ni::COLLECTIVE_OP_UNICAST;
+constexpr uint8_t COLLECTIVE_OP_MULTICAST = ::ni::COLLECTIVE_OP_MULTICAST;
 
 // AWUSER[9:8]. The 48 b AWUSER[57:10] is an ADDRESS mask, not the 8 b node mask
 // the flit header carries: a set bit marks the matching AWADDR bit don't care.
@@ -171,8 +171,8 @@ constexpr uint64_t awuser_collective_mask(uint64_t user) {
 // The lifted AWUSER width (specgen constants.yaml) and the AWUSER layout the
 // accessors above hardcode come from two different specgen domains, so they
 // agree by construction only while this holds.
-static_assert(ni::AXI_AWUSER_WIDTH == ni::width::AXI_USER_WIDTH + ni::width::COLLECTIVE_OP_WIDTH +
-                                          ni::width::AXI_ADDR_WIDTH,
+static_assert(::ni::AXI_AWUSER_WIDTH == ::ni::width::AXI_USER_WIDTH + ::ni::width::COLLECTIVE_OP_WIDTH +
+                                          ::ni::width::AXI_ADDR_WIDTH,
               "AXI_AWUSER_WIDTH disagrees with the spec AWUSER layout "
               "(user + collective_op + address mask)");
 

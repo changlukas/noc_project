@@ -3,7 +3,7 @@
 #
 #   make -C sim/verilator sim CONFIG=<config> PATTERN=<p> [SEED=<n>]
 #
-# Run logs land in output/<scenario>/run.log.
+# Run logs land in $(OUTPUT_ROOT)/<scenario>/run.log.
 
 ##########
 # Common #
@@ -29,8 +29,8 @@ CONFIG ?= mesh_4x4
 #   continuous : same endpoint with the "ideal" master-face profile -- a
 #                measurement run must not be throttled by its own consumer
 #                (measured: the random profile hid 4x of neighbor bandwidth).
-#                Selected by INJECTION_MODE=1; each class has its own obj_dir.
-RUN_CLASS ?= $(if $(filter 1,$(INJECTION_MODE)),continuous,directed)
+#                Selected by INJECTION_MODE=1 or 4; each class has its own obj_dir.
+RUN_CLASS ?= $(if $(filter 1 4,$(INJECTION_MODE)),continuous,directed)
 ifeq ($(filter $(RUN_CLASS),directed continuous),)
 $(error RUN_CLASS must be directed or continuous (got '$(RUN_CLASS)'))
 endif
@@ -53,8 +53,9 @@ include ../build_config.mk
 # Listed, not enforced: a wrong name fails at the file the build then cannot
 # find. The lists exist so `make help` can print them.
 _CONFIGS  := $(patsubst ../configs/%.yml,%,$(wildcard ../configs/*.yml))
-_PATTERNS := neighbor transpose uniform_random all_to_all hotspot multicast \
-             bit_complement bit_reverse shuffle bit_rotation tornado
+_PATTERNS := neighbor transpose uniform_random all_to_all hotspot multicast many_to_many \
+             bit_complement bit_reverse shuffle bit_rotation tornado broadcast gather \
+             alltoall neighbor_exchange pipeline
 
 .PHONY: help
 help:
@@ -69,7 +70,8 @@ help:
 	@echo "  The DAT VC count (noc.DAT_NUM_VC) and the NMU read RoB mode"
 	@echo "  (nmu.READ_ROB_ENABLED) are specgen constants: edit"
 	@echo "  specgen/source/constants.yaml and rebuild, they are not run knobs."
-	@echo "  Vars: INJECTION_MODE=0|1|2 INJECTION_RATE= INJECTION_COUNT= IDS_PER_INITIATOR= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT= HOTSPOT_PERIPHERALS=1; SEED unset draws + prints a random seed"
+	@echo "  Vars: INJECTION_MODE=0|1|2|4 INJECTION_RATE= INJECTION_COUNT= SOURCE_OUTSTANDING_DEPTH= IDS_PER_INITIATOR= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT= HOTSPOT_PERIPHERALS=1; SEED unset draws + prints a random seed"
+	@echo "  make channel-compare-run CONFIG=mesh_4x4 CHANNEL_MODE=2|3 CHANNEL_CASE=write|read"
 	@echo "  Forensics: TIMEOUT_CYCLES=<n> fires the watchdog early, so a hang dumps per-node outstanding and last_progress without waiting out the formula"
 	@echo ""
 	@echo "  make sim CONFIG=mesh_2x2 DMA=1               pulp iDMA on every master face"
@@ -78,7 +80,11 @@ help:
 	@echo "  region matches its source. Vars: DMA_JOBS_PER_NODE= DMA_LENGTH= DMA_RW=read|write"
 	@echo "  (all three feed the job files AND the top's compare) DECERR_FAULT=1 DECERR_FAULT_WR=1"
 	@echo ""
-	@echo "  make sim-injection-sweep PATTERN=<p>         saturation sweep, long"
+	@echo "  make sim-injection-sweep                     saturation sweep, long"
+	@echo "  Vars: SWEEP_OFFERED= (DAT flits per node per cycle) SWEEP_PATTERNS= SWEEP_SEEDS="
+	@echo "  PATTERN and SEED are ignored here, use SWEEP_PATTERNS and SWEEP_SEEDS."
+	@echo "  BURST_LEN defaults to 32 in this target (SWEEP_OFFERED assumes AxLEN 32)"
+	@echo "  Render the report and summary chart with: tools/perf_report.py sim/verilator/output"
 	@echo ""
 	@echo "Build and test gates stay at the repo root: make build / make test / make pytest"
 
@@ -273,21 +279,34 @@ endif
 #     testbench disarms it and the axi_bw_monitor gates instead.
 #   INJECTION_MODE=2: one phase, writes paced as mode 1, each read issues after its
 #     paired write's B response, scoreboard gates as mode 0 (checked-continuous).
+#   INJECTION_MODE=4: write-only AXI source window. Admission releases AW and W
+#     independently; an AW handshake occupies a slot until its B handshake.
 # INJECTION_COUNT bounds the run. Past saturation the queues never empty, and
 # wait_b/wait_r would not terminate without it (booksim solves the same problem
 # with sim_type=throughput, which skips its drain).
 PATTERN         ?= neighbor
-# Multicast mask shape (multicast pattern only): row | col | submesh. One shape
+CHANNEL_MODE    ?=
+CHANNEL_CASE    ?=
+# Multicast mask shape: row | col | submesh | global. One shape
 # per run -- concurrent multicast trees must stay pairwise disjoint (R1).
 MCAST_SHAPE     ?= row
+MULTICAST_MODE  ?= hardware
+GATHER_SHAPE    ?= global
+ROOT_NODE       ?= 0
+AI_ROUNDS       ?=
+AI_TXNS_PER_FLOW ?= 1
+TRAFFIC_DIRECTION ?= write
+ROUND_PERF      ?= 0
 INJECTION_MODE  ?= 0
 INJECTION_RATE  ?= 1.0
+SOURCE_OUTSTANDING_DEPTH ?=
+READ_PREFILL_FAULT ?=
 # Directed default is 64: measured on mesh_4x4_vc4 uniform_random at 4 ids,
 # the RoB high-water mark rises 3 -> 12 -> 60 (of 128) across counts 4, 16, 64
 # and then saturates at 75 by 128, so 64 is the largest count where injection
 # still sets the load rather than the fabric. At 4 the RoB sat at 2% and no
 # depth was anywhere near binding.
-INJECTION_COUNT ?= $(if $(filter 1 2,$(INJECTION_MODE)),200,64)
+INJECTION_COUNT ?= $(if $(filter 1 2 4,$(INJECTION_MODE)),200,64)
 HOTSPOT         ?= 5
 
 # Distinct AXI ids one initiator draws from (gen_test_patterns
@@ -323,9 +342,15 @@ STIM_SIZE       ?= $(if $(filter config,$(SPACE)),3,5)
 # the next line into the value.
 _CONTINUOUS    := $(filter 1,$(INJECTION_MODE))
 _CHECKED       := $(filter 2,$(INJECTION_MODE))
+_WINDOWED      := $(filter 4,$(INJECTION_MODE))
+_AI_PATTERN    := $(filter broadcast gather alltoall neighbor_exchange pipeline many_to_many,$(PATTERN))
+_NUM_READS     := $(if $(_AI_PATTERN),$(if $(filter read,$(TRAFFIC_DIRECTION)),$(INJECTION_COUNT),0),$(INJECTION_COUNT))
+_NUM_WRITES    := $(if $(_AI_PATTERN),$(if $(filter write,$(TRAFFIC_DIRECTION)),$(INJECTION_COUNT),0),$(INJECTION_COUNT))
 # Pattern tag: multicast runs are per-shape, so the shape joins the stim dir /
 # output tag (row and submesh runs must not share stimulus or logs).
-_PATTERN_TAG   := $(PATTERN)$(if $(filter multicast,$(PATTERN)),_$(MCAST_SHAPE))$(if $(filter config,$(SPACE)),_narrow)
+_GATHER_TAG    := gather_$(GATHER_SHAPE)$(if $(filter global,$(GATHER_SHAPE)),_root$(ROOT_NODE))
+_TRAFFIC_MAPPING := $(if $(filter gather,$(PATTERN)),$(_GATHER_TAG),$(PATTERN)$(if $(filter channel_compare,$(PATTERN)),_$(CHANNEL_CASE))$(if $(filter multicast broadcast,$(PATTERN)),_$(MCAST_SHAPE)))
+_PATTERN_TAG   := $(_TRAFFIC_MAPPING)$(if $(filter broadcast,$(PATTERN)),_$(MULTICAST_MODE))$(if $(_AI_PATTERN),_$(TRAFFIC_DIRECTION))$(if $(filter config,$(SPACE)),_narrow)
 # DMA=1 replaces the pattern stimulus with iDMA job files, so its stimulus and
 # its run tag key on the job geometry rather than on PATTERN / INJECTION_COUNT,
 # neither of which a DMA run reads.
@@ -353,14 +378,35 @@ _TOPO_TAG      := $(CONFIG)
 ifeq ($(DMA),1)
 SIM_TAG        ?= dma_$(_TOPO_TAG)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
 else
-SIM_TAG        ?= $(if $(_CONTINUOUS),continuous_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),$(if $(_CHECKED),checked_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),directed_$(_TOPO_TAG)_$(_PATTERN_TAG)_s$(SEED)))
+SIM_TAG        ?= $(if $(filter channel_compare,$(PATTERN)),channel_compare_$(CHANNEL_MODE)ch_$(CHANNEL_CASE),$(if $(_WINDOWED),windowed_$(_TOPO_TAG)_$(_PATTERN_TAG)_od$(SOURCE_OUTSTANDING_DEPTH)_s$(SEED),$(if $(_CONTINUOUS),continuous_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),$(if $(_CHECKED),checked_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),directed_$(_TOPO_TAG)_$(_PATTERN_TAG)_s$(SEED)))))
 endif
+OUTPUT_ROOT    ?= output
+RUN_DIR        := $(OUTPUT_ROOT)/$(SIM_TAG)
 GEN_PATTERNS   := $(SIM_ROOT)/tools/gen_test_patterns.py
 EMIT_CSV       := $(SIM_ROOT)/tools/emit_result_csv.py
+EMIT_MANIFEST  := $(SIM_ROOT)/tools/emit_result_manifest.py
+SOURCE_PATCH   := $(PROJ_ROOT)/sim/verilator/output/source.patch
 # HOTSPOT_PERIPHERALS=1 moves the hotspot set off the router array (every tile
 # targets the peripheral on its row), so HOTSPOT names nothing and is not passed.
 _HOTSPOT_ARGS  := $(if $(filter hotspot,$(PATTERN)),$(if $(HOTSPOT_PERIPHERALS),--hotspot-peripherals,--hotspot $(HOTSPOT)),)
-_MCAST_ARGS    := $(if $(filter multicast,$(PATTERN)),--mcast-shape $(MCAST_SHAPE),)
+_MCAST_ARGS    := $(if $(filter multicast broadcast,$(PATTERN)),--mcast-shape $(MCAST_SHAPE),) $(if $(filter broadcast,$(PATTERN)),--multicast-mode $(MULTICAST_MODE),)
+_GATHER_ARGS   := $(if $(filter gather,$(PATTERN)),--gather-shape $(GATHER_SHAPE) --root-node $(ROOT_NODE),)
+_AI_ARGS       := $(if $(AI_ROUNDS),--rounds $(AI_ROUNDS)) $(if $(_AI_PATTERN),--direction $(TRAFFIC_DIRECTION) --transactions-per-flow $(AI_TXNS_PER_FLOW))
+_AI_META_ARGS  := $(if $(_AI_PATTERN),--traffic-meta $(STIM_ROOT)/traffic_meta.json --traffic-mapping $(_TRAFFIC_MAPPING))
+_REPRO_KNOBS   := CONFIG=$(CONFIG) PATTERN=$(PATTERN) SEED=$(SEED) INJECTION_MODE=$(INJECTION_MODE) INJECTION_COUNT=$(INJECTION_COUNT) SOURCE_OUTSTANDING_DEPTH=$(SOURCE_OUTSTANDING_DEPTH) MAX_TXNS_PER_ID=$(MAX_TXNS_PER_ID) TRAFFIC_DIRECTION=$(TRAFFIC_DIRECTION) AI_ROUNDS=$(AI_ROUNDS) AI_TXNS_PER_FLOW=$(AI_TXNS_PER_FLOW) STIM_SIZE=$(STIM_SIZE) BURST_LEN=$(BURST_LEN) MCAST_SHAPE=$(MCAST_SHAPE) MULTICAST_MODE=$(MULTICAST_MODE) GATHER_SHAPE=$(GATHER_SHAPE) ROOT_NODE=$(ROOT_NODE) CHANNEL_MODE=$(CHANNEL_MODE) CHANNEL_CASE=$(CHANNEL_CASE)
+REPRO_COMMAND  ?= make -C sim/verilator gen $(_REPRO_KNOBS) && make -C sim/verilator sim $(_REPRO_KNOBS)
+_EMIT_MANIFEST_CMD = $(PYTHON3) $(EMIT_MANIFEST) --out $(RUN_DIR)/manifest.json --repo-root $(PROJ_ROOT) --config sim/configs/$(CONFIG).yml --simulator $(VERILATOR) --seed $(SEED) --command '$(REPRO_COMMAND)' --source-patch $(SOURCE_PATCH)
+
+ifneq ($(filter gen sim run,$(MAKECMDGOALS)),)
+ifneq ($(strip $(_AI_PATTERN)),)
+ifeq ($(filter write read,$(TRAFFIC_DIRECTION)),)
+$(error TRAFFIC_DIRECTION must be write or read)
+endif
+ifeq ($(PATTERN):$(TRAFFIC_DIRECTION),broadcast:read)
+$(error Broadcast Read is not supported)
+endif
+endif
+endif
 
 # Stimulus generation alone: no build, no run.
 .PHONY: gen
@@ -370,12 +416,36 @@ gen:
 	$(if $(filter 1,$(DMA)),,$(PYTHON3) $(GEN_PATTERNS) --topology $(CONFIG) \
 	    --out $(STIM_ROOT) --pattern $(PATTERN) \
 	    --transactions-per-node $(INJECTION_COUNT) --size $(STIM_SIZE) --len $(BURST_LEN) \
+	    $(if $(filter channel_compare,$(PATTERN)),--channel-case $(CHANNEL_CASE)) \
 	    $(if $(filter config,$(SPACE)),--space config) \
-	    --seed $(SEED) $(_HOTSPOT_ARGS) $(_MCAST_ARGS) \
+	    --seed $(SEED) $(_HOTSPOT_ARGS) $(_MCAST_ARGS) $(_GATHER_ARGS) $(_AI_ARGS) \
 	    $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)))
 	$(if $(filter 1,$(DMA)),$(PYTHON3) $(GEN_DMA_JOBS) --topology $(CONFIG) \
 	    --out $(STIM_ROOT) $(_DMA_JOB_ARGS))
 	@echo "stimulus: $(STIM_ROOT)"
+
+ifneq ($(filter channel-compare-gen channel-compare-run,$(MAKECMDGOALS)),)
+ifeq ($(filter 2 3,$(CHANNEL_MODE)),)
+$(error CHANNEL_MODE must be 2 or 3 (got '$(CHANNEL_MODE)'))
+endif
+ifeq ($(filter write read,$(CHANNEL_CASE)),)
+$(error CHANNEL_CASE must be write or read (got '$(CHANNEL_CASE)'))
+endif
+ifneq ($(strip $(CHANNEL_COMPARE_FAULT)),)
+$(error CHANNEL_COMPARE_FAULT must be unset for channel-compare-run)
+endif
+endif
+
+.PHONY: channel-compare-gen channel-compare-run
+channel-compare-gen:
+	@$(MAKE) --no-print-directory gen PATTERN=channel_compare CHANNEL_CASE=$(CHANNEL_CASE) \
+	    AI_ROUNDS=16 INJECTION_COUNT=64 STIM_SIZE=3 BURST_LEN=255
+
+channel-compare-run: channel-compare-gen
+	@$(MAKE) --no-print-directory sim PATTERN=channel_compare INJECTION_MODE=3 \
+	    CHANNEL_MODE=$(CHANNEL_MODE) CHANNEL_CASE=$(CHANNEL_CASE) AI_ROUNDS=16 \
+	    INJECTION_COUNT=64 SOURCE_OUTSTANDING_DEPTH=32 MAX_TXNS_PER_ID=32 \
+	    STIM_SIZE=3 BURST_LEN=255
 
 #######
 # Run #
@@ -388,6 +458,11 @@ gen:
 ifneq ($(filter sim run,$(MAKECMDGOALS)),)
 ifeq ($(wildcard $(STIM_ROOT)),)
 $(error no stimulus at $(STIM_ROOT). Run: make gen CONFIG=$(CONFIG) PATTERN=$(PATTERN))
+endif
+ifneq ($(filter 4,$(INJECTION_MODE)),)
+ifeq ($(strip $(SOURCE_OUTSTANDING_DEPTH)),)
+$(error INJECTION_MODE=4 requires SOURCE_OUTSTANDING_DEPTH=<positive integer>)
+endif
 endif
 endif
 
@@ -402,55 +477,95 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 	# before a vacuous no-scoreboard run. Deliberately a recipe check, not a
 	# parse-time $(error): OBJ_DIR/TBTOP_EXE are := fixed at parse, so a target-
 	# specific override cannot re-key them; the cost is a wasted wrong-flavor build.
-	@[ "$(RUN_CLASS)" = "$(if $(filter 1,$(INJECTION_MODE)),continuous,directed)" ] || { echo "ERROR: INJECTION_MODE=$(INJECTION_MODE) runs on RUN_CLASS=$(if $(filter 1,$(INJECTION_MODE)),continuous,directed) (got '$(RUN_CLASS)')"; exit 1; }
-	@mkdir -p output/$(SIM_TAG)
+	@[ "$(RUN_CLASS)" = "$(if $(filter 1 4,$(INJECTION_MODE)),continuous,directed)" ] || { echo "ERROR: INJECTION_MODE=$(INJECTION_MODE) runs on RUN_CLASS=$(if $(filter 1 4,$(INJECTION_MODE)),continuous,directed) (got '$(RUN_CLASS)')"; exit 1; }
+	@mkdir -p $(RUN_DIR)
 	@echo ">>> $@ CONFIG=$(CONFIG) PATTERN=$(PATTERN) SEED=$(SEED)"
 	@echo "running $(SIM_TAG) (mode=$(INJECTION_MODE) rate=$(INJECTION_RATE) count=$(INJECTION_COUNT) pattern=$(PATTERN))"
 	$(TBTOP_EXE) \
 	    "+stim_dir=$(STIM_ROOT)" \
-	    "+num_reads=$(INJECTION_COUNT)" "+num_writes=$(INJECTION_COUNT)" \
+	    "+num_reads=$(_NUM_READS)" "+num_writes=$(_NUM_WRITES)" \
 	    "+injection_mode=$(INJECTION_MODE)" "+injection_rate=$(INJECTION_RATE)" \
+	    "+traffic_direction=$(TRAFFIC_DIRECTION)" \
+	    $(if $(SOURCE_OUTSTANDING_DEPTH),"+source_outstanding_depth=$(SOURCE_OUTSTANDING_DEPTH)") \
+	    "+round_perf=$(ROUND_PERF)" \
+	    $(if $(filter channel_compare,$(PATTERN)),"+channel_mode=$(CHANNEL_MODE)" "+channel_case=$(CHANNEL_CASE)") \
+	    $(if $(filter channel_compare,$(PATTERN)),"+channel_rounds=$(AI_ROUNDS)") \
+	    $(if $(CHANNEL_COMPARE_FAULT),"+channel_compare_fault=$(CHANNEL_COMPARE_FAULT)") \
 	    $(if $(MAX_UNIQUE_IDS),"+max_unique_ids=$(MAX_UNIQUE_IDS)") \
 	    $(if $(MAX_OUTSTANDING),"+max_outstanding=$(MAX_OUTSTANDING)") \
 	    $(if $(B_ROB_DEPTH),"+b_rob_depth=$(B_ROB_DEPTH)") \
 	    $(if $(R_ROB_DEPTH),"+r_rob_depth=$(R_ROB_DEPTH)") \
 	    $(if $(MAX_TXNS_PER_ID),"+max_txns_per_id=$(MAX_TXNS_PER_ID)") \
 	    $(if $(MCAST_FAULT),"+mcast_fault=$(MCAST_FAULT)") \
+	    $(if $(READ_PREFILL_FAULT),"+read_prefill_fault=$(READ_PREFILL_FAULT)") \
 	    $(if $(TIMEOUT_CYCLES),"+timeout_cycles=$(TIMEOUT_CYCLES)") \
 	    $(if $(DECERR_FAULT),"+decerr_fault=$(DECERR_FAULT)") \
 	    $(if $(DECERR_FAULT_WR),"+decerr_fault_wr=$(DECERR_FAULT_WR)") \
 	    "+verilator+seed+$(SEED)" \
 	    "+sam_config=$(TOPOLOGY_CONFIG)" \
-	    "+perf_out=output/$(SIM_TAG)/perf.json" \
+	    "+perf_out=$(RUN_DIR)/perf.json" \
 	    "+perf_scenario=$(SIM_TAG)" \
-	    > output/$(SIM_TAG)/run.log 2>&1; \
+	    > $(RUN_DIR)/run.log 2>&1; \
 	rc=$$?; \
-	echo "--- run.log: per-node monitors + tail ---"; grep -F '[Monitor' output/$(SIM_TAG)/run.log; grep -vF '[HWM]' output/$(SIM_TAG)/run.log | tail -4; \
+	echo "--- run.log: per-node monitors + tail ---"; grep -F '[Monitor' $(RUN_DIR)/run.log; grep -vF '[HWM]' $(RUN_DIR)/run.log | tail -4; \
 	if grep -qE 'Unexpected RData|Unexpected W last|Not supported (AW|AR) burst|Atomic transfers not supported|%Error' \
-	        output/$(SIM_TAG)/run.log; then \
+	        $(RUN_DIR)/run.log; then \
 	    echo "RUN FAIL: scoreboard mismatch/assertion/malformed stimulus"; exit 1; \
 	fi; \
-	if [ "$(INJECTION_MODE)" = "1" ]; then \
+	if [ "$(INJECTION_MODE)" = "1" ] || [ "$(INJECTION_MODE)" = "4" ]; then \
 	    if [ $$rc -ne 0 ]; then echo "CONTINUOUS FAIL (rc=$$rc)"; exit 1; fi; \
-	    if ! grep -qiE '\[Monitor .*\]\[(Read|Write)\].*BW:\s*[1-9]' output/$(SIM_TAG)/run.log; then \
+	    if ! grep -qiE '\[Monitor .*\]\[(Read|Write)\].*BW:\s*[1-9]' $(RUN_DIR)/run.log; then \
 	        echo "CONTINUOUS FAIL: no non-zero bandwidth reported"; exit 1; \
 	    fi; \
-	    $(PYTHON3) $(EMIT_CSV) --log output/$(SIM_TAG)/run.log \
-	        --out output/$(SIM_TAG)/result.csv \
+	    $(PYTHON3) $(EMIT_CSV) --log $(RUN_DIR)/run.log \
+	        --out $(RUN_DIR)/result.csv \
 	        --topology $(CONFIG) --pattern $(PATTERN) \
-	        --injection-mode $(INJECTION_MODE) --injection-rate $(INJECTION_RATE) \
+	        --injection-mode $(INJECTION_MODE) --injection-rate $(if $(_WINDOWED),N/A,$(INJECTION_RATE)) \
 	        --injection-count $(INJECTION_COUNT) --seed $(SEED) \
+	        $(if $(_WINDOWED),--source-outstanding-depth $(SOURCE_OUTSTANDING_DEPTH)) \
+	        $(if $(_WINDOWED),--traffic-direction $(TRAFFIC_DIRECTION)) \
 	        $(if $(MAX_UNIQUE_IDS),--max-unique-ids $(MAX_UNIQUE_IDS)) \
 	        $(if $(MAX_OUTSTANDING),--max-outstanding $(MAX_OUTSTANDING)) \
+	        $(if $(R_ROB_DEPTH),--r-rob-depth $(R_ROB_DEPTH)) \
 	        $(if $(MAX_TXNS_PER_ID),--max-txns-per-id $(MAX_TXNS_PER_ID)) \
 	        $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)) \
-	        --burst-len $(BURST_LEN) --space $(SPACE); \
+	        --burst-len $(BURST_LEN) --stim-size $(STIM_SIZE) --space $(SPACE) \
+	        $(_AI_META_ARGS) $(if $(filter broadcast,$(PATTERN)),--multicast-mode $(MULTICAST_MODE)) || exit 1; \
+	    $(_EMIT_MANIFEST_CMD) || exit 1; \
 	    echo "CONTINUOUS PASS: $(SIM_TAG)"; \
-	elif [ $$rc -ne 0 ] || ! grep -q 'PASS: all' output/$(SIM_TAG)/run.log; then \
+	elif [ "$(INJECTION_MODE)" = "3" ]; then \
+	    if [ $$rc -ne 0 ] || ! grep -qE '^PASS: all [0-9]+ nodes done, non-vacuous$$' $(RUN_DIR)/run.log; then \
+	        echo "CHANNEL COMPARE FAIL: run did not reach exact non-vacuous PASS (rc=$$rc)"; exit 1; \
+	    fi; \
+	    $(PYTHON3) $(EMIT_CSV) --log $(RUN_DIR)/run.log \
+	        --out $(RUN_DIR)/result.csv --topology $(CONFIG) \
+	        --channel-mapping $(CHANNEL_MODE)-channel --channel-case $(CHANNEL_CASE) \
+	        --seed $(SEED) --traffic-meta $(STIM_ROOT)/traffic_meta.json \
+        --source-outstanding-depth $(SOURCE_OUTSTANDING_DEPTH) \
+        --max-txns-per-id $(MAX_TXNS_PER_ID) || exit 1; \
+	    $(_EMIT_MANIFEST_CMD) || exit 1; \
+	    echo "CHANNEL COMPARE PASS: $(SIM_TAG) scoreboard clean, marker and data beats verified"; \
+	elif [ $$rc -ne 0 ] || ! grep -q 'PASS: all' $(RUN_DIR)/run.log; then \
 	    echo "DIRECTED FAIL: run did not reach non-vacuous PASS (rc=$$rc)"; exit 1; \
 	elif [ "$(DMA)" = "1" ]; then \
 	    echo "DMA PASS: $(SIM_TAG) every job retired, every region intact"; \
 	else \
+	    if [ "$(ROUND_PERF)" = "1" ]; then \
+	        $(PYTHON3) $(EMIT_CSV) --log $(RUN_DIR)/run.log \
+	            --out $(RUN_DIR)/result.csv \
+	            --topology $(CONFIG) --pattern $(PATTERN) \
+	            --injection-mode $(INJECTION_MODE) --injection-rate $(INJECTION_RATE) \
+	            --injection-count $(INJECTION_COUNT) --seed $(SEED) \
+	            $(if $(MAX_UNIQUE_IDS),--max-unique-ids $(MAX_UNIQUE_IDS)) \
+	            $(if $(MAX_OUTSTANDING),--max-outstanding $(MAX_OUTSTANDING)) \
+	            $(if $(R_ROB_DEPTH),--r-rob-depth $(R_ROB_DEPTH)) \
+	            $(if $(MAX_TXNS_PER_ID),--max-txns-per-id $(MAX_TXNS_PER_ID)) \
+	            $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)) \
+	            --burst-len $(BURST_LEN) --stim-size $(STIM_SIZE) --space $(SPACE) \
+	            $(_AI_META_ARGS) \
+	            --require-round-perf || exit 1; \
+	        $(_EMIT_MANIFEST_CMD) || exit 1; \
+	    fi; \
 	    echo "$(if $(_CHECKED),CHECKED,DIRECTED) PASS: $(SIM_TAG) scoreboard clean, non-vacuous"; \
 	fi
 
@@ -458,34 +573,196 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 # Injection Sweep  #
 ####################
 
-# Nine rates, one point per `make sim`, at whatever VC count
-# specgen/source/constants.yaml currently holds. The VC dimension is not swept
-# here -- noc.DAT_NUM_VC is a tracked file, and a sweep would have to edit it
-# mid-run. Four curves is four edits and four sweeps; each run writes its own
-# result.csv and plot_injection_sweep.py globs them.
-# MAX_UNIQUE_IDS and MAX_OUTSTANDING are inherited, not forced. Both are shipped
-# NI parameters, and the figure's subject is the machine as built. The bring-up
-# step measures what other settings would buy, and reports it as a number.
-SWEEP_RATES ?= 0.05 0.1 0.2 0.3 0.4 0.5 0.7 0.85 1.0
+# The sweep axis is offered DAT load per active source per cycle. The CSV also
+# records the mesh-average load after scaling by active_sources / NUM_ENDPOINTS.
+# For legacy read/write patterns it remains DAT flits per node per cycle, the
+# unit the report and the analytic ideal are stated in. At AxLEN 32 one AX per
+# channel per cycle offers 2 * 33 + 1 = 67 flits (a write is 34, a read 33), so
+# the Bernoulli rate per channel is offered / 67 and the retired 0.05 to 1.0
+# rate grid sat entirely above saturation.
+SWEEP_OFFERED  ?= 0.067 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.2
+
+# One curve per pattern per seed. The VC dimension is not swept here --
+# NOC_DAT_NUM_VC lives in specgen/source/constants.yaml, a tracked file, and a
+# sweep would have to edit it mid-run.
+SWEEP_PATTERNS ?= uniform_random
+SWEEP_SEEDS    ?= 1
 
 # INJECTION_MODE=1 selects the continuous run class, whose binary carries the
 # ideal master-face backpressure profile, so the curve measures the fabric and
 # not a consumer that stalls first (tools/gen_tb_top.py's _MST_BACKPRESSURE
 # governs the DMA top only). Same reason _MEM_LATENCY stays "ideal".
-# Generate once, up front: every point in the loop below runs the same
-# configuration, so one generation covers all of them.
+# Stimulus depends on the pattern and the seed, so `gen` runs once per curve.
+# MAX_UNIQUE_IDS and MAX_OUTSTANDING are inherited, not forced. Both are shipped
+# NI parameters, and the figure's subject is the machine as built.
+# INJECTION_COUNT is left at its default: the run length is a stated constant of
+# the method, not a per-point knob.
+# The rate is rounded to basis points, the resolution of the tb's Bernoulli
+# comparison against a 10000-wide draw.
+# PATTERN and SEED are ignored here: SWEEP_PATTERNS and SWEEP_SEEDS are the
+# knobs, because one invocation walks several of each.
+# BURST_LEN is target specific. The global default is 0 (single beat), which
+# would make SWEEP_OFFERED mean 3 flits per AX pair instead of the 67 the grid,
+# the README and the spec are written for. A command line BURST_LEN still wins,
+# and the value is passed to every sub-make explicitly: target specific values
+# do not reach a recursive make on their own.
 .PHONY: sim-injection-sweep
+sim-injection-sweep: BURST_LEN = 32
+# INJECTION_COUNT reaches the sub-makes only when the user set it on the command
+# line. A plain `$(if $(INJECTION_COUNT),...)` is always true, because the ?= at
+# the top of this file already gave it a value, and that value is the mode 0
+# default of 64 (the parent make has no INJECTION_MODE set). Forwarding it would
+# generate 64 transactions while the sim sub-make, which does run under
+# INJECTION_MODE=1, expects the 200 the same ?= gives it.
+_SWEEP_COUNT = $(if $(filter command line,$(origin INJECTION_COUNT)),INJECTION_COUNT=$(INJECTION_COUNT))
 sim-injection-sweep:
-	$(MAKE) gen CONFIG=$(CONFIG) PATTERN=$(PATTERN) SEED=$(SEED) \
-	    INJECTION_MODE=1 $(if $(INJECTION_COUNT),INJECTION_COUNT=$(INJECTION_COUNT))
-	@for r in $(SWEEP_RATES); do \
-	    echo ">>> sweep rate $$r"; \
-	    $(MAKE) sim CONFIG=$(CONFIG) PATTERN=$(PATTERN) SEED=$(SEED) \
-	        INJECTION_MODE=1 INJECTION_RATE=$$r \
-	        $(if $(MAX_UNIQUE_IDS),MAX_UNIQUE_IDS=$(MAX_UNIQUE_IDS)) \
-	        $(if $(MAX_OUTSTANDING),MAX_OUTSTANDING=$(MAX_OUTSTANDING)) || exit 1; \
+	@for p in $(SWEEP_PATTERNS); do \
+	    for s in $(SWEEP_SEEDS); do \
+	        $(MAKE) gen CONFIG=$(CONFIG) PATTERN=$$p SEED=$$s INJECTION_MODE=1 \
+	            BURST_LEN=$(BURST_LEN) $(_SWEEP_COUNT) || exit 1; \
+	        for o in $(SWEEP_OFFERED); do \
+	            if echo " broadcast gather alltoall neighbor_exchange pipeline many_to_many " | grep -q " $$p "; then \
+	                flits_per_event=$$(( $(BURST_LEN) + 2 )); \
+	            else \
+	                flits_per_event=$$(( 2 * ($(BURST_LEN) + 1) + 1 )); \
+	            fi; \
+	            r=$$($(PYTHON3) -c "print('%.4f' % ($$o / $$flits_per_event))"); \
+	            echo ">>> sweep $$p seed $$s offered $$o flits/node/cyc, INJECTION_RATE=$$r"; \
+	            $(MAKE) sim CONFIG=$(CONFIG) PATTERN=$$p SEED=$$s \
+	                INJECTION_MODE=1 INJECTION_RATE=$$r BURST_LEN=$(BURST_LEN) \
+	                $(_SWEEP_COUNT) \
+	                $(if $(MAX_UNIQUE_IDS),MAX_UNIQUE_IDS=$(MAX_UNIQUE_IDS)) \
+	                $(if $(MAX_OUTSTANDING),MAX_OUTSTANDING=$(MAX_OUTSTANDING)) || exit 1; \
+	        done; \
+	    done; \
 	done
-	$(PYTHON3) $(SIM_ROOT)/tools/plot_injection_sweep.py $(PATTERN)
+
+# Closed-loop AI baseline: every performance run uses the approved fixed source
+# and per-ID transaction windows.
+AI_BASELINE_MAPPINGS := broadcast_row broadcast_col broadcast_submesh \
+                        broadcast_global gather_global gather_submesh \
+                        alltoall neighbor_exchange pipeline many_to_many
+.PHONY: sim-outstanding-ai-baseline
+sim-outstanding-ai-baseline:
+	@mkdir -p output
+	@set -e; \
+	for item in $(AI_BASELINE_MAPPINGS); do \
+	    pattern=$$item; mcast=row; gather=global; \
+	    case $$item in \
+	      broadcast_*) pattern=broadcast; mcast=$${item#broadcast_} ;; \
+	      gather_global) pattern=gather; gather=global ;; \
+	      gather_submesh) pattern=gather; gather=submesh ;; \
+	    esac; \
+	    if [ "$$pattern" = "broadcast" ]; then directions="write"; else directions="write read"; fi; \
+	    for direction in $$directions; do \
+	        echo "[baseline] generate $$item $$direction"; \
+	        $(MAKE) --no-print-directory gen CONFIG=$(CONFIG) PATTERN=$$pattern \
+	            MCAST_SHAPE=$$mcast GATHER_SHAPE=$$gather ROOT_NODE=0 \
+	            TRAFFIC_DIRECTION=$$direction AI_ROUNDS=16 INJECTION_MODE=4 \
+	            INJECTION_COUNT=16 STIM_SIZE=6 BURST_LEN=63 SEED=$(SEED) \
+	            >> output/baseline_campaign.log 2>&1; \
+	        echo "[baseline] run $$item $$direction O=32"; \
+	        $(MAKE) --no-print-directory sim CONFIG=$(CONFIG) PATTERN=$$pattern \
+	            MCAST_SHAPE=$$mcast GATHER_SHAPE=$$gather ROOT_NODE=0 \
+	            TRAFFIC_DIRECTION=$$direction AI_ROUNDS=16 INJECTION_MODE=4 \
+	            INJECTION_COUNT=16 SOURCE_OUTSTANDING_DEPTH=32 MAX_TXNS_PER_ID=32 \
+	            STIM_SIZE=6 BURST_LEN=63 SEED=$(SEED) \
+	            OUTPUT_ROOT=output/baseline \
+	            >> output/baseline_campaign.log 2>&1 || { \
+	                tail -80 output/baseline_campaign.log; exit 1; }; \
+	    done; \
+	done
+
+AI_CHARACTERIZATION_MAPPINGS := broadcast_global gather_global alltoall pipeline
+.PHONY: sim-ai-burst-sweep
+sim-ai-burst-sweep:
+	@mkdir -p output/burst
+	@set -e; \
+	for item in $(AI_CHARACTERIZATION_MAPPINGS); do \
+	    pattern=$$item; mcast=global; gather=global; \
+	    if [ "$$item" = "broadcast_global" ]; then pattern=broadcast; directions="write"; \
+	    elif [ "$$item" = "gather_global" ]; then pattern=gather; directions="write read"; \
+	    else directions="write read"; fi; \
+	    for direction in $$directions; do \
+	        for beats in 1 4 16 64; do \
+	            txns=$$((64 / beats)); len=$$((beats - 1)); \
+	            tag=$${item}_$${direction}_bl$${beats}_o32_hardware_s$(SEED); \
+	            $(MAKE) --no-print-directory gen CONFIG=$(CONFIG) PATTERN=$$pattern \
+	                MCAST_SHAPE=$$mcast GATHER_SHAPE=$$gather ROOT_NODE=0 \
+	                TRAFFIC_DIRECTION=$$direction AI_ROUNDS=16 AI_TXNS_PER_FLOW=$$txns \
+	                INJECTION_MODE=4 INJECTION_COUNT=16 STIM_SIZE=6 BURST_LEN=$$len \
+	                SEED=$(SEED) || exit 1; \
+	            $(MAKE) --no-print-directory sim CONFIG=$(CONFIG) PATTERN=$$pattern \
+	                MCAST_SHAPE=$$mcast GATHER_SHAPE=$$gather ROOT_NODE=0 \
+	                TRAFFIC_DIRECTION=$$direction AI_ROUNDS=16 AI_TXNS_PER_FLOW=$$txns \
+	                INJECTION_MODE=4 INJECTION_COUNT=16 SOURCE_OUTSTANDING_DEPTH=32 \
+	                MAX_TXNS_PER_ID=32 STIM_SIZE=6 BURST_LEN=$$len SEED=$(SEED) \
+	                SIM_TAG=$$tag OUTPUT_ROOT=output/burst || exit 1; \
+	        done; \
+	    done; \
+	done
+
+.PHONY: sim-ai-multicast-compare
+sim-ai-multicast-compare:
+	@mkdir -p output/multicast_compare
+	@set -e; \
+	for shape in row col submesh global; do \
+	    for mode in hardware repeated_unicast; do \
+	        tag=broadcast_$${shape}_write_bl64_o32_$${mode}_s$(SEED); \
+	        $(MAKE) --no-print-directory gen CONFIG=$(CONFIG) PATTERN=broadcast \
+	            MCAST_SHAPE=$$shape MULTICAST_MODE=$$mode TRAFFIC_DIRECTION=write \
+	            AI_ROUNDS=16 AI_TXNS_PER_FLOW=1 INJECTION_MODE=4 INJECTION_COUNT=16 \
+	            STIM_SIZE=6 BURST_LEN=63 SEED=$(SEED) || exit 1; \
+	        $(MAKE) --no-print-directory sim CONFIG=$(CONFIG) PATTERN=broadcast \
+	            MCAST_SHAPE=$$shape MULTICAST_MODE=$$mode TRAFFIC_DIRECTION=write \
+	            AI_ROUNDS=16 AI_TXNS_PER_FLOW=1 INJECTION_MODE=4 INJECTION_COUNT=16 \
+	            SOURCE_OUTSTANDING_DEPTH=32 MAX_TXNS_PER_ID=32 STIM_SIZE=6 BURST_LEN=63 \
+	            SEED=$(SEED) SIM_TAG=$$tag OUTPUT_ROOT=output/multicast_compare || exit 1; \
+	    done; \
+	done
+
+.PHONY: sim-ai-rr-rrd
+sim-ai-rr-rrd:
+	@mkdir -p output/rr_vs_rrd
+	@set -e; \
+	for mode in 2 3; do \
+	    mapping=$$(if [ "$$mode" = "2" ]; then echo rr; else echo rrd; fi); \
+	    for direction in write read; do \
+	        tag=pipeline_$${direction}_bl256_o32_$${mapping}_s$(SEED); \
+	        $(MAKE) --no-print-directory channel-compare-run CONFIG=$(CONFIG) \
+	            CHANNEL_MODE=$$mode CHANNEL_CASE=$$direction SEED=$(SEED) \
+	            SIM_TAG=$$tag OUTPUT_ROOT=output/rr_vs_rrd || exit 1; \
+	    done; \
+	done
+
+AI_TRADEOFF_CELLS := broadcast_global_write gather_global_write \
+                     gather_global_read many_to_many_write many_to_many_read
+TRADEOFF_CONFIG_TAG ?=
+.PHONY: sim-outstanding-ai-tradeoff
+sim-outstanding-ai-tradeoff:
+	@[ -n "$(TRADEOFF_CONFIG_TAG)" ] || { echo "ERROR: TRADEOFF_CONFIG_TAG is required"; exit 1; }
+	@mkdir -p output
+	@set -e; \
+	for item in $(AI_TRADEOFF_CELLS); do \
+	    direction=$${item##*_}; mapping=$${item%_*}; pattern=$$mapping; \
+	    if [ "$$mapping" = "broadcast_global" ]; then pattern=broadcast; fi; \
+	    if [ "$$mapping" = "gather_global" ]; then pattern=gather; fi; \
+	    echo "[tradeoff $(TRADEOFF_CONFIG_TAG)] generate $$mapping $$direction"; \
+	    $(MAKE) --no-print-directory gen CONFIG=$(CONFIG) PATTERN=$$pattern \
+	        MCAST_SHAPE=global GATHER_SHAPE=global ROOT_NODE=0 \
+	        TRAFFIC_DIRECTION=$$direction AI_ROUNDS=16 INJECTION_MODE=4 \
+	        INJECTION_COUNT=16 STIM_SIZE=6 BURST_LEN=63 SEED=$(SEED) \
+	        >> output/tradeoff_campaign.log 2>&1; \
+	    echo "[tradeoff $(TRADEOFF_CONFIG_TAG)] run $$mapping $$direction O=32"; \
+	    $(MAKE) --no-print-directory sim CONFIG=$(CONFIG) PATTERN=$$pattern \
+	        MCAST_SHAPE=global GATHER_SHAPE=global ROOT_NODE=0 \
+	        TRAFFIC_DIRECTION=$$direction AI_ROUNDS=16 INJECTION_MODE=4 \
+	        INJECTION_COUNT=16 SOURCE_OUTSTANDING_DEPTH=32 MAX_TXNS_PER_ID=32 \
+	        STIM_SIZE=6 BURST_LEN=63 SEED=$(SEED) \
+	        OUTPUT_ROOT=output/tradeoff/$(TRADEOFF_CONFIG_TAG) \
+	        >> output/tradeoff_campaign.log 2>&1 || { \
+	            tail -80 output/tradeoff_campaign.log; exit 1; }; \
+	done
 
 #################
 # Phony targets #

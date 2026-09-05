@@ -31,7 +31,7 @@ namespace ni::cmodel::nsu {
 
 class VcAllocator : public router::NocRspOut {
   public:
-    static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
+    static constexpr std::size_t NUM_VC_MAX = 1u << ::ni::header::VC_ID_WIDTH;  // 8
     static constexpr std::size_t kDefaultPendingDepth = 4;
 
     VcAllocator(router::NocRspOut& downstream, std::size_t num_vc,
@@ -57,10 +57,10 @@ class VcAllocator : public router::NocRspOut {
     // is_aw/is_ar/is_w comment): both narrow and data class B/R route through
     // this same VC-selection logic.
     static bool is_b(uint8_t axi_ch) {
-        return axi_ch == ni::AXI_CH_NarrowB || axi_ch == ni::AXI_CH_DataB;
+        return axi_ch == ::ni::AXI_CH_NarrowB || axi_ch == ::ni::AXI_CH_DataB;
     }
     static bool is_r(uint8_t axi_ch) {
-        return axi_ch == ni::AXI_CH_NarrowR || axi_ch == ni::AXI_CH_DataR;
+        return axi_ch == ::ni::AXI_CH_NarrowR || axi_ch == ::ni::AXI_CH_DataR;
     }
 
     router::NocRspOut& downstream_;
@@ -104,7 +104,7 @@ inline bool VcAllocator::push_flit(const Flit& flit) {
         // "rid" sits at the same bit offset in NARROW_R and DATA_R (rlast then
         // rid; only rdata's trailing width differs), so reading it via either
         // channel name returns the same bits -- no class branch needed here.
-        static_assert(ni::payload::narrow_r::RID_LSB == ni::payload::data_r::RID_LSB,
+        static_assert(::ni::payload::narrow_r::RID_LSB == ::ni::payload::data_r::RID_LSB,
                       "narrow_r/data_r RID_LSB must match for the class-agnostic read below");
         id = static_cast<uint8_t>(is_b(axi_ch) ? flit.get_payload_field("B", "bid")
                                                : flit.get_payload_field("NARROW_R", "rid"));

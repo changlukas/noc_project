@@ -13,7 +13,7 @@ namespace ni::cmodel::testing {
 // pairing lock -- WormholeArbiter's own comment: "AW=0, W=wlast").
 inline Flit make_data_aw(uint8_t awid, uint8_t dst_id) {
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_DataAw);
+    f.set_header_field("axi_ch", ::ni::AXI_CH_DataAw);
     f.set_header_field("dst_id", dst_id);
     f.set_header_field("flit_tail", 0);
     f.set_payload_field("AW", "awid", awid);
@@ -26,7 +26,7 @@ inline Flit make_data_aw(uint8_t awid, uint8_t dst_id) {
 
 inline Flit make_data_w(uint8_t dst_id) {
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_DataW);
+    f.set_header_field("axi_ch", ::ni::AXI_CH_DataW);
     f.set_header_field("dst_id", dst_id);
     f.set_header_field("flit_tail", 1);  // wlast closes the wormhole packet
     f.set_payload_field("DATA_W", "wlast", 1);
@@ -36,7 +36,7 @@ inline Flit make_data_w(uint8_t dst_id) {
 
 inline Flit make_data_r(uint8_t rid, uint8_t src_id, uint8_t dst_id) {
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_DataR);
+    f.set_header_field("axi_ch", ::ni::AXI_CH_DataR);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", dst_id);
     f.set_header_field("vc_id", 0);

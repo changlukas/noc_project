@@ -1,5 +1,5 @@
 #pragma once
-#include "ni_flit_constants.h"  // ni::width::X_WIDTH / Y_WIDTH (DST_ID composition)
+#include "ni_flit_constants.h"  // ::ni::width::X_WIDTH / Y_WIDTH (DST_ID composition)
 #include "axi/types.hpp"        // axi::Burst (used by burst_last_byte)
 #include "ni/address_map.hpp"   // BitRange / SpaceCoords / clog2 / range_mask
 #include <algorithm>            // std::max / std::min
@@ -110,7 +110,7 @@ class SamTable {
             const bool is_config = t.cls == axi::AxiClass::Narrow;
             const uint64_t base =
                 (uint64_t{(t.y << x_bits) | t.x}) * block_size + (is_config ? config_offset : 0);
-            es.push_back({base, t.size, static_cast<uint8_t>((t.y << ni::width::X_WIDTH) | t.x),
+            es.push_back({base, t.size, static_cast<uint8_t>((t.y << ::ni::width::X_WIDTH) | t.x),
                           t.cls, /*port=*/0, t.space});
         }
         // A tile base is ((y << x_bits) | x) * block_size with x_bits =
@@ -125,7 +125,7 @@ class SamTable {
             assert(p.size != 0 && (p.size & (p.size - 1)) == 0 &&
                    "SAM: peripheral region size must be a non-zero power of two");
             next = (next + p.size - 1) & ~(p.size - 1);  // align up to its own size
-            es.push_back({next, p.size, static_cast<uint8_t>((p.y << ni::width::X_WIDTH) | p.x),
+            es.push_back({next, p.size, static_cast<uint8_t>((p.y << ::ni::width::X_WIDTH) | p.x),
                           axi::AxiClass::Data, p.port, axi::Space::Peripheral});
             next += p.size;
         }
@@ -187,8 +187,8 @@ class SamTable {
             assert((e.base % k4k == 0) && (e.size % k4k == 0) &&
                    "SAM: base and size must be 4 KB aligned");
             assert(e.base + e.size > e.base && "SAM: base+size overflow");
-            unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
-            unsigned y = e.dst_id >> ni::width::X_WIDTH;
+            unsigned x = e.dst_id & ((1u << ::ni::width::X_WIDTH) - 1);
+            unsigned y = e.dst_id >> ::ni::width::X_WIDTH;
             assert(x < x_dim && y < y_dim && "SAM: dst outside mesh");
             // cls is derivable from space and both are stored, so a hand-built
             // table can disagree with itself: the map keys on space while
@@ -205,8 +205,8 @@ class SamTable {
             // region sits at a coordinate its router's tile already covers, so
             // it is neither a duplicate of that tile nor part of any count.
             if (e.space != axi::Space::Memory && e.space != axi::Space::Config) continue;
-            unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
-            unsigned y = e.dst_id >> ni::width::X_WIDTH;
+            unsigned x = e.dst_id & ((1u << ::ni::width::X_WIDTH) - 1);
+            unsigned y = e.dst_id >> ::ni::width::X_WIDTH;
             std::size_t idx = static_cast<std::size_t>(y) * x_dim + x;
             const bool is_memory = e.space == axi::Space::Memory;
             std::vector<bool>& seen = is_memory ? seen_memory : seen_config;
@@ -257,8 +257,8 @@ class SamTable {
         std::size_t tile_entries = 0;
         for (const auto& e : entries_) {
             if (e.space != space) continue;
-            const unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
-            const unsigned y = e.dst_id >> ni::width::X_WIDTH;
+            const unsigned x = e.dst_id & ((1u << ::ni::width::X_WIDTH) - 1);
+            const unsigned y = e.dst_id >> ::ni::width::X_WIDTH;
             if (x == 0 && y == 0) origin = &e;
             if (x >= c.x_count || y >= c.y_count) continue;
             ++tile_entries;
@@ -286,7 +286,7 @@ class SamTable {
                 if (e == nullptr || e->space != space) return false;  // reachable, one space
                 if (e->base != addr) return false;                    // uniform stride
                 if (e->size != origin->size) return false;            // uniform aperture
-                if (e->dst_id != ((y << ni::width::X_WIDTH) | x)) return false;  // raster order
+                if (e->dst_id != ((y << ::ni::width::X_WIDTH) | x)) return false;  // raster order
             }
         }
         coords_[slot] = c;
@@ -451,11 +451,11 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b, u
     // The uint8_t return IS the flit's collective_mask, so the node id this
     // function reasons about and the header field it fills must stay the same
     // width. Same guard route_mask.hpp:43-46 puts on the consumer side.
-    static_assert(ni::width::X_WIDTH + ni::width::Y_WIDTH == ni::width::COLLECTIVE_MASK_WIDTH,
+    static_assert(::ni::width::X_WIDTH + ::ni::width::Y_WIDTH == ::ni::width::COLLECTIVE_MASK_WIDTH,
                   "collective_mask must be one node id wide (X|Y) -- specgen drift");
-    static_assert(ni::width::X_WIDTH + ni::width::Y_WIDTH <= 8,
+    static_assert(::ni::width::X_WIDTH + ::ni::width::Y_WIDTH <= 8,
                   "node id / collective_mask no longer fit uint8_t");
-    return static_cast<uint8_t>((mask_y << ni::width::X_WIDTH) | mask_x);
+    return static_cast<uint8_t>((mask_y << ::ni::width::X_WIDTH) | mask_x);
 }
 
 }  // namespace ni::cmodel::nmu::addr_trans

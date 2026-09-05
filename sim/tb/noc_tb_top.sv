@@ -160,15 +160,16 @@ module noc_tb_top #(
     localparam int unsigned K_CYC_PER_BEAT  = FABRIC_CYC_PER_BEAT + MEM_CYC_PER_BEAT
                                             + MST_CYC_PER_BEAT;
     localparam int unsigned MAX_BURST_BEATS = int'(REGION_BYTES) / (DATA_WIDTH / 8);
-    int unsigned tb_num_reads  = 8;   // mirror endpoint defaults
-    int unsigned tb_num_writes = 8;
     import "DPI-C" context function void cmodel_dump_fabric_state();
     initial begin
         int unsigned timeout_cycles;
-        void'($value$plusargs("num_reads=%d",  tb_num_reads));
-        void'($value$plusargs("num_writes=%d", tb_num_writes));
+        int unsigned expected_total;
+        @(posedge rst_ni);
+        expected_total = 0;
+        for (int i = 0; i < NUM_ENDPOINTS; i++)
+            expected_total += expected_txn_cnt[i];
         timeout_cycles = TIMEOUT_BASE
-            + K_CYC_PER_BEAT * (tb_num_reads + tb_num_writes) * MAX_BURST_BEATS * NUM_ENDPOINTS;
+            + K_CYC_PER_BEAT * expected_total * MAX_BURST_BEATS;
         // Forensics override: fire the watchdog just past a known freeze
         // point so the state dump lands without waiting out the formula.
         void'($value$plusargs("timeout_cycles=%d", timeout_cycles));
@@ -217,12 +218,20 @@ module noc_tb_top #(
                                                                  input int max_txns_per_id,
                                                                  input int port_id,
                                                                  input string config_path);
+    import "DPI-C" context function void cmodel_nmu_set_channel_mode(input longint unsigned ctx,
+                                                                        input int mode);
     import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name,
                                                               input int src_id, input int num_vc,
                                                               input int max_unique_ids,
                                                               input int max_outstanding,
                                                               input int port_id,
                                                               input string config_path);
+    import "DPI-C" context function void cmodel_nsu_set_channel_mode(input longint unsigned ctx,
+                                                                        input int mode);
+    import "DPI-C" context function void cmodel_nsu_meta_buffer_hwm(
+                                                                 input longint unsigned ctx,
+                                                                 output int unsigned write_hwm,
+                                                                 output int unsigned read_hwm);
     import "DPI-C" context function longint unsigned cmodel_dat_merge_create(input string name,
                                                                     input int dat_num_vc);
 
@@ -246,18 +255,27 @@ module noc_tb_top #(
     int unsigned r_rob_depth = ni_params_pkg::NMU_ROB_R_DEPTH_DFLT;
     // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId).
     int unsigned max_txns_per_id = ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT;
+    int unsigned channel_mode = 0;
+    int unsigned injection_mode = 0;
+    string traffic_direction = "write";
 
     initial begin
         cmodel_init();
+        void'($value$plusargs("channel_mode=%d", channel_mode));
+        void'($value$plusargs("injection_mode=%d", injection_mode));
+        void'($value$plusargs("traffic_direction=%s", traffic_direction));
+        if (channel_mode != 0 && channel_mode != 2 && channel_mode != 3)
+            $fatal(1, "noc_tb_top: channel_mode must be 0, 2 or 3");
         void'($value$plusargs("sam_config=%s", sam_config_path));
         void'($value$plusargs("max_unique_ids=%d", max_unique_ids));
         void'($value$plusargs("max_outstanding=%d", max_outstanding));
         // dat_num_vc is printed rather than derived by the reader: it comes from
         // specgen/source/constants.yaml and no longer appears in the config name,
         // so the log is the only place it is bound to the run that used it.
-        $display("[Config] max_unique_ids=%0d max_outstanding=%0d dat_num_vc=%0d router_vc_depth=%0d mst_stall_random=%0d",
+        $display("[Config] max_unique_ids=%0d max_outstanding=%0d dat_num_vc=%0d router_vc_depth=%0d mst_stall_random=%0d ni_dat_rx_vc_depth=%0d",
                  max_unique_ids, max_outstanding, DAT_NUM_VC,
-                 ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT, MST_STALL_RANDOM_OUTPUT);
+                 ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT, MST_STALL_RANDOM_OUTPUT,
+                 ni_params_pkg::NOC_NI_DAT_RX_VC_DEPTH_DFLT);
         void'($value$plusargs("b_rob_depth=%d", b_rob_depth));
         void'($value$plusargs("r_rob_depth=%d", r_rob_depth));
         void'($value$plusargs("max_txns_per_id=%d", max_txns_per_id));
@@ -283,6 +301,8 @@ module noc_tb_top #(
             nsu_ctx[e] = cmodel_nsu_create($sformatf("nsu_%0d", e), src_id, int'(DAT_NUM_VC),
                                            max_unique_ids, max_outstanding, port_id,
                                            sam_config_path);
+            cmodel_nmu_set_channel_mode(nmu_ctx[e], channel_mode);
+            cmodel_nsu_set_channel_mode(nsu_ctx[e], channel_mode);
             dat_merge_ctx[e] = cmodel_dat_merge_create($sformatf("dat_merge_%0d", e),
                                                        int'(DAT_NUM_VC));
         end
@@ -310,7 +330,7 @@ module noc_tb_top #(
         .PERIPH_NODE(PERIPH_NODE),
         .PERIPH_PORT(PERIPH_PORT)
     ) u_fabric (
-        .clk_i(clk_i), .rst_ni(rst_ni),
+        .clk_i(clk_i), .rst_ni(rst_ni), .measure_en(perf_measure_en),
         .router_ctx(router_ctx), .nmu_ctx(nmu_ctx), .nsu_ctx(nsu_ctx),
         .dat_merge_ctx(dat_merge_ctx),
         .master_axi_req(master_axi_req), .master_awuser(master_awuser),
@@ -327,6 +347,51 @@ module noc_tb_top #(
     // -------------------------------------------------------------------------
     logic        end_of_sim [NUM_ENDPOINTS];
     int unsigned txn_cnt    [NUM_ENDPOINTS];
+    int unsigned expected_txn_cnt [NUM_ENDPOINTS];
+    int unsigned expected_write_cnt [NUM_ENDPOINTS];
+    longint unsigned stimulus_start_cycle [NUM_ENDPOINTS];
+    longint unsigned stimulus_done_cycle [NUM_ENDPOINTS];
+    logic        compare_ready [NUM_ENDPOINTS];
+    logic        compare_start;
+    logic        compare_finish;
+    logic        compare_work_done [NUM_ENDPOINTS];
+    logic        compare_done [NUM_ENDPOINTS];
+    logic        compare_background [NUM_ENDPOINTS];
+    logic        source_done [NUM_ENDPOINTS];
+    logic        mode3_start = 1'b0;
+    logic        mode4_start = 1'b0;
+    logic        all_barrier_ready;
+    logic        any_active_source;
+    logic        all_active_sources_done;
+    logic        all_compare_work_done;
+    logic        all_compare_done;
+    longint unsigned compare_barrier_cycle = 0;
+    always_comb begin
+        all_barrier_ready = 1'b1;
+        any_active_source = 1'b0;
+        all_active_sources_done = 1'b1;
+        all_compare_work_done = 1'b1;
+        all_compare_done = 1'b1;
+        for (int i = 0; i < NUM_ENDPOINTS; i++) begin
+            all_barrier_ready &= compare_ready[i];
+            all_compare_work_done &= compare_work_done[i];
+            all_compare_done &= compare_done[i];
+            if (expected_txn_cnt[i] > 0) begin
+                any_active_source = 1'b1;
+                all_active_sources_done &= source_done[i];
+            end
+        end
+        compare_start = injection_mode == 3 ? mode3_start : mode4_start;
+        compare_finish = injection_mode == 3 && all_compare_work_done;
+    end
+
+    always @(posedge compare_finish) begin
+        if (rst_ni && injection_mode == 3) begin
+            compare_barrier_cycle = live_cyc;
+            $display("[ChannelCompareBarrier] release_cycle=%0d",
+                     compare_barrier_cycle);
+        end
+    end
     for (genvar i = 0; i < NUM_ENDPOINTS; i++) begin : g_endpoint
         user_node_endpoint #(
             .NODE_ID(i),
@@ -346,7 +411,15 @@ module noc_tb_top #(
             .master_axi_req_o(master_axi_req[i]), .master_awuser_o(master_awuser[i]),
             .master_axi_rsp_i(master_axi_rsp[i]),
             .slave_axi_req_i(slave_axi_req[i]),   .slave_axi_rsp_o(slave_axi_rsp[i]),
-            .end_of_sim_o(end_of_sim[i]), .txn_cnt_o(txn_cnt[i])
+            .end_of_sim_o(end_of_sim[i]), .txn_cnt_o(txn_cnt[i]),
+            .expected_txn_cnt_o(expected_txn_cnt[i]),
+            .expected_write_cnt_o(expected_write_cnt[i]),
+            .stimulus_start_cycle_o(stimulus_start_cycle[i]),
+            .stimulus_done_cycle_o(stimulus_done_cycle[i]),
+            .compare_ready_o(compare_ready[i]), .compare_start_i(compare_start),
+            .compare_finish_i(compare_finish), .compare_work_done_o(compare_work_done[i]),
+            .compare_done_o(compare_done[i]),
+            .compare_background_o(compare_background[i]), .source_done_o(source_done[i])
         );
     end : g_endpoint
 
@@ -357,10 +430,18 @@ module noc_tb_top #(
     import "DPI-C" context function void cmodel_perf_set_run(input string scenario,
                                                              input longint total_cyc);
     import "DPI-C" context function void cmodel_perf_dump(input string path);
+    import "DPI-C" context function void cmodel_perf_begin(input longint start_cyc);
+    import "DPI-C" context function void cmodel_perf_end(input longint end_cyc);
 
     string        perf_out_path = "perf.json";
     string        perf_scn      = "";
     int unsigned  perf_cycle    = 0;
+    logic         perf_measure_en = 1'b0;
+    logic         mode4_ended = 1'b0;
+    logic         mode3_started = 1'b0;
+    logic         mode3_ended = 1'b0;
+    longint unsigned measurement_start_cycle = 0;
+    longint unsigned measurement_end_cycle = 0;
     initial begin
         void'($value$plusargs("perf_out=%s", perf_out_path));
         void'($value$plusargs("perf_scenario=%s", perf_scn));
@@ -368,6 +449,49 @@ module noc_tb_top #(
     always @(posedge clk_i) begin
         cmodel_perf_sample_tick();
         perf_cycle = perf_cycle + 1;
+    end
+
+    always @(posedge clk_i) begin
+        if (!rst_ni) begin
+            perf_measure_en <= 1'b0;
+            mode3_start <= 1'b0;
+            mode4_start <= 1'b0;
+            mode4_ended <= 1'b0;
+            mode3_started <= 1'b0;
+            mode3_ended <= 1'b0;
+        end else if (injection_mode == 3 && !mode3_started && all_barrier_ready) begin
+            measurement_start_cycle = live_cyc + 1;
+            cmodel_perf_begin(longint'(measurement_start_cycle));
+            perf_measure_en <= 1'b1;
+            mode3_start <= 1'b1;
+            mode3_started <= 1'b1;
+        end else if (injection_mode == 3 && mode3_started && !mode3_ended &&
+                     all_compare_done) begin
+            measurement_end_cycle = 0;
+            for (int i = 0; i < NUM_ENDPOINTS; i++) begin
+                if (compare_background[i] &&
+                    stimulus_done_cycle[i] > measurement_end_cycle)
+                    measurement_end_cycle = stimulus_done_cycle[i];
+            end
+            perf_measure_en <= 1'b0;
+            mode3_ended <= 1'b1;
+            #1ps cmodel_perf_end(longint'(measurement_end_cycle));
+        end else if (injection_mode != 3 && injection_mode != 4 && !perf_measure_en) begin
+            cmodel_perf_begin(0);
+            perf_measure_en <= 1'b1;
+        end else if (injection_mode == 4 && !mode4_start && all_barrier_ready && any_active_source) begin
+            measurement_start_cycle = live_cyc + 1;
+            cmodel_perf_begin(longint'(measurement_start_cycle));
+            perf_measure_en <= 1'b1;
+            mode4_start <= 1'b1;
+        end else if (injection_mode == 4 && !mode4_ended && all_active_sources_done) begin
+            measurement_end_cycle = live_cyc;
+            perf_measure_en <= 1'b0;
+            mode4_ended <= 1'b1;
+            #1ps cmodel_perf_end(longint'(measurement_end_cycle));
+            $display("[MeasurementWindow] start_cycle=%0d completion_cycle=%0d",
+                     measurement_start_cycle, measurement_end_cycle);
+        end
     end
 
     final begin
@@ -393,28 +517,125 @@ module noc_tb_top #(
     // Exit logic - non-vacuous PASS guard
     // -------------------------------------------------------------------------
     localparam int unsigned SETTLE_CYCLES = 100;
+    bit round_perf = 1'b0;
+    initial void'($value$plusargs("round_perf=%d", round_perf));
     initial begin
         bit vacuous;
         bit all_done;
+        int unsigned expected_total;
+        int unsigned active_sources;
+        int unsigned write_bursts;
+        longint unsigned round_start;
+        longint unsigned round_completion;
         int unsigned aw_idle, aw_same, aw_alloc, ar_idle, ar_same, ar_alloc;
         int unsigned list_hwm, wtxn_hwm, rtxn_hwm;
+        int unsigned nsu_write_hwm, nsu_read_hwm;
+        int unsigned background_nodes;
+        bit all_completion_at_barrier;
         // clock-polled (not wait()): end_of_sim is driven through port
         // aliases; Verilator --timing wait() on it does not wake reliably.
         do begin
             @(posedge clk_i);
             all_done = rst_ni;
             for (int i = 0; i < NUM_ENDPOINTS; i++)
-                all_done &= end_of_sim[i];  // scoreboard is in-endpoint
+                all_done &= injection_mode == 3 ? compare_done[i] : end_of_sim[i];
         end while (!all_done);
+        if (injection_mode == 4 && !mode4_ended)
+            $fatal(1, "tb_top: Mode 4 completed without closing the measurement window");
+        if (injection_mode == 3) begin
+            background_nodes = 0;
+            round_completion = 0;
+            all_completion_at_barrier = stimulus_done_cycle[0] == compare_barrier_cycle;
+            for (int i = 0; i < NUM_ENDPOINTS; i++) begin
+                if (compare_background[i]) begin
+                    background_nodes++;
+                    if (stimulus_start_cycle[i] == 0 ||
+                        stimulus_start_cycle[0] == 0 ||
+                        stimulus_done_cycle[i] < stimulus_start_cycle[i] ||
+                        stimulus_start_cycle[i] > stimulus_start_cycle[0] ||
+                        stimulus_done_cycle[i] < stimulus_done_cycle[0])
+                        $fatal(1, "tb_top: background node%0d interval does not contain Control", i);
+                    if (stimulus_done_cycle[i] > round_completion)
+                        round_completion = stimulus_done_cycle[i];
+                    all_completion_at_barrier &=
+                        stimulus_done_cycle[i] == compare_barrier_cycle;
+                end
+            end
+            if (background_nodes == 0)
+                $fatal(1, "tb_top: channel comparison has no Pipeline background");
+            if (compare_barrier_cycle < round_completion || all_completion_at_barrier)
+                $fatal(1, "tb_top: lifetime barrier replaced an actual ChannelCompare completion");
+            $display("[ChannelCompareOverlap] control_node=0 background_nodes=%0d status=PASS",
+                     background_nodes);
+        end
+        if (injection_mode == 4) begin
+            round_completion = 0;
+            for (int i = 0; i < NUM_ENDPOINTS; i++) begin
+                if (expected_txn_cnt[i] > 0) begin
+                    if (stimulus_start_cycle[i] != measurement_start_cycle)
+                        $fatal(1, "tb_top: Mode 4 sources did not start together");
+                    if (stimulus_done_cycle[i] > round_completion)
+                        round_completion = stimulus_done_cycle[i];
+                end
+            end
+            if (measurement_end_cycle != round_completion)
+                $fatal(1, "tb_top: Mode 4 measurement window missed final completion");
+        end
         repeat (SETTLE_CYCLES) @(posedge clk_i);
         vacuous = 1'b0;
+        expected_total = 0;
         for (int i = 0; i < NUM_ENDPOINTS; i++) begin
-            if (txn_cnt[i] == 0) begin
+            expected_total += expected_txn_cnt[i];
+            if (expected_txn_cnt[i] > 0 && txn_cnt[i] == 0) begin
                 vacuous = 1'b1;
-                $display("FAIL: node%0d completed zero transactions (vacuous)", i);
+                $display("FAIL: node%0d completed zero of %0d loaded transactions",
+                         i, expected_txn_cnt[i]);
             end
         end
+        if (expected_total == 0) $fatal(1, "tb_top: empty stimulus");
         if (vacuous) $fatal(1, "tb_top: vacuous run");
+        active_sources = 0;
+        write_bursts = 0;
+        if (injection_mode == 4) begin
+            for (int i = 0; i < NUM_ENDPOINTS; i++) begin
+                if (expected_txn_cnt[i] > 0) active_sources++;
+                write_bursts += expected_txn_cnt[i];
+            end
+        end else begin
+            for (int i = 0; i < NUM_ENDPOINTS; i++) begin
+                if (expected_write_cnt[i] > 0) active_sources++;
+                write_bursts += expected_write_cnt[i];
+            end
+        end
+        if (injection_mode == 4)
+            $display("[TrafficMeta] direction=%s axi_initiators=%0d source_requests=%0d",
+                     traffic_direction, active_sources, write_bursts);
+        else
+            $display("[TrafficMeta] active_sources=%0d write_bursts=%0d",
+                     active_sources, write_bursts);
+        if (round_perf) begin
+            if (injection_mode != 0)
+                $fatal(1, "RoundPerf requires injection_mode=0");
+            round_start = 0;
+            round_completion = 0;
+            active_sources = 0;
+            for (int i = 0; i < NUM_ENDPOINTS; i++) begin
+                if (expected_txn_cnt[i] > 0) begin
+                    if (expected_txn_cnt[i] != expected_write_cnt[i])
+                        $fatal(1, "RoundPerf requires write-only stimulus at node%0d", i);
+                    if (active_sources == 0)
+                        round_start = stimulus_start_cycle[i];
+                    else if (stimulus_start_cycle[i] != round_start)
+                        $fatal(1, "RoundPerf sources did not start together");
+                    if (stimulus_done_cycle[i] > round_completion)
+                        round_completion = stimulus_done_cycle[i];
+                    active_sources++;
+                end
+            end
+            $display("[RoundPerf] start_cycle=%0d completion_cycle=%0d round_cycles=%0d active_sources=%0d write_bursts=%0d",
+                     round_start, round_completion, round_completion - round_start,
+                     active_sources, write_bursts);
+        end
         // Sizing statistics per node: RoB slot peak, the SPEC 17 admission
         // clause split, the per-id order-list peak and the shared-pool peaks.
         for (int i = 0; i < NUM_ENDPOINTS; i++) begin
@@ -425,6 +646,9 @@ module noc_tb_top #(
                      i, cmodel_nmu_read_slot_hwm(nmu_ctx[i]),
                      list_hwm, wtxn_hwm, rtxn_hwm,
                      aw_idle, aw_same, aw_alloc, ar_idle, ar_same, ar_alloc);
+            cmodel_nsu_meta_buffer_hwm(nsu_ctx[i], nsu_write_hwm, nsu_read_hwm);
+            $display("[NSU_HWM] node=%0d write_meta_hwm=%0d read_meta_hwm=%0d",
+                     i, nsu_write_hwm, nsu_read_hwm);
         end
         $display("PASS: all %0d nodes done, non-vacuous", NUM_ENDPOINTS);
         $finish(0);

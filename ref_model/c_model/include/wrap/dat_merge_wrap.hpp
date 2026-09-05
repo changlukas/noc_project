@@ -6,9 +6,9 @@
 //
 // Spec §4.3: a port is one physical rx/tx pair. REQ/RSP each have exactly one
 // producer and one consumer at LOCAL (NMU produces/NSU consumes REQ; NSU
-// produces/NMU consumes RSP) -- no sharing. DAT does not: DataAw/DataW
-// originate at NMU and are consumed at NSU (REQ-shaped), while DataR
-// originates at NSU and is consumed at NMU (RSP-shaped) -- both riding the
+// produces/NMU consumes RSP) -- no sharing. Native DAT carries DataAw/DataW
+// toward NSU and DataR toward NMU; ThreeChannel64 adds DataAr toward NSU and
+// DataB toward NMU. Both directions share the
 // SAME physical dat_router_ LOCAL port (stage design §7: "dat_router_ is the
 // existing credit Router"). This wrap is the mux (egress: NMU+NSU -> router)
 // and demux (ingress: router -> NMU/NSU by axi_ch) that makes that sharing
@@ -25,12 +25,12 @@
 // the existing translated floo_wormhole_arbiter port (ni/wormhole_arbiter.hpp)
 // -- NOT a new arbiter. No ChannelPairing: NMU's own dat_wormhole_arbiter_
 // already pairs DataAw with its DataW (the chimney's SelAw/SelW-muxed
-// WideAw/W stream) and NSU's DataR is single-flit. The NMU input is NOT one
+// WideAw/W stream) and NSU's DataB/DataR responses are single-flit. The NMU input is NOT one
 // worm-locked stream, though: nmu::VcAllocator's cross-VC round-robin drain
 // legally interleaves worms ACROSS VCs (each VC's stream stays contiguous),
 // which is exactly why the arbiter's locking is per VC -- a stream-level
 // lock here once let one worm's tail release another VC's mid-flight worm
-// and admit NSU's DataR into its beat stream (2026-08-21). ONE shared credit pool
+// and admit an NSU DataB/DataR response into its beat stream (2026-08-21). ONE shared credit pool
 // downstream of the arbiter (DatMergeDownstream, term_ below), sized to the
 // DAT router's real LOCAL input depth (NOC_ROUTER_VC_DEPTH) -- replaces NMU's
 // and NSU's previous independent full-depth pools (the inconsistency the
@@ -42,12 +42,12 @@
 // per-input pending depth, not the router's).
 //
 // Ingress demux (router -> NMU/NSU): unbuffered, same-cycle pass-through --
-// axi_ch selects the destination (DataR -> NMU, DataAw/DataW -> NSU) --
+// axi_ch selects the destination (DataB/DataR -> NMU, DataAw/DataW/DataAr -> NSU) --
 // mirroring the chimney's RX unpack (:1433-1440). Credit-return to the router
 // is split by destination, because the two sides have different ingress
-// capacity. NMU's DataR ingress queue is unbounded and always accepts (see
-// nmu_wrap.hpp), so its credit returns immediately at demux. NSU's DataAw/
-// DataW ingress is one BOUNDED queue per DAT VC (depth NOC_NI_DAT_RX_VC_DEPTH,
+// capacity. NMU's DataB/DataR ingress queue is unbounded and always accepts
+// (see nmu_wrap.hpp), so its credit returns immediately at demux. NSU's
+// DataAw/DataW/DataAr ingress is one BOUNDED queue per DAT VC (depth NOC_NI_DAT_RX_VC_DEPTH,
 // nsu_standalone.hpp), so its credit is the NSU's own consume pulse
 // (nsu_wrap rx_dat_crdvalid_o, DatMergeInputs::nsu_rx_dat_crdvalid) forwarded
 // on -- returning it at demux instead would leave that queue with no
@@ -61,7 +61,7 @@
 #include "ni/wormhole_arbiter.hpp"
 #include "router/req_out.hpp"
 #include "router/router_adapters.hpp"  // router::LinkCreditOut
-#include "ni_flit_constants.h"         // ni::AXI_CH_DataR
+#include "ni_flit_constants.h"         // ::ni::AXI_CH_DataB, ::ni::AXI_CH_DataR
 #include "ni_params.h"                 // NOC_ROUTER_VC_DEPTH, {NMU,NSU}_ARBITER_FIFO_DEPTH
 #include <algorithm>
 #include <deque>
@@ -103,16 +103,16 @@ struct DatMergeDownstream : router::NocReqOut {
 }  // namespace detail
 
 struct DatMergeInputs {
-    // From NMU (DataAw/DataW producer): its egress push, and our credit-return
+    // From NMU (DataAw/DataW/DataAr producer): its egress push, and our credit-return
     // pulses it forwards back are NOT here (those are OUR output).
     bool nmu_tx_dat_valid;
     FlitBytes nmu_tx_dat_flit;
-    // From NSU (DataR producer): its egress push.
+    // From NSU (DataB/DataR producer): its egress push.
     bool nsu_tx_dat_valid;
     FlitBytes nsu_tx_dat_flit;
     // From the router: credit-return for our egress sends (replenishes term_).
     VcCreditVec tx_dat_crdvalid;
-    // From NSU: credit pulses for DataAw/DataW flits it consumed from its
+    // From NSU: credit pulses for DataAw/DataW/DataAr flits consumed from its
     // per-VC ingress queues (nsu_wrap rx_dat_crdvalid_o).
     VcCreditVec nsu_rx_dat_crdvalid;
     // From the router: its ejected LOCAL flit (to demux toward NMU/NSU).
@@ -123,12 +123,12 @@ struct DatMergeInputs {
 struct DatMergeOutputs {
     // To NMU: credit-return for its egress sends into wormhole input(0).
     VcCreditVec nmu_tx_dat_crdvalid;
-    // To NMU: demuxed DataR ingress.
+    // To NMU: demuxed DataB/DataR ingress.
     bool nmu_rx_dat_valid;
     FlitBytes nmu_rx_dat_flit;
     // To NSU: credit-return for its egress sends into wormhole input(1).
     VcCreditVec nsu_tx_dat_crdvalid;
-    // To NSU: demuxed DataAw/DataW ingress.
+    // To NSU: demuxed DataAw/DataW/DataAr ingress.
     bool nsu_rx_dat_valid;
     FlitBytes nsu_rx_dat_flit;
     // To the router: our egress send (drained from the shared pool term_).
@@ -210,11 +210,12 @@ class DatMergeWrap {
 
         // Ingress demux (router -> NMU/NSU), unbuffered same-cycle
         // pass-through; credit-return is split by destination -- immediate for
-        // NMU-bound DataR, the NSU's own consume pulse for NSU-bound DataAw/
-        // DataW -- see class comment.
+        // NMU-bound DataB/DataR, the NSU's own consume pulse for NSU-bound
+        // DataAw/DataW/DataAr -- see class comment.
         if (in_.rx_dat_valid) {
             const Flit f = flit_from_bytes(in_.rx_dat_flit);
-            if (f.get_header_field("axi_ch") == ni::AXI_CH_DataR) {
+            const auto ch = f.get_header_field("axi_ch");
+            if (ch == ::ni::AXI_CH_DataB || ch == ::ni::AXI_CH_DataR) {
                 out_.nmu_rx_dat_valid = true;
                 out_.nmu_rx_dat_flit = in_.rx_dat_flit;
                 rx_credit_->receive_credit(static_cast<uint8_t>(f.get_header_field("vc_id")));

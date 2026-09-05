@@ -51,7 +51,7 @@ namespace ni::cmodel::nmu {
 
 class VcAllocator : public router::NocReqOut {
   public:
-    static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
+    static constexpr std::size_t NUM_VC_MAX = 1u << ::ni::header::VC_ID_WIDTH;  // 8
     static constexpr std::size_t kDefaultPendingDepth = 4;
 
     VcAllocator(router::NocReqOut& downstream, std::size_t num_vc,
@@ -79,13 +79,13 @@ class VcAllocator : public router::NocReqOut {
     // classes onto the shared REQ/RSP link is S2's interim shape; S3a splits
     // this). Every axi_ch comparison below must accept both encodings.
     static bool is_aw(uint8_t axi_ch) {
-        return axi_ch == ni::AXI_CH_NarrowAw || axi_ch == ni::AXI_CH_DataAw;
+        return axi_ch == ::ni::AXI_CH_NarrowAw || axi_ch == ::ni::AXI_CH_DataAw;
     }
     static bool is_ar(uint8_t axi_ch) {
-        return axi_ch == ni::AXI_CH_NarrowAr || axi_ch == ni::AXI_CH_DataAr;
+        return axi_ch == ::ni::AXI_CH_NarrowAr || axi_ch == ::ni::AXI_CH_DataAr;
     }
     static bool is_w(uint8_t axi_ch) {
-        return axi_ch == ni::AXI_CH_NarrowW || axi_ch == ni::AXI_CH_DataW;
+        return axi_ch == ::ni::AXI_CH_NarrowW || axi_ch == ::ni::AXI_CH_DataW;
     }
 
     router::NocReqOut& downstream_;
@@ -184,7 +184,7 @@ inline bool VcAllocator::push_flit(const Flit& flit) {
         // wlast sits at bit 0 of both NARROW_W and DATA_W (same relative
         // position in both channel layouts), so reading it via either
         // channel name returns the same bit -- no class branch needed here.
-        static_assert(ni::payload::narrow_w::WLAST_LSB == ni::payload::data_w::WLAST_LSB,
+        static_assert(::ni::payload::narrow_w::WLAST_LSB == ::ni::payload::data_w::WLAST_LSB,
                       "narrow_w/data_w WLAST_LSB must match for the class-agnostic read below");
         if (flit.get_payload_field("NARROW_W", "wlast") != 0) {
             current_aw_vc_.reset();
