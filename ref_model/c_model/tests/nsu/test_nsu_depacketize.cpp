@@ -2,6 +2,7 @@
 #include "nsu/meta_buffer.hpp"
 #include "common/channel_model.hpp"
 #include "axi/types.hpp"
+#include "ni/channel_mode.hpp"
 #include <array>
 #include <gtest/gtest.h>
 
@@ -290,19 +291,20 @@ TEST(NsuDepacketize, DemuxMixedAwWAr) {
 // own burst; the AXI side sees A's beats, then B's, never mixed.
 TEST(NsuDepacketize, InterleavedDataWormsReassemblePerVc) {
     ChannelModel noc(16, 16);
+    ChannelModel dat_noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, axi::NOC_ID_SPACE, ni::cmodel::router::null_req_in(), 0, {},
-                      0, /*dat_num_vc=*/2);
+    Depacketize depkt(noc.req_in(), mb, axi::NOC_ID_SPACE, dat_noc.req_in(), 0, {}, 0,
+                      /*dat_num_vc=*/2);
     auto aw_a = make_aw_flit(0x01, 0x0, 0x10, 0, 0, ni::AXI_CH_DataAw, /*vc=*/0);
     auto aw_b = make_aw_flit(0x02, 0x0, 0x11, 0, 0, ni::AXI_CH_DataAw, /*vc=*/1);
     aw_a.set_payload_field("AW", "awlen", 1);
     aw_b.set_payload_field("AW", "awlen", 1);
-    ASSERT_TRUE(noc.req_out().push_flit(aw_a));
-    ASSERT_TRUE(noc.req_out().push_flit(aw_b));
-    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xA0, false, ni::AXI_CH_DataW, 0)));
-    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xB0, false, ni::AXI_CH_DataW, 1)));
-    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xA1, true, ni::AXI_CH_DataW, 0)));
-    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xB1, true, ni::AXI_CH_DataW, 1)));
+    ASSERT_TRUE(dat_noc.req_out().push_flit(aw_a));
+    ASSERT_TRUE(dat_noc.req_out().push_flit(aw_b));
+    ASSERT_TRUE(dat_noc.req_out().push_flit(make_w_flit(0xA0, false, ni::AXI_CH_DataW, 0)));
+    ASSERT_TRUE(dat_noc.req_out().push_flit(make_w_flit(0xB0, false, ni::AXI_CH_DataW, 1)));
+    ASSERT_TRUE(dat_noc.req_out().push_flit(make_w_flit(0xA1, true, ni::AXI_CH_DataW, 0)));
+    ASSERT_TRUE(dat_noc.req_out().push_flit(make_w_flit(0xB1, true, ni::AXI_CH_DataW, 1)));
     for (int i = 0; i < 6; ++i) depkt.tick();
     auto a = depkt.pop_aw();
     ASSERT_TRUE(a.has_value());
@@ -321,11 +323,13 @@ TEST(NsuDepacketize, InterleavedDataWormsReassemblePerVc) {
 // (pop_aw / pop_w), not when it arrives. One pulse per consumed flit.
 TEST(NsuDepacketize, DatCreditPulsesOnConsumption) {
     ChannelModel noc(16, 16);
+    ChannelModel dat_noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, axi::NOC_ID_SPACE, ni::cmodel::router::null_req_in(), 0, {},
-                      0, /*dat_num_vc=*/2);
-    ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x01, 0x0, 0x10, 0, 0, ni::AXI_CH_DataAw, 1)));
-    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xFF, true, ni::AXI_CH_DataW, 1)));
+    Depacketize depkt(noc.req_in(), mb, axi::NOC_ID_SPACE, dat_noc.req_in(), 0, {}, 0,
+                      /*dat_num_vc=*/2);
+    ASSERT_TRUE(
+        dat_noc.req_out().push_flit(make_aw_flit(0x01, 0x0, 0x10, 0, 0, ni::AXI_CH_DataAw, 1)));
+    ASSERT_TRUE(dat_noc.req_out().push_flit(make_w_flit(0xFF, true, ni::AXI_CH_DataW, 1)));
     depkt.tick();
     depkt.tick();
     EXPECT_FALSE(depkt.take_dat_credit(1));  // arrived, not consumed
@@ -335,6 +339,91 @@ TEST(NsuDepacketize, DatCreditPulsesOnConsumption) {
     ASSERT_TRUE(depkt.pop_w().has_value());
     EXPECT_TRUE(depkt.take_dat_credit(1));
     EXPECT_FALSE(depkt.take_dat_credit(0));
+}
+
+namespace {
+
+void expect_normalized_data_w_reanchor(::ni::cmodel::ni::ChannelMode mode,
+                                       bool use_dat_ingress) {
+    ChannelModel noc(16, 16);
+    ChannelModel dat_noc(16, 16);
+    MetaBuffer mb(4);
+    Depacketize depkt(noc.req_in(), mb, axi::NOC_ID_SPACE, dat_noc.req_in(), 0, {},
+                      0, /*dat_num_vc=*/1);
+    depkt.set_channel_mode(mode);
+    auto& ingress = use_dat_ingress ? dat_noc.req_out() : noc.req_out();
+
+    auto aw = make_aw_flit(0x01, 0x1000, 0x10, 0, 0, ::ni::AXI_CH_DataAw);
+    aw.set_payload_field("AW", "awlen", 1);
+    aw.set_payload_field("AW", "awsize", 3);
+    ASSERT_TRUE(ingress.push_flit(aw));
+    for (uint8_t beat = 0; beat < 2; ++beat) {
+        auto w = make_w_flit(0, beat == 1, ::ni::AXI_CH_DataW);
+        w.set_payload_field("NARROW_W", "wlast", beat == 1 ? 1u : 0u);
+        w.set_payload_field("NARROW_W", "wstrb", 0xFF);
+        std::array<uint8_t, axi::NARROW_DATA_BYTES> lane{};
+        for (std::size_t i = 0; i < lane.size(); ++i)
+            lane[i] = static_cast<uint8_t>((beat == 0 ? 0xD0 : 0xE0) + i);
+        w.set_payload_bytes("NARROW_W", "wdata", lane.data(),
+                            ::ni::width::NOC_NARROW_DATA_WIDTH);
+        ASSERT_TRUE(ingress.push_flit(w));
+    }
+    for (int i = 0; i < 3; ++i) depkt.tick();
+
+    ASSERT_TRUE(depkt.pop_aw().has_value());
+    EXPECT_EQ(depkt.take_dat_credit(0), use_dat_ingress);
+    for (uint8_t beat = 0; beat < 2; ++beat) {
+        auto out = depkt.pop_w();
+        ASSERT_TRUE(out.has_value());
+        const std::size_t offset = beat * axi::NARROW_DATA_BYTES;
+        EXPECT_EQ(out->strb, 0xFFull << offset);
+        for (std::size_t i = 0; i < out->data.size(); ++i) {
+            const uint8_t expected = i >= offset && i < offset + axi::NARROW_DATA_BYTES
+                                         ? static_cast<uint8_t>((beat == 0 ? 0xD0 : 0xE0) + i - offset)
+                                         : 0;
+            EXPECT_EQ(out->data[i], expected) << "beat=" << unsigned(beat) << " byte=" << i;
+        }
+        EXPECT_EQ(depkt.take_dat_credit(0), use_dat_ingress);
+    }
+    EXPECT_FALSE(depkt.take_dat_credit(0));
+}
+
+}  // namespace
+
+TEST(NsuDepacketize, TwoChannel64ReanchorsConsecutiveDataWBeatsToAddressedAxiLanes) {
+    expect_normalized_data_w_reanchor(::ni::cmodel::ni::ChannelMode::TwoChannel64,
+                                      /*use_dat_ingress=*/false);
+}
+
+TEST(NsuDepacketize, TwoChannel64ReqIngressWaitsWhenDataQueueIsFull) {
+    ChannelModel noc(32, 32);
+    MetaBuffer mb(4);
+    Depacketize depkt(noc.req_in(), mb, axi::NOC_ID_SPACE);
+    depkt.set_channel_mode(::ni::cmodel::ni::ChannelMode::TwoChannel64);
+
+    auto aw = make_aw_flit(0x01, 0x1000, 0x10, 0, 0, ::ni::AXI_CH_DataAw);
+    aw.set_payload_field("AW", "awlen", ::ni::NOC_NI_DAT_RX_VC_DEPTH - 1);
+    ASSERT_TRUE(noc.req_out().push_flit(aw));
+    for (std::size_t beat = 0; beat < ::ni::NOC_NI_DAT_RX_VC_DEPTH; ++beat) {
+        ASSERT_TRUE(noc.req_out().push_flit(
+            make_w_flit(static_cast<uint32_t>(beat),
+                        beat + 1 == ::ni::NOC_NI_DAT_RX_VC_DEPTH, ::ni::AXI_CH_DataW)));
+    }
+
+    depkt.tick();
+    ASSERT_TRUE(depkt.pop_aw().has_value());
+    ASSERT_TRUE(depkt.pop_w().has_value());
+    depkt.tick();
+    for (std::size_t beat = 1; beat < ::ni::NOC_NI_DAT_RX_VC_DEPTH; ++beat) {
+        auto w = depkt.pop_w();
+        ASSERT_TRUE(w.has_value()) << "beat=" << beat;
+        EXPECT_EQ(w->last, beat + 1 == ::ni::NOC_NI_DAT_RX_VC_DEPTH);
+    }
+}
+
+TEST(NsuDepacketize, ThreeChannel64ReanchorsConsecutiveDataWBeatsToAddressedAxiLanes) {
+    expect_normalized_data_w_reanchor(::ni::cmodel::ni::ChannelMode::ThreeChannel64,
+                                      /*use_dat_ingress=*/true);
 }
 
 // A second worm on the SAME VC queues behind the first worm's beats: a VC's

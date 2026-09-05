@@ -13,6 +13,7 @@
 #include "common/channel_model.hpp"
 #include "common/per_channel_capture.hpp"
 #include "axi/types.hpp"
+#include "ni/channel_mode.hpp"
 #include <array>
 #include <gtest/gtest.h>
 
@@ -20,6 +21,7 @@ using ni::cmodel::nsu::AxiClass;
 using ni::cmodel::nsu::MetaBuffer;
 using ni::cmodel::nsu::MetaEntry;
 using ni::cmodel::nsu::Packetize;
+using ni::cmodel::ni::ChannelMode;
 using ni::cmodel::testing::ChannelModel;
 using ni::cmodel::testing::RspCapture;
 namespace axi = ni::cmodel::axi;
@@ -43,7 +45,52 @@ axi::RBeat make_r(uint8_t id, bool last, axi::Resp resp = axi::Resp::OKAY) {
     r.user = 0;
     return r;
 }
+
+
+void expect_normalized_data_response_path(ChannelMode mode, bool use_dat) {
+    RspCapture rsp_b, rsp_r, native_dat_r, dat_b, dat_r;
+    MetaBuffer mb(4);
+    mb.allocate_write(0x05, {0x12, 0x05, 0, 0, AxiClass::Data});
+    mb.allocate_read(0x03, {0x12, 0x03, 0, 0, AxiClass::Data, /*local_addr=*/0x1000,
+                            /*len=*/1, /*size=*/3, axi::Burst::INCR});
+    Packetize pkt(rsp_b, rsp_r, native_dat_r, dat_b, dat_r, mb, kNsuSrcId);
+    pkt.set_channel_mode(mode);
+
+    ASSERT_TRUE(pkt.push_b(make_b(0x05)));
+    ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last=*/false)));
+    pkt.tick();
+
+    auto fb = use_dat ? dat_b.pop() : rsp_b.pop();
+    auto fr0 = use_dat ? dat_r.pop() : rsp_r.pop();
+    ASSERT_TRUE(fb.has_value());
+    ASSERT_TRUE(fr0.has_value());
+    EXPECT_EQ(fb->get_header_field("axi_ch"), ::ni::AXI_CH_DataB);
+    ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last=*/true)));
+    pkt.tick();
+    auto fr1 = use_dat ? dat_r.pop() : rsp_r.pop();
+    ASSERT_TRUE(fr1.has_value());
+    const std::array<ni::cmodel::Flit, 2> flits{*fr0, *fr1};
+    for (std::size_t beat = 0; beat < flits.size(); ++beat) {
+        EXPECT_EQ(flits[beat].get_header_field("axi_ch"), ::ni::AXI_CH_DataR);
+        std::array<uint8_t, axi::NARROW_DATA_BYTES> data{};
+        flits[beat].get_payload_bytes("NARROW_R", "rdata", data.data(),
+                                      ::ni::width::NOC_NARROW_DATA_WIDTH);
+        for (std::size_t i = 0; i < data.size(); ++i)
+            EXPECT_EQ(data[i], static_cast<uint8_t>(0xC0 + beat * axi::NARROW_DATA_BYTES + i));
+    }
+    EXPECT_FALSE(native_dat_r.pop().has_value());
+    EXPECT_FALSE((use_dat ? rsp_b : dat_b).pop().has_value());
+    EXPECT_FALSE((use_dat ? rsp_r : dat_r).pop().has_value());
+}
 }  // namespace
+
+TEST(NsuPacketize, TwoChannel64SteersDataResponsesToRspWithNarrowRPayload) {
+    expect_normalized_data_response_path(ChannelMode::TwoChannel64, /*use_dat=*/false);
+}
+
+TEST(NsuPacketize, ThreeChannel64SteersDataResponsesToDatWithNarrowRPayload) {
+    expect_normalized_data_response_path(ChannelMode::ThreeChannel64, /*use_dat=*/true);
+}
 
 // push_b() accepts beat into S1 register; tick() peeks meta, builds flit,
 // commits MetaBuffer on successful push to b_out_.
@@ -62,7 +109,7 @@ TEST(NsuPacketize, PushBLooksUpMetaAndEmitsFlit) {
 
     auto f = b_cap.pop();
     ASSERT_TRUE(f.has_value()) << "tick() must emit B flit to b_out_";
-    EXPECT_EQ(f->get_header_field("axi_ch"), ni::AXI_CH_NarrowB);
+    EXPECT_EQ(f->get_header_field("axi_ch"), ::ni::AXI_CH_NarrowB);
     EXPECT_EQ(f->get_header_field("dst_id"), 0x12u);  // = orig src_id
     EXPECT_EQ(f->get_header_field("src_id"), kNsuSrcId);
     EXPECT_EQ(f->get_header_field("ordering_req"), 1u);
@@ -160,7 +207,7 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
     EXPECT_EQ(f->get_payload_field("NARROW_R", "rresp"), static_cast<uint64_t>(axi::Resp::SLVERR));
     EXPECT_EQ(f->get_payload_field("NARROW_R", "rlast"), 1u);
     std::array<uint8_t, axi::NARROW_DATA_BYTES> out{};
-    f->get_payload_bytes("NARROW_R", "rdata", out.data(), ni::width::NOC_NARROW_DATA_WIDTH);
+    f->get_payload_bytes("NARROW_R", "rdata", out.data(), ::ni::width::NOC_NARROW_DATA_WIDTH);
     for (int i = 0; i < axi::NARROW_DATA_BYTES; ++i)
         EXPECT_EQ(out[i], static_cast<uint8_t>(0xC0 + i));
 }
@@ -200,13 +247,13 @@ TEST(NsuPacketize, NarrowRUnalignedAddrExtractsCorrectLane) {
     pkt.tick();
     auto f = r_cap.pop();
     ASSERT_TRUE(f.has_value());
-    EXPECT_EQ(f->get_header_field("axi_ch"), ni::AXI_CH_NarrowR);
+    EXPECT_EQ(f->get_header_field("axi_ch"), ::ni::AXI_CH_NarrowR);
 
     // narrow_lane(0x1B) = (0x1B >> 3) & 7 = 3 -> byte offset 24: neither the
     // beat's own address (27) nor a size-aligned/rounded value.
     constexpr unsigned kByteOffset = 24;
     std::array<uint8_t, axi::NARROW_DATA_BYTES> out{};
-    f->get_payload_bytes("NARROW_R", "rdata", out.data(), ni::width::NOC_NARROW_DATA_WIDTH);
+    f->get_payload_bytes("NARROW_R", "rdata", out.data(), ::ni::width::NOC_NARROW_DATA_WIDTH);
     for (int i = 0; i < axi::NARROW_DATA_BYTES; ++i)
         EXPECT_EQ(out[i], static_cast<uint8_t>(kByteOffset + i));
 }
@@ -228,12 +275,12 @@ TEST(NsuPacketize, DataClassMetaStampsDataAxiChAndChannel) {
 
     auto fb = b_cap.pop();
     ASSERT_TRUE(fb.has_value());
-    EXPECT_EQ(fb->get_header_field("axi_ch"), ni::AXI_CH_DataB);
+    EXPECT_EQ(fb->get_header_field("axi_ch"), ::ni::AXI_CH_DataB);
     EXPECT_EQ(fb->get_payload_field("B", "bid"), 0x05u);  // B payload channel is reused as-is
 
     auto fr = r_cap.pop();
     ASSERT_TRUE(fr.has_value());
-    EXPECT_EQ(fr->get_header_field("axi_ch"), ni::AXI_CH_DataR);
+    EXPECT_EQ(fr->get_header_field("axi_ch"), ::ni::AXI_CH_DataR);
     EXPECT_EQ(fr->get_payload_field("DATA_R", "rid"), 0x03u);
 }
 

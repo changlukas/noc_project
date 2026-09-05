@@ -76,9 +76,9 @@ class RouterCreditSink {
 // dst_port_id names which endpoint here receives.
 // dst_id layout matches nmu::addr_trans (X in low bits).
 inline RouterPort route_compute(uint8_t dst_id, uint8_t dst_port_id, const RouterConfig& cfg) {
-    const uint8_t dst_x = dst_id & static_cast<uint8_t>((1u << ni::width::X_WIDTH) - 1);
-    const uint8_t dst_y = static_cast<uint8_t>(dst_id >> ni::width::X_WIDTH) &
-                          static_cast<uint8_t>((1u << ni::width::Y_WIDTH) - 1);
+    const uint8_t dst_x = dst_id & static_cast<uint8_t>((1u << ::ni::width::X_WIDTH) - 1);
+    const uint8_t dst_y = static_cast<uint8_t>(dst_id >> ::ni::width::X_WIDTH) &
+                          static_cast<uint8_t>((1u << ::ni::width::Y_WIDTH) - 1);
     if (!(dst_x < cfg.mesh_x_dim && dst_y < cfg.mesh_y_dim)) {
         assert(false && "route_compute: dst_id outside mesh range");
         std::abort();
@@ -144,7 +144,7 @@ inline uint8_t preferred_vc(RouterPort out, RouterPort next_hop, uint8_t num_vc)
 class Router {
   public:
     explicit Router(const RouterConfig& cfg) : cfg_(cfg) {
-        if (!(cfg_.num_vc >= 1 && cfg_.num_vc <= (1u << ni::header::VC_ID_WIDTH))) {
+        if (!(cfg_.num_vc >= 1 && cfg_.num_vc <= (1u << ::ni::header::VC_ID_WIDTH))) {
             assert(false && "Router: num_vc out of range (1 .. 2^VC_ID_WIDTH)");
             std::abort();
         }
@@ -264,6 +264,68 @@ class Router {
         const auto dst = static_cast<uint8_t>(q.front().get_header_field("dst_id"));
         const auto dst_port = static_cast<uint8_t>(q.front().get_header_field("dst_port_id"));
         return route_compute(dst, dst_port, cfg_);
+    }
+    // True when this output VC would otherwise accept a requesting front flit
+    // but its credit is zero. Pure diagnostic: no queue/arbitration state.
+    bool output_vc_credit_blocked(std::size_t out_port, uint8_t vc) const {
+        if (out_port >= ROUTER_PORT_COUNT || vc >= cfg_.num_vc || credit_[out_port][vc] != 0) {
+            return false;
+        }
+
+        const auto& owner = wormhole_[out_port][vc];
+        if (owner.locked_input.has_value()) {
+            if (output_fifo_[out_port].size() >= cfg_.output_fifo_depth) return false;
+            const auto in = *owner.locked_input;
+            const auto in_vc = *owner.locked_input_vc;
+            const auto& q = input_fifo_[in][in_vc];
+            if (q.empty()) return false;
+            const PortMask branch = port_bit(static_cast<RouterPort>(out_port));
+            return port_in_mask(head_expected_mask(q.front()), static_cast<RouterPort>(out_port)) &&
+                   (fork_done_[in][in_vc] & branch) == 0;
+        }
+
+        for (std::size_t in = 0; in < ROUTER_PORT_COUNT; ++in) {
+            for (uint8_t in_vc = 0; in_vc < cfg_.num_vc; ++in_vc) {
+                const auto& st = ivc_[in][in_vc];
+                if (st.out_vc[out_port].has_value()) continue;
+                const auto& q = input_fifo_[in][in_vc];
+                if (q.empty()) continue;
+                const auto& flit = q.front();
+                const PortMask branch = port_bit(static_cast<RouterPort>(out_port));
+                if (!port_in_mask(head_expected_mask(flit), static_cast<RouterPort>(out_port)) ||
+                    (fork_done_[in][in_vc] & branch) != 0) {
+                    continue;
+                }
+                const bool collective =
+                    flit.get_header_field("collective_op") != ::ni::COLLECTIVE_OP_UNICAST;
+                if (st.active && !(collective && st.head_parked)) continue;
+                if (vc_assignment(out_port, flit).has_value()) continue;
+
+                uint8_t requested;
+                if (flit.get_header_field("fixed_vc") != 0) {
+                    requested = static_cast<uint8_t>(flit.get_header_field("vc_id"));
+                    if (wormhole_[out_port][requested].locked_input.has_value()) continue;
+                } else {
+                    const auto dst = static_cast<uint8_t>(flit.get_header_field("dst_id"));
+                    const auto dst_port = static_cast<uint8_t>(flit.get_header_field("dst_port_id"));
+                    requested = preferred_out_vc(out_port, dst, dst_port);
+                    if (wormhole_[out_port][requested].locked_input.has_value()) {
+                        if (flit.get_header_field("flit_tail") == 0) continue;
+                        bool found = false;
+                        for (uint8_t candidate = 0; candidate < cfg_.num_vc; ++candidate) {
+                            if (candidate != requested &&
+                                !wormhole_[out_port][candidate].locked_input.has_value()) {
+                                requested = candidate;
+                                found = true;
+                            }
+                        }
+                        if (!found) continue;
+                    }
+                }
+                if (requested == vc) return true;
+            }
+        }
+        return false;
     }
 
   private:
@@ -386,7 +448,7 @@ class Router {
     // and silently drop + credit a misrouted multicast (T1 review hard rule).
     PortMask head_expected_mask(const Flit& f) const {
         const auto dst = static_cast<uint8_t>(f.get_header_field("dst_id"));
-        if (f.get_header_field("collective_op") == ni::COLLECTIVE_OP_UNICAST) {
+        if (f.get_header_field("collective_op") == ::ni::COLLECTIVE_OP_UNICAST) {
             const auto dst_port = static_cast<uint8_t>(f.get_header_field("dst_port_id"));
             return port_bit(route_compute(dst, dst_port, cfg_));
         }
@@ -395,7 +457,7 @@ class Router {
         // classification everywhere keys on `!= UNICAST`, so a reserved code
         // would silently become a fork; rejecting the code itself catches it at
         // the one place the keying is read.
-        if (f.get_header_field("collective_op") != ni::COLLECTIVE_OP_MULTICAST) {
+        if (f.get_header_field("collective_op") != ::ni::COLLECTIVE_OP_MULTICAST) {
             assert(false &&
                    "Router: reserved collective_op code on a flit (only UNICAST "
                    "and MULTICAST are defined)");
@@ -407,8 +469,8 @@ class Router {
         // DataAr/DataR; the Narrow codes are checked too so both routers enforce
         // one rule. A collective AW/W is legal fork traffic and is not rejected.
         const auto axi_ch = f.get_header_field("axi_ch");
-        if (axi_ch == ni::AXI_CH_NarrowR || axi_ch == ni::AXI_CH_DataR ||
-            axi_ch == ni::AXI_CH_NarrowAr || axi_ch == ni::AXI_CH_DataAr) {
+        if (axi_ch == ::ni::AXI_CH_NarrowR || axi_ch == ::ni::AXI_CH_DataR ||
+            axi_ch == ::ni::AXI_CH_NarrowAr || axi_ch == ::ni::AXI_CH_DataAr) {
             assert(false &&
                    "Router: non-B collective flit on a read channel — reads are unicast "
                    "everywhere, so the header is mis-stamped");
@@ -563,7 +625,7 @@ inline void Router::tick() {
             // The head is the flit VA itself vetted before locking this VC, so
             // the continuation checks below do not apply to it.
             const bool head = ivc_[lin][lin_vc].head_parked;
-            if (lq.front().get_header_field("collective_op") != ni::COLLECTIVE_OP_UNICAST) {
+            if (lq.front().get_header_field("collective_op") != ::ni::COLLECTIVE_OP_UNICAST) {
                 // Collective — EVERY collective flit takes this branch, one-hot
                 // included: at a pass-through / spread-end hop the one-hot fork
                 // direction legally diverges from the header's dst_id XY route,
@@ -711,7 +773,7 @@ inline void Router::tick() {
                 const PortMask exp = head_expected_mask(q.front());
                 if (!port_in_mask(exp, static_cast<RouterPort>(out))) continue;
                 const bool collective =
-                    q.front().get_header_field("collective_op") != ni::COLLECTIVE_OP_UNICAST;
+                    q.front().get_header_field("collective_op") != ::ni::COLLECTIVE_OP_UNICAST;
                 if (collective &&
                     (fork_done_[in][ivc] & port_bit(static_cast<RouterPort>(out))) != 0) {
                     continue;

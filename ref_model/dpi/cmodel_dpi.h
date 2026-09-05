@@ -137,7 +137,7 @@ void cmodel_dat_merge_get_outputs(unsigned long long ctx, svBitVecVal* nmu_tx_da
 // port); AXI slave side + three NoC faces (REQ egress ready/valid, RSP
 // ingress ready/valid, DAT ingress+egress credit).
 // Packing conventions (little-endian word order; word counts derived from
-// ni::FLIT_WIDTH / axi::DATA_WIDTH in ref_model/dpi/dpi_marshal.hpp):
+// ::ni::FLIT_WIDTH / axi::DATA_WIDTH in ref_model/dpi/dpi_marshal.hpp):
 //   id fields     : 1 word (8-bit value in low byte)
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
 //   data fields   : DATA_VEC_WORDS = 16 words (512-bit bus, little-endian)
@@ -158,6 +158,7 @@ void cmodel_dat_merge_get_outputs(unsigned long long ctx, svBitVecVal* nmu_tx_da
 unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int dat_num_vc,
                                         int rob_enabled, int b_rob_depth, int r_rob_depth,
                                         int max_txns_per_id, int port_id, const char* config_path);
+void cmodel_nmu_set_channel_mode(unsigned long long ctx, int mode);
 // awuser: 58-bit AWUSER (spec §6 layout — [7:0] user, [9:8] collective_op,
 // [57:10] collective address mask) => 2 svBitVecVal words, little-endian.
 void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid,
@@ -219,12 +220,15 @@ void cmodel_nmu_admission_stats(unsigned long long ctx, unsigned int* aw_idle_by
 unsigned long long cmodel_nsu_create(const char* name, int src_id, int dat_num_vc,
                                      int max_unique_ids, int max_outstanding, int port_id,
                                      const char* config_path);
+void cmodel_nsu_set_channel_mode(unsigned long long ctx, int mode);
 void cmodel_nsu_set_inputs(unsigned long long ctx, svBit rx_req_valid, svBitVecVal* rx_req_flit,
                            svBit tx_rsp_ready, svBit rx_dat_valid, svBitVecVal* rx_dat_flit,
                            svBitVecVal* tx_dat_crdvalid, svBit awready, svBit wready, svBit bvalid,
                            svBitVecVal* bid, svBitVecVal* bresp, svBit arready, svBit rvalid,
                            svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast);
 void cmodel_nsu_tick(unsigned long long ctx);
+void cmodel_nsu_meta_buffer_hwm(unsigned long long ctx, unsigned int* write_hwm,
+                                unsigned int* read_hwm);
 void cmodel_nsu_get_outputs(unsigned long long ctx, svBit* rx_req_ready, svBit* tx_rsp_valid,
                             svBitVecVal* tx_rsp_flit, svBit* tx_dat_valid, svBitVecVal* tx_dat_flit,
                             svBitVecVal* rx_dat_crdvalid, svBit* awvalid, svBitVecVal* awid,

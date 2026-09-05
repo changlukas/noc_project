@@ -501,6 +501,11 @@ git commit -m "perf(sim): measure directed AI communication rounds"
 
 ## Stage 4: Common performance flow and report
 
+> Reporting-policy update, 2026-09-03: the next VC/buffer report uses destination-accepted
+> `Delivered payload bandwidth` without a workload-specific useful-byte discount. The completed
+> steps below retain the earlier `Useful delivered bandwidth` implementation as historical evidence;
+> `IMPLEMENTATION_PLAN.md` records the approved replacement work.
+
 Goal: Run every approved AI communication type under one documented geometry and produce directly comparable report rows and figures.
 
 Success Criteria: Each row states its participant scale and shape, all patterns use the same 4 KB transfer geometry and per-active-source load points, directed-round completion is separated from continuous-load metrics, and generated output contains only current results plus Markdown reports.
@@ -663,6 +668,6 @@ The report and run directories under `sim/verilator/output/` remain local ignore
 ## Explicitly Deferred
 
 - AllReduce and ReduceScatter: require arithmetic reduction semantics and a matching completion check.
-- Compute overlap coverage `[TBD]`: requires a user-approved PE compute budget in cycles plus a tagged probe round or synchronized round scheduler. Until both exist, do not emit the metric or relabel directed-round completion as overlap coverage.
+- Compute overlap coverage is retained as a separate workload-derived analysis. It remains `[TBD]` until an explicit offered load, a user-approved PE compute budget in cycles, and a tagged probe round or synchronized round scheduler are available. Do not relabel directed-round completion as overlap coverage.
 - Variable-size AlltoAllv for MoE imbalance: add only after the balanced AlltoAll baseline is measured.
 - Dependent single-tensor pipeline latency: requires receive-to-forward dependencies between endpoints; the first implementation measures steady-state link traffic.

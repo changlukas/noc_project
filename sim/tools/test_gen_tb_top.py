@@ -77,3 +77,14 @@ def test_channel_compare_barrier_is_wired_into_generated_top():
     assert "compare_start &= compare_ready[i];" in text
     assert "all_done &= injection_mode == 3 ? compare_done[i] : end_of_sim[i];" in text
     assert "if (expected_txn_cnt[i] > 0 && txn_cnt[i] == 0)" in text
+
+
+def test_generated_dma_top_opens_and_drives_the_legacy_measurement_window():
+    text = g.emit_tb_top(g.load_topology("mesh_2x2"), dma=True)
+
+    assert "logic perf_measure_en = 1'b1;" in text
+    assert ".measure_en(perf_measure_en)," in text
+    assert ('import "DPI-C" context function void cmodel_perf_begin('
+            'input longint start_cyc);') in text
+    assert "cmodel_init();\n        cmodel_perf_begin(0);" in text
+    assert text.index("cmodel_perf_begin(0);") < text.index("cmodel_perf_sample_tick();")

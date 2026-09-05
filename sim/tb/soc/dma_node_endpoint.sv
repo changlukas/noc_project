@@ -192,6 +192,7 @@ module dma_node_endpoint #(
     ) i_mst_backpressure (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
+        .bypass_i(1'b0),
         .slv(mst_pre_delay),
         .mst(mst_post_delay)
     );
@@ -410,7 +411,7 @@ module dma_node_endpoint #(
             .FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),
             .FIXED_DELAY_OUTPUT(MEM_FIXED_DELAY_OUTPUT)
         ) i_delayer (
-            .clk_i(clk_i), .rst_ni(rst_ni),
+            .clk_i(clk_i), .rst_ni(rst_ni), .bypass_i(1'b0),
             .slv(tile_mst[t]), .mst(tile_mem[t])
         );
 

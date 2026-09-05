@@ -1,6 +1,6 @@
 # NoC Performance Parameters
 
-Revision 0.2, 2026-08-07.
+Revision 0.4, 2026-09-05.
 
 Every parameter below moves a specific part of the latency-throughput curve. Implemented values
 are single-sourced in `specgen/source/constants.yaml`, which is authoritative. Target-only
@@ -15,13 +15,19 @@ links with no contention, the floor. Queuing latency is the wait behind other tr
 dominates the average once the network is loaded. Parameters that set hop count move the floor,
 while buffer and outstanding depths move the queuing part.
 
+The current AI-workload campaign fixes source Outstanding Depth and `MAX_TXNS_PER_ID` at 32.
+Burst Length is characterized separately as a workload condition. The DUT comparison sweeps only
+DAT VC count and Router/NI receive depth; it does not rank Burst Length as hardware. The reference
+configuration is DAT VC 2, Router VC depth 8, NI RX DAT depth 8, NI TX DAT depth 8, and Read RoB
+depth 128.
+
 ## Parameters by curve region
 
 | Parameter | Affects | Effect | Default (range) |
 |---|---|---|---|
 | `AXI_ID_WIDTH` / `NOC_ID_WIDTH` | Endpoint concurrency / NoC area | External AXI IDs are 1..8 bits. A remap keeps at most eight distinct live IDs in the fixed 3-bit NoC space, backpressuring exhaustion; REQ/RSP/DAT remain 136/126/633 b | 3 (1..8) / 3 (fixed) |
 | `AXI_DATA_WIDTH` | Peak bandwidth, area | Sets the data-class payload, hence the DAT flit width (`DAT_FLIT_WIDTH` = 633 b = 48 b header + 585 b payload) and per-router buffer and crossbar area | 512 b (32, 64, 128, 256, 512, 1024) |
-| `DAT_NUM_VC` | Peak bandwidth, area | Recovers link bandwidth lost to head-of-line blocking, at a buffer cost that is `flit width x depth x NUM_VC`. Only DAT carries VCs and only DAT is swept by the topology set, REQ and RSP being scalar ready/valid | implemented 1; target 2 (1 to 8) |
+| `DAT_NUM_VC` | Peak bandwidth, area | Recovers link bandwidth lost to head-of-line blocking, at a buffer cost that is `flit width x depth x NUM_VC`. Only DAT carries VCs and only DAT is swept by the topology set, REQ and RSP being scalar ready/valid | 2 (1 to 8) |
 | `NOC_DAT_VC_MODE` [target] | Head-of-line blocking, usable capacity | `SHARED` lets every DAT class use every VC. `READ_WRITE_SPLIT` reserves equal lower/upper halves for Write/Read, removing cross-class blocking but potentially stranding capacity under asymmetric traffic | `SHARED` (`SHARED`, `READ_WRITE_SPLIT`); Split requires `DAT_NUM_VC` in {2, 4, 6, 8} |
 | `MESH_X_DIM`, `MESH_Y_DIM` | Latency floor | Set hop count, hence the structural transport term of every latency form in the spec | 4, 4 ({2, 4, 8, 16} independently for unicast; equal dimensions for v1 collective signoff) |
 | `NOC_ROUTER_VC_DEPTH` | Sustained throughput | Credit seed of the upstream sender on DAT, sized by rule 1 below | 8 `[TBD]` (power of two, >= 2) |
@@ -29,9 +35,9 @@ while buffer and outstanding depths move the queuing part.
 | `NOC_FIFO_DEPTH` [target] | Burst absorption | Common depth of the synchronous `noc_clk` REQ/RSP/DATW/DATR FIFOs after channel assignment; not replicated per VC | 8 `[TBD]` (positive power of two) |
 | `ROUTER_OUTPUT_FIFO_DEPTH` | Sustained throughput | Output staging, not credit-counted, absorbs transient output-port contention | 8 `[TBD]` (positive power of two) |
 | `MAX_TXNS_PER_ID` | Latency hiding | Bounds outstanding transactions per NoC ID. Nothing sits above it, so the NoC-side admission limit is `MAX_TXNS_PER_ID x 2^NOC_ID_WIDTH`. An external unseen ID may be backpressured by the remap before this limit. Measured on `mesh_4x4` at 4 VCs, `all_to_all`: exactly its cap at one id per initiator, 31 of 32 at four ids under continuous checked injection, 21 of 32 on the directed run. | 32 (1 to 256) |
-| `ROB_B_DEPTH`, `ROB_R_DEPTH` | Latency hiding | Reorder buffer pool depths, bound in-flight write and read responses awaiting in-order return. `ROB_R_DEPTH` is what binds first under sustained load: measured full, 128 of 128, on `mesh_4x4` at 4 VCs, `all_to_all` under continuous checked injection, against 60 on the directed run | 128, 128 (1 to 256) |
+| `ROB_B_DEPTH`, `ROB_R_DEPTH` | Latency hiding | Reorder buffer pool depths, bound in-flight write and read responses awaiting in-order return. The AI campaign measured Read occupancy up to 128 of 128, but has no matching non-zero admission-stall counter; occupancy alone does not prove that the RoB limits performance | 128, 128 (1 to 256) |
 | `META_BUFFER_MAX_OUTSTANDING` | Latency hiding | Slave-side outstanding pool per direction, bounds concurrency the slave sustains | 32 (1 to 256) |
-| `META_BUFFER_MAX_UNIQUE_IDS` | Endpoint concurrency | Distinct AXI IDs the NSU presents downstream. At 1 every transaction reaching a tile carries the same ID, so an endpoint that tracks IDs sees no concurrency to exploit | 1 (1 or 8) |
+| `META_BUFFER_MAX_UNIQUE_IDS` | Endpoint concurrency | Distinct AXI IDs the NSU presents downstream. At 1 every transaction reaching a tile carries the same ID, so an endpoint that tracks IDs sees no concurrency to exploit | 8 (1 or 8) |
 | `NMU_QUEUE_DEPTH`, `NSU_QUEUE_DEPTH` [current model] | Burst absorption | Single-clock AXI-channel queue depth in the C++ model; target CDC uses `AXI_FIFO_DEPTH` | 16, 16 (1 to 1024) |
 | `NMU_DEPKT_Q_DEPTH` | Burst absorption | Depacketize demux FIFO depth | 16 (1 to 1024) |
 | `NMU_ARBITER_FIFO_DEPTH`, `NSU_ARBITER_FIFO_DEPTH` [current model] | Burst absorption | Current C++ wormhole and VC-arbiter staging depth; not a target NI per-VC FIFO | 4, 4 (1 to 64) |
@@ -208,6 +214,35 @@ FIFO paths. They may each emit one flit per `noc_clk`; their combined throughput
 shared AXI source only while filling those buffers, not while draining an existing backlog.
 
 Full-window absorption is still uncovered on the write side: the port depth is 16 against the 205
-the write window needs. The read side is covered, `ROB_R_DEPTH` being 128 beats, which is the 8 KB
-budget the read window asks for at the 512 b width. Only the read side can back up into the fabric,
-which is why it was sized first.
+the write window needs. The Read RoB is 128 beats, or 8 KB at the 512 b width. The current AI
+campaign reached that occupancy, but did not observe a resource-specific non-zero admission-stall
+counter. A deeper Read RoB sweep is therefore not justified by this campaign.
+
+## Deterministic RR vs RRD comparison
+
+This is a repeated, deterministic contention test on `mesh_4x4`, not a load sweep or an
+average-workload result. Node 0 sends 64 Control transactions to node 3. Fourteen other Pipeline
+P2P initiators provide background traffic throughout the complete Control interval. Endpoint
+random stalls and memory delay are disabled.
+
+| Case | Control probe | Pipeline P2P background per flow | Completion event |
+|---|---|---|---|
+| Write | One 64-bit Write transaction | 16 rounds, two 256-beat Write transactions/round | Control B handshake |
+| Read | One 64-bit Read transaction | 16 rounds, two 256-beat Read transactions/round | Control R handshake |
+
+Both mappings encode the experiment's Data beats as 64-bit values while retaining the Data AXI
+class. In RR, Data requests use REQ and Data responses use RSP; DAT is idle. In
+RRD, Data requests and responses use DAT. The physical REQ/RSP/DAT widths do not
+change. Native-width performance tests remain 64-bit Control and 512-bit Data; only those tests
+report bandwidth and max link utilization.
+
+Each active background flow carries 32 bursts and 8192 beats per run. The shared directed edge is
+derived from the Pipeline geometry. RR must show background traffic on the Control REQ/RSP
+resource; RRD must show it on DAT over the same edge. Every background interval must contain the
+complete Control-probe interval.
+
+Control Completion Time starts at the first request `VALID` assertion and ends at its B/R
+handshake, so source admission backpressure is included. The report gives node 0's mean Control
+Completion Time for 64 probes and the difference
+`RR mean Completion Time - RRD mean Completion Time`. It has no load, bandwidth, or utilization
+field, and its 64-bit results do not enter the native 512-bit DUT Pareto comparison.

@@ -33,10 +33,10 @@ HandleBlock* validate_handle(unsigned long long ctx, WrapType expected, const ch
 // need a CAS loop here.
 #define DPI_SET_ERR_IF_CLEAR(code_expr, msg_expr)                \
     do {                                                         \
-        int prior = ni::cmodel::wrap::g_dpi_error_code.load();   \
+        int prior = ::ni::cmodel::wrap::g_dpi_error_code.load();   \
         if (prior == CMODEL_DPI_OK) {                            \
-            ni::cmodel::wrap::g_dpi_error_code.store(code_expr); \
-            ni::cmodel::wrap::g_dpi_error_msg = (msg_expr);      \
+            ::ni::cmodel::wrap::g_dpi_error_code.store(code_expr); \
+            ::ni::cmodel::wrap::g_dpi_error_msg = (msg_expr);      \
         }                                                        \
     } while (0)
 
@@ -67,7 +67,7 @@ HandleBlock* validate_handle(unsigned long long ctx, WrapType expected, const ch
 // from the void handler. The caller pulls the typed adapter with:
 //     auto* nmu = static_cast<NmuWrap*>(_h->adapter.get());
 #define REQUIRE_HANDLE(ctx, expected_type, fn_name)                                  \
-    auto* _h = ni::cmodel::wrap::validate_handle((ctx), (expected_type), (fn_name)); \
+    auto* _h = ::ni::cmodel::wrap::validate_handle((ctx), (expected_type), (fn_name)); \
     do {                                                                             \
         if (!_h) return;                                                             \
     } while (0)

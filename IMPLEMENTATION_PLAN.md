@@ -149,3 +149,71 @@ Status: Not Started
 Goal: Run the standing 4x4 milestone regression after 2x2 integration is stable.
 Success Criteria: The complete `4x4 verify` gate in `docs/backlog.md` passes from a clean tree and all campaign issues are closed or moved to tracked limitations.
 Status: Not Started
+
+## Auxiliary task: AXI outstanding-driven injection mode
+
+### Stage 1: Behavioral contract and regression
+Goal: Add a failing focused test for a write-only injection mode controlled by accepted AXI write outstanding depth.
+Success Criteria: The test requires a positive `SOURCE_OUTSTANDING_DEPTH`, independent AW/W issue after local admission, and B-handshake retirement.
+Status: Complete
+
+### Stage 2: Minimal implementation
+Goal: Add `INJECTION_MODE=4` without changing modes 0-3.
+Success Criteria: AW admission stops at the configured depth, W does not wait for AWREADY, each W burst remains contiguous and ordered, and a B handshake releases one slot.
+Status: Complete
+
+### Stage 3: Verification and measurement
+Goal: Verify the new mode and run a focused 4x4 AI-traffic measurement.
+Success Criteria: Focused pytest, generated-file drift, clean 2x2 smoke, and selected 4x4 depth points pass; logs expose configured and observed source outstanding depth.
+Status: Complete
+
+## Auxiliary task: DAT VC and Router buffer trade-off report
+
+### Stage 1: Measurement and report contract
+Goal: Freeze the short run label, seed-separated output layout, compared parameters, units, formulas, and four result fields: delivered payload bandwidth, completion latency, busiest DAT-link utilization, and DAT buffer entries per Router input.
+Success Criteria: Focused tests distinguish Mode 4 rows from offered-load rows and require `m4_<traffic>_v<VC>_b<depth>_o<outstanding>` without seed in the displayed label; Pareto candidates appear only in the conclusion and are not presented as measured data; compute overlap coverage remains a separate workload-derived analysis with an explicit offered load and PE compute budget.
+Status: Complete
+
+### Stage 2: Minimal collection and rendering support
+Goal: Reuse the current Makefile, CSV, and report generator for isolated VC/buffer results.
+Success Criteria: Runs can write beneath a caller-selected output root; the main report adds one concise VC/buffer method and result section without changing the RTL datapath.
+Status: Complete
+
+### Stage 3: Screening, refinement, and confirmation
+Goal: Measure VC count at Router depth 8, then measure depths 16 and 32 only for selected VC candidates and confirm Pareto finalists across seeds.
+Success Criteria: Every cell passes the scoreboard and records the complete hardware/workload tuple; existing VC=2 results are reused only after exact validation.
+Status: Complete
+
+### Stage 4: Restore defaults and close evidence
+Goal: Restore shipped parameters and publish the performance/cost trade-off in the main report.
+Success Criteria: VC 2, Router depth 8, and NI DAT RX depth 8 are restored; codegen drift, focused tests, and clean 2x2/4x4 smokes pass; synthesis-only PPA remains explicitly unclaimed.
+Status: Complete
+
+## Auxiliary task: AI NoC performance efficiency evaluation
+
+Detailed plan: `docs/superpowers/plans/2026-09-04-ai-performance-efficiency.md`
+
+### Stage 1: Measurement window
+Goal: Make one workload interval authoritative for every performance counter.
+Success Criteria: Throughput, flit, utilization, stall, occupancy, and Completion Time values use the same non-zero Mode 4 start/end cycles.
+Status: Complete
+
+### Stage 2: Router diagnostics
+Goal: Attribute DAT occupancy and credit blocking to the relevant Router port and VC.
+Success Criteria: Per-VC HWM and selected-credit blocking distinguish active contention from idle zero-credit state.
+Status: Complete
+
+### Stage 3: Throughput bound
+Goal: Calculate a pattern-specific Ideal Throughput Bound from resource serialization.
+Success Criteria: Analytic resource counts match directed Read, Write, multicast, and repeated-unicast counter fixtures.
+Status: Complete
+
+### Stage 4: Experiment sweeps
+Goal: Characterize Burst Length separately and compare DUT configurations, multicast, and Pipeline P2P RR/RRD at Outstanding Depth 32.
+Success Criteria: Every accepted row passes metadata and checker gates; Burst Length is not ranked as a DUT setting; 512-bit throughput results remain separate from 64-bit RR/RRD latency results.
+Status: Complete
+
+### Stage 5: Campaign and report
+Goal: Generate clean AI-workload results and measured-set Pareto candidates.
+Success Criteria: The report uses standard metrics, lists storage categories separately, identifies limiting workloads, and makes no unsupported PPA claim.
+Status: Complete

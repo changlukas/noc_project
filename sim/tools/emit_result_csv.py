@@ -101,22 +101,99 @@ _CONFIG = re.compile(
     r"(?:\s+router_vc_depth=(\d+))?(?:\s+mst_stall_random=(\d+))?"
     r"(?:\s+ni_dat_rx_vc_depth=(\d+))?")
 _CHANNEL_BEATS = re.compile(
-    r"^\[ChannelCompare\]\s+case=(write|read)\s+node=([12])\s+"
+    r"^\[ChannelCompare\]\s+case=(write|read)\s+node=(\d+)\s+"
     r"bursts=(\d+)\s+data_beats=(\d+)\s*$", re.M)
+_CHANNEL_INTERVAL = re.compile(
+    r"^\[ChannelCompareInterval\]\s+role=(control|background)\s+node=(\d+)\s+"
+    r"start_cycle=(\d+)\s+completion_cycle=(\d+)\s*$", re.M)
+_CHANNEL_CONTROL_SRCQ = re.compile(
+    r"^\[SrcQueue node0\]\[(Read|Write)\]\s+mean:\s*([\d.]+),\s*N:\s*(\d+)\s*$",
+    re.M | re.I)
+_CHANNEL_OVERLAP = re.compile(
+    r"^\[ChannelCompareOverlap\]\s+control_node=0\s+background_nodes=(\d+)\s+"
+    r"status=PASS\s*$", re.M)
+_CHANNEL_BARRIER = re.compile(
+    r"^\[ChannelCompareBarrier\]\s+release_cycle=(\d+)\s*$", re.M)
 _CHANNEL_PASS = re.compile(r"^PASS: all \d+ nodes done, non-vacuous$", re.M)
 _TRAFFIC_META = re.compile(
     r"^\[TrafficMeta\]\s+active_sources=(\d+)\s+write_bursts=(\d+)\s*$", re.M)
+_WINDOW_TRAFFIC_META = re.compile(
+    r"^\[TrafficMeta\]\s+direction=(write|read)\s+axi_initiators=(\d+)\s+"
+    r"source_requests=(\d+)\s*$", re.M)
 _ROUND_PERF = re.compile(
     r"^\[RoundPerf\]\s+start_cycle=(\d+)\s+completion_cycle=(\d+)\s+"
     r"round_cycles=(\d+)\s+active_sources=(\d+)\s+write_bursts=(\d+)\s*$", re.M)
+_SOURCE_WINDOW = re.compile(
+    r"^\[SourceWindow node\d+\]\s+depth=(\d+)\s+max_outstanding=(\d+)\s*$", re.M)
+_NMU_HWM = re.compile(
+    r"^\[HWM\]\s+node=\d+\s+read_slot_hwm=(\d+)\s+order_list_hwm=(\d+)\s+"
+    r"write_txns_hwm=(\d+)\s+read_txns_hwm=(\d+)\s+"
+    r"aw_clause=\{idle=\d+\s+same_dest=\d+\s+alloc=(\d+)\}\s+"
+    r"ar_clause=\{idle=\d+\s+same_dest=\d+\s+alloc=(\d+)\}\s*$", re.M)
+_NSU_HWM = re.compile(
+    r"^\[NSU_HWM\]\s+node=\d+\s+write_meta_hwm=(\d+)\s+read_meta_hwm=(\d+)\s*$",
+    re.M)
+_MEASUREMENT_WINDOW = re.compile(
+    r"^\[MeasurementWindow\]\s+start_cycle=(\d+)\s+completion_cycle=(\d+)\s*$",
+    re.M)
+
+
+def parse_source_window(log_text, expected_depth):
+    rows = [(int(depth), int(hwm)) for depth, hwm in _SOURCE_WINDOW.findall(log_text)]
+    if not rows:
+        sys.exit("emit_result_csv: mode 4 requires [SourceWindow] evidence")
+    if any(depth != expected_depth or hwm > depth for depth, hwm in rows):
+        sys.exit("emit_result_csv: inconsistent [SourceWindow] evidence")
+    return max(hwm for _, hwm in rows)
+
+
+def parse_capacity_hwm(log_text):
+    nmu = [tuple(map(int, row)) for row in _NMU_HWM.findall(log_text)]
+    nsu = [tuple(map(int, row)) for row in _NSU_HWM.findall(log_text)]
+    result = {
+        "nmu_read_slot_hwm_beats": "",
+        "nmu_order_list_hwm_transactions": "",
+        "nmu_write_txns_hwm_transactions": "",
+        "nmu_read_txns_hwm_transactions": "",
+        "nmu_aw_fallback_allocations": "",
+        "nmu_ar_fallback_allocations": "",
+        "nsu_write_meta_hwm_transactions": "",
+        "nsu_read_meta_hwm_transactions": "",
+    }
+    if nmu:
+        maxima = [max(row[index] for row in nmu) for index in range(4)]
+        result.update({
+            "nmu_read_slot_hwm_beats": str(maxima[0]),
+            "nmu_order_list_hwm_transactions": str(maxima[1]),
+            "nmu_write_txns_hwm_transactions": str(maxima[2]),
+            "nmu_read_txns_hwm_transactions": str(maxima[3]),
+            "nmu_aw_fallback_allocations": str(sum(row[4] for row in nmu)),
+            "nmu_ar_fallback_allocations": str(sum(row[5] for row in nmu)),
+        })
+    if nsu:
+        result.update({
+            "nsu_write_meta_hwm_transactions": str(max(row[0] for row in nsu)),
+            "nsu_read_meta_hwm_transactions": str(max(row[1] for row in nsu)),
+        })
+    return result
 
 
 def parse_traffic_meta(log_text):
-    rows = _TRAFFIC_META.findall(log_text)
+    legacy_rows = _TRAFFIC_META.findall(log_text)
+    window_rows = _WINDOW_TRAFFIC_META.findall(log_text)
     tagged = sum(line.startswith("[TrafficMeta]") for line in log_text.splitlines())
-    if tagged != 1 or len(rows) != 1:
+    if tagged != 1 or len(legacy_rows) + len(window_rows) != 1:
         sys.exit("emit_result_csv: expected exactly one [TrafficMeta] line")
-    active_sources, write_bursts = map(int, rows[0])
+    if window_rows:
+        direction, initiators, requests = window_rows[0]
+        if int(initiators) <= 0 or int(requests) <= 0:
+            sys.exit("emit_result_csv: TrafficMeta counts must be positive")
+        return {
+            "direction": direction,
+            "axi_initiators": initiators,
+            "source_requests": requests,
+        }
+    active_sources, write_bursts = map(int, legacy_rows[0])
     if active_sources <= 0 or write_bursts <= 0:
         sys.exit("emit_result_csv: TrafficMeta counts must be positive")
     return {
@@ -146,11 +223,70 @@ def parse_round_perf(log_text):
     }
 
 
-def load_traffic_meta(path, log_text, pattern):
+def load_traffic_meta(path, log_text, pattern, direction=None,
+                      multicast_mode=None, burst_beats=None, bytes_per_beat=None):
     try:
         payload = json.loads(pathlib.Path(path).read_text())
     except (OSError, json.JSONDecodeError) as error:
         sys.exit(f"emit_result_csv: invalid traffic metadata: {error}")
+    new_required = {
+        "direction", "rounds", "data_producers", "consumers", "axi_initiators",
+        "source_requests", "payload_deliveries",
+    }
+    geometry = {
+        "transactions_per_flow", "burst_beats", "bytes_per_beat",
+        "bytes_per_flow_round",
+    }
+    allowed = new_required | geometry
+    if pattern == "broadcast":
+        allowed |= {"multicast_mode", "destinations_per_source"}
+        if multicast_mode is not None and "multicast_mode" not in payload:
+            sys.exit("emit_result_csv: traffic metadata is missing multicast mode")
+        if new_required <= set(payload) and "destinations_per_source" not in payload:
+            sys.exit("emit_result_csv: traffic metadata is missing destinations per source")
+    if set(payload) in (new_required, allowed):
+        if payload["direction"] not in ("write", "read") or any(
+                not isinstance(payload[name], int) or payload[name] <= 0
+                for name in new_required - {"direction"}):
+            sys.exit("emit_result_csv: invalid Outstanding traffic metadata")
+        if direction != payload["direction"]:
+            sys.exit("emit_result_csv: traffic direction does not match metadata")
+        if pattern == "broadcast" and direction == "read":
+            sys.exit("emit_result_csv: Broadcast Read is not supported")
+        log_meta = parse_traffic_meta(log_text)
+        if (log_meta.get("direction") != direction or
+                int(log_meta.get("axi_initiators", 0)) != payload["axi_initiators"] or
+                int(log_meta.get("source_requests", 0)) != payload["source_requests"]):
+            sys.exit("emit_result_csv: traffic metadata does not match the run log")
+        mode = payload.get("multicast_mode", "hardware" if pattern == "broadcast" else None)
+        if multicast_mode is not None and mode != multicast_mode:
+            sys.exit("emit_result_csv: multicast mode does not match traffic metadata")
+        if pattern == "broadcast":
+            fanout = payload["destinations_per_source"]
+            if not isinstance(fanout, int) or fanout <= 0:
+                sys.exit("emit_result_csv: destinations per source must be positive")
+            flows = (payload["data_producers"] * payload["rounds"] *
+                     payload.get("transactions_per_flow", 1))
+            expected_requests = flows if mode == "hardware" else flows * fanout
+            if (mode not in ("hardware", "repeated_unicast") or
+                    payload["source_requests"] != expected_requests or
+                    payload["payload_deliveries"] != flows * fanout):
+                sys.exit("emit_result_csv: traffic metadata payload fanout is inconsistent")
+        elif payload["payload_deliveries"] != payload["source_requests"]:
+            sys.exit("emit_result_csv: traffic metadata payload fanout is inconsistent")
+        if geometry <= set(payload):
+            if any(not isinstance(payload[name], int) or payload[name] <= 0
+                   for name in geometry):
+                sys.exit("emit_result_csv: invalid traffic metadata geometry")
+            if (payload["bytes_per_flow_round"] !=
+                    payload["transactions_per_flow"] * payload["burst_beats"] *
+                    payload["bytes_per_beat"] or
+                    (burst_beats is not None and payload["burst_beats"] != burst_beats) or
+                    (bytes_per_beat is not None and
+                     payload["bytes_per_beat"] != bytes_per_beat)):
+                sys.exit("emit_result_csv: traffic metadata geometry disagrees with the run")
+        return payload
+
     required = {"active_sources", "source_write_bursts", "destination_deliveries"}
     if set(payload) != required or any(
             not isinstance(payload[name], int) or payload[name] <= 0
@@ -195,7 +331,7 @@ def parse_monitors(log_text):
     return sum(float(bw) for _c, _m, _n, bw in rows), latency, total_samples
 
 
-def run_window(log_path):
+def run_window(log_path, log_text=None, require_measurement_window=False):
     """Cycles the run spanned, from the perf.json the tb writes beside the log.
 
     None when there is no perf.json, which is the caller's signal to fall back
@@ -204,7 +340,53 @@ def run_window(log_path):
     if not perf.is_file():
         return None
     w = json.loads(perf.read_text())["window"]
+    if require_measurement_window:
+        rows = _MEASUREMENT_WINDOW.findall(log_text or "")
+        if len(rows) != 1:
+            sys.exit("emit_result_csv: performance window requires one MeasurementWindow marker")
+        start, completion = map(int, rows[0])
+        if (start == 0 or completion <= start or
+                w.get("start_cyc") != start or w.get("end_cyc") != completion):
+            sys.exit("emit_result_csv: performance window does not match workload markers")
     return w["end_cyc"] - w["start_cyc"] or None
+
+
+def dat_link_stats(log_path):
+    perf = pathlib.Path(log_path).with_name("perf.json")
+    if not perf.is_file():
+        return None
+    payload = json.loads(perf.read_text())
+    cycles = payload["window"]["end_cyc"] - payload["window"]["start_cyc"]
+    if cycles <= 0:
+        sys.exit("emit_result_csv: invalid performance window")
+    utilization = [100.0 * link["flit_count"] / cycles
+                   for link in payload["noc"]["links"]
+                   if link["name"].startswith("dat_")]
+    if not utilization:
+        sys.exit("emit_result_csv: no DAT-link counters in perf.json")
+    return {
+        "busiest_dat_link_utilization_pct": f"{max(utilization):.2f}",
+        "dat_links_total": str(len(utilization)),
+        **{f"dat_links_ge_{threshold}_pct": str(sum(value >= threshold
+                                                     for value in utilization))
+           for threshold in (25, 50, 75, 90)},
+    }
+
+
+def router_dat_stats(log_path):
+    perf = pathlib.Path(log_path).with_name("perf.json")
+    payload = json.loads(perf.read_text())["noc"]
+    input_vcs = payload["router_dat_input_vcs"]
+    output_vcs = payload["router_dat_output_vcs"]
+    if not input_vcs or not output_vcs:
+        sys.exit("emit_result_csv: missing Router DAT per-VC diagnostics")
+    peak = max(input_vcs, key=lambda entry: entry["hwm_flits"])
+    return {
+        "router_dat_input_vc_hwm_max_flits": str(peak["hwm_flits"]),
+        "router_dat_input_vc_capacity_flits": str(peak["capacity_flits"]),
+        "router_dat_output_vc_credit_block_cycles_sum": str(sum(
+            entry["credit_block_cycles"] for entry in output_vcs)),
+    }
 
 
 def parse_source_queue(log_text):
@@ -255,7 +437,8 @@ def parse_config(log_text, cli_max_unique_ids, cli_max_outstanding):
     )
 
 
-def parse_channel_compare(log_text, channel_mapping, channel_case, seed):
+def parse_channel_compare(log_path, log_text, channel_mapping, channel_case, seed,
+                          traffic_meta_path):
     """Return the multi-burst comparison row after proving its log evidence."""
     if not _CHANNEL_PASS.search(log_text):
         sys.exit("emit_result_csv: channel comparison did not reach exact non-vacuous PASS")
@@ -280,21 +463,106 @@ def parse_channel_compare(log_text, channel_mapping, channel_case, seed):
             sys.exit("emit_result_csv: malformed [ChannelCompare] data evidence")
         data.append(match.groups())
 
-    if len(control) != 1 or control[0][0].lower() != channel_case or int(control[0][2]) != 64:
+    try:
+        meta = json.loads(pathlib.Path(traffic_meta_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        sys.exit(f"emit_result_csv: invalid channel traffic metadata: {error}")
+    required = {
+        "direction", "rounds", "transactions_per_flow", "control_probes",
+        "background_bursts_per_flow", "background_beats_per_flow",
+        "background_nodes", "shared_directed_edge", "control_resource",
+        "rr_background_resource", "rrd_background_resource",
+    }
+    if set(meta) != required or meta["direction"] != channel_case:
+        sys.exit("emit_result_csv: invalid channel traffic metadata")
+    if any(not isinstance(meta[name], int) or meta[name] <= 0 for name in (
+            "rounds", "transactions_per_flow", "control_probes",
+            "background_bursts_per_flow", "background_beats_per_flow",
+            "background_nodes")):
+        sys.exit("emit_result_csv: invalid channel traffic metadata counts")
+    if (meta["background_bursts_per_flow"] !=
+            meta["rounds"] * meta["transactions_per_flow"] or
+            meta["background_beats_per_flow"] !=
+            meta["background_bursts_per_flow"] * 256):
+        sys.exit("emit_result_csv: inconsistent channel traffic metadata geometry")
+    edge = meta["shared_directed_edge"]
+    if (meta["control_resource"] != f"req_{edge}" or
+            meta["rr_background_resource"] != meta["control_resource"] or
+            meta["rrd_background_resource"] != f"dat_{edge}"):
+        sys.exit("emit_result_csv: channel resources do not name the shared directed edge")
+
+    if (len(control) != 1 or control[0][0].lower() != channel_case or
+            int(control[0][2]) != meta["control_probes"]):
         sys.exit("emit_result_csv: expected exactly 64 node 0 Control samples")
-    if len(data) != 2 or {row[1] for row in data} != {"1", "2"} or any(
-            row[0] != channel_case or int(row[2]) != 64 or int(row[3]) != 16384
+    source_queue = [row for row in _CHANNEL_CONTROL_SRCQ.findall(log_text)
+                    if row[0].lower() == channel_case]
+    if (len(source_queue) != 1 or
+            int(source_queue[0][2]) != meta["control_probes"]):
+        sys.exit("emit_result_csv: expected source-queue timing for every Control sample")
+    if len(data) != meta["background_nodes"] or any(
+            row[0] != channel_case or
+            int(row[2]) != meta["background_bursts_per_flow"] or
+            int(row[3]) != meta["background_beats_per_flow"]
             for row in data):
-        sys.exit("emit_result_csv: node 1/2 Data burst proof is inconsistent")
+        sys.exit("emit_result_csv: Pipeline background burst proof is inconsistent")
+
+    intervals = [(role, int(node), int(start), int(done))
+                 for role, node, start, done in _CHANNEL_INTERVAL.findall(log_text)]
+    controls = [row for row in intervals if row[0] == "control"]
+    backgrounds = [row for row in intervals if row[0] == "background"]
+    if (len(controls) != 1 or controls[0][1] != 0 or
+            len(backgrounds) != meta["background_nodes"] or
+            {row[1] for row in backgrounds} != {int(row[1]) for row in data} or
+            any(start > controls[0][2] or done < controls[0][3]
+                for _role, _node, start, done in backgrounds)):
+        sys.exit("emit_result_csv: background intervals do not contain Control interval")
+    overlap = _CHANNEL_OVERLAP.findall(log_text)
+    if overlap != [str(meta["background_nodes"])]:
+        sys.exit("emit_result_csv: missing ChannelCompare overlap proof")
+    barriers = [int(cycle) for cycle in _CHANNEL_BARRIER.findall(log_text)]
+    if (len(barriers) != 1 or
+            barriers[0] < max(row[3] for row in intervals) or
+            all(row[3] == barriers[0] for row in intervals)):
+        sys.exit("emit_result_csv: ChannelCompare barrier replaced an actual completion cycle")
+
+    perf_path = pathlib.Path(log_path).with_name("perf.json")
+    try:
+        perf = json.loads(perf_path.read_text(encoding="utf-8"))
+        links = {link["name"]: int(link["flit_count"])
+                 for link in perf["noc"]["links"]}
+        window = perf["window"]
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        sys.exit("emit_result_csv: invalid channel comparison perf.json")
+    if (window.get("start_cyc") != min(row[2] for row in backgrounds) or
+            window.get("end_cyc") != max(row[3] for row in backgrounds)):
+        sys.exit("emit_result_csv: channel comparison counter window misses background interval")
+    background_resource = (meta["rr_background_resource"]
+                           if channel_mapping == "2-channel" else
+                           meta["rrd_background_resource"])
+    control_flits = meta["control_probes"] * (2 if channel_case == "write" else 1)
+    background_flits = meta["background_bursts_per_flow"] * (
+        257 if channel_case == "write" else 1)
+    if background_resource == meta["control_resource"]:
+        valid_resources = links.get(background_resource) == control_flits + background_flits
+    else:
+        valid_resources = (links.get(meta["control_resource"]) == control_flits and
+                           links.get(background_resource) == background_flits)
+    if not valid_resources:
+        sys.exit("emit_result_csv: shared-edge channel resources do not match traffic metadata")
 
     return {
         "channel_mapping": channel_mapping,
         "channel_case": channel_case,
         "seed": seed,
-        "control_samples": "64",
-        "control_mean_latency_cycles": str(float(control[0][1])),
-        "data_bursts_per_node": "64",
-        "data_beats_per_node": "16384",
+        "control_samples": str(meta["control_probes"]),
+        "control_mean_latency_cycles": str(
+            float(control[0][1]) + float(source_queue[0][1])),
+        "data_bursts_per_flow": str(meta["background_bursts_per_flow"]),
+        "data_beats_per_flow": str(meta["background_beats_per_flow"]),
+        "shared_directed_edge": meta["shared_directed_edge"],
+        "control_resource": meta["control_resource"],
+        "background_resource": background_resource,
+        "overlap_status": "PASS",
     }
 
 
@@ -307,11 +575,14 @@ def main():
     ap.add_argument("--injection-mode")
     ap.add_argument("--injection-rate")
     ap.add_argument("--injection-count")
+    ap.add_argument("--source-outstanding-depth", type=int)
+    ap.add_argument("--traffic-direction", choices=("write", "read"))
     ap.add_argument("--seed")
     ap.add_argument("--max-unique-ids", default=None)
     ap.add_argument("--max-outstanding", default=None)
-    # The next three do not appear in the tb [Config] line; unset means the run
+    # These do not appear in the tb [Config] line; unset means the shipped
     # used the generator / ni_params_pkg default, which is what gets recorded.
+    ap.add_argument("--r-rob-depth", default="128")
     ap.add_argument("--max-txns-per-id", default="32")
     ap.add_argument("--ids-per-initiator", default="1")
     ap.add_argument("--burst-len", default="0")
@@ -319,6 +590,7 @@ def main():
     ap.add_argument("--space", default="memory")
     ap.add_argument("--traffic-meta")
     ap.add_argument("--traffic-mapping")
+    ap.add_argument("--multicast-mode", choices=("hardware", "repeated_unicast"))
     ap.add_argument("--require-round-perf", action="store_true")
     ap.add_argument("--channel-mapping", choices=("2-channel", "3-channel"))
     ap.add_argument("--channel-case", choices=("write", "read"))
@@ -328,11 +600,19 @@ def main():
         ap.error("--channel-mapping and --channel-case must be used together")
     if a.channel_mapping and a.seed is None:
         ap.error("channel comparison requires --seed")
+    if a.channel_mapping and not a.traffic_meta:
+        ap.error("channel comparison requires --traffic-meta")
+    if a.channel_mapping and (a.source_outstanding_depth != 32 or
+                              a.max_txns_per_id != "32"):
+        ap.error("channel comparison requires fixed Outstanding Depth 32 and MAX_TXNS_PER_ID 32")
 
     log_text = pathlib.Path(a.log).read_text()
     parse_traffic_meta(log_text)
     if a.channel_mapping:
-        row = parse_channel_compare(log_text, a.channel_mapping, a.channel_case, a.seed)
+        row = parse_channel_compare(
+            a.log, log_text, a.channel_mapping, a.channel_case, a.seed, a.traffic_meta)
+        row["source_outstanding_depth"] = "32"
+        row["max_txns_per_id"] = "32"
         with open(a.out, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=list(row))
             writer.writeheader()
@@ -342,38 +622,59 @@ def main():
         return
 
     if any(value is None for value in (
-            a.pattern, a.injection_mode, a.injection_rate, a.injection_count, a.seed,
-            a.stim_size)):
-        ap.error("throughput results require --pattern, --injection-mode, --injection-rate, "
+            a.pattern, a.injection_mode, a.injection_count, a.seed, a.stim_size)):
+        ap.error("throughput results require --pattern, --injection-mode, "
                  "--injection-count, --seed, and --stim-size")
 
     bw, latency, samples = parse_monitors(log_text)
     srcq = parse_source_queue(log_text)
-    offered_flits, offered_bytes = offered_load(
-        a.injection_rate, a.burst_len,
-        write_only=a.pattern in AI_WRITE_ONLY)
+    windowed = a.injection_mode == "4"
+    if windowed:
+        if not a.source_outstanding_depth or a.source_outstanding_depth <= 0:
+            ap.error("injection mode 4 requires --source-outstanding-depth=<positive integer>")
+        if a.traffic_direction is None:
+            ap.error("injection mode 4 requires --traffic-direction=write|read")
+        source_outstanding_hwm = parse_source_window(
+            log_text, a.source_outstanding_depth)
+        offered_flits, offered_bytes = None, None
+    else:
+        if a.injection_rate is None:
+            ap.error("non-windowed throughput results require --injection-rate")
+        source_outstanding_hwm = None
+        offered_flits, offered_bytes = offered_load(
+            a.injection_rate, a.burst_len,
+            write_only=a.pattern in AI_WRITE_ONLY)
     nodes = mesh_nodes(a.topology)
-    window = run_window(a.log)
+    window = run_window(a.log, log_text, windowed)
     traffic_meta = None
     if a.pattern in AI_WRITE_ONLY:
         if not a.traffic_meta or not a.traffic_mapping:
             ap.error("AI traffic results require --traffic-meta and --traffic-mapping")
-        traffic_meta = load_traffic_meta(a.traffic_meta, log_text, a.pattern)
+        traffic_meta = load_traffic_meta(
+            a.traffic_meta, log_text, a.pattern,
+            a.traffic_direction if windowed else None, a.multicast_mode,
+            int(a.burst_len) + 1, 1 << int(a.stim_size))
     if window:
         bw = samples * (int(a.burst_len) + 1) * BEAT_BYTES * 8 / window
         window_source = "run"
     else:
         window_source = "monitor"
     accepted_bytes = bw / 8 / nodes if nodes else None
-    active_sources = traffic_meta["active_sources"] if traffic_meta else None
+    active_sources = (traffic_meta.get("active_sources") if traffic_meta else None)
     offered_mesh_avg = (offered_flits * active_sources / nodes
-                        if active_sources is not None and nodes else None)
+                        if offered_flits is not None and
+                        active_sources is not None and nodes else None)
     accepted_injection = (
         traffic_meta["source_write_bursts"] * (int(a.burst_len) + 2) / window / nodes
-        if traffic_meta and window and nodes else None)
+        if traffic_meta and "source_write_bursts" in traffic_meta and window and nodes
+        else None)
+    deliveries = (traffic_meta.get("payload_deliveries",
+                                   traffic_meta.get("destination_deliveries"))
+                  if traffic_meta else None)
+    transfer_bytes = 1 << int(a.stim_size)
     delivered_payload = (
-        traffic_meta["destination_deliveries"] * (int(a.burst_len) + 1) *
-        BEAT_BYTES / window if traffic_meta and window else None)
+        deliveries * (int(a.burst_len) + 1) * transfer_bytes / window
+        if deliveries is not None and window else None)
     (max_unique_ids, max_outstanding, dat_num_vc, router_vc_depth, mst_stall_random,
      ni_dat_rx_vc_depth) = parse_config(log_text, a.max_unique_ids, a.max_outstanding)
 
@@ -382,6 +683,65 @@ def main():
         if mean is None:
             return ""
         return f"{mean + (srcq.get(channel, 0.0) if open_loop else 0.0):.1f}"
+
+    if windowed:
+        if window is None:
+            sys.exit("emit_result_csv: mode 4 requires perf.json")
+        if not _CHANNEL_PASS.search(log_text) or re.search(
+                r"Unexpected RData|Unexpected W last|RLAST mismatch|%Error", log_text):
+            sys.exit("emit_result_csv: mode 4 requires clean non-vacuous checker PASS")
+        direction_latency = lat(a.traffic_direction, True)
+        if not direction_latency:
+            sys.exit("emit_result_csv: selected direction has no completion samples")
+        row = {
+            "topology": a.topology,
+            "vc": dat_num_vc,
+            "router_vc_depth": router_vc_depth,
+            "ni_dat_rx_vc_depth": ni_dat_rx_vc_depth,
+            "pattern": a.pattern,
+            "traffic_mapping": a.traffic_mapping,
+            "measurement_mode": "outstanding",
+            "direction": a.traffic_direction,
+            "data_producers": str(traffic_meta["data_producers"]),
+            "consumers": str(traffic_meta["consumers"]),
+            "axi_initiators": str(traffic_meta["axi_initiators"]),
+            "source_requests": str(traffic_meta["source_requests"]),
+            "payload_deliveries": str(traffic_meta["payload_deliveries"]),
+            "rounds": str(traffic_meta["rounds"]),
+            "transactions_per_flow": str(traffic_meta.get("transactions_per_flow", 1)),
+            "bytes_per_flow_round": str(traffic_meta.get(
+                "bytes_per_flow_round", (int(a.burst_len) + 1) * transfer_bytes)),
+            "multicast_mode": (traffic_meta.get("multicast_mode", "")
+                               if a.pattern == "broadcast" else ""),
+            "destinations_per_source": str(
+                traffic_meta.get("destinations_per_source", "")),
+            "source_outstanding_depth": str(a.source_outstanding_depth),
+            "source_outstanding_hwm": str(source_outstanding_hwm),
+            "seed": a.seed,
+            "max_unique_ids": max_unique_ids,
+            "max_outstanding": max_outstanding,
+            "r_rob_depth": a.r_rob_depth,
+            "max_txns_per_id": a.max_txns_per_id,
+            "ids_per_initiator": a.ids_per_initiator,
+            "burst_length": a.burst_len,
+            "burst_beats": str(int(a.burst_len) + 1),
+            "bytes_per_beat": str(transfer_bytes),
+            "transaction_bytes": str((int(a.burst_len) + 1) * transfer_bytes),
+            "completion_cycles": str(window),
+            "completion_latency_cycles": direction_latency,
+            "delivered_payload_bytes_per_cycle": str(round(delivered_payload, 6)),
+            "checker_status": "PASS",
+            **parse_capacity_hwm(log_text),
+            **dat_link_stats(a.log),
+            **router_dat_stats(a.log),
+        }
+        with open(a.out, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(row))
+            writer.writeheader()
+            writer.writerow(row)
+        print(f"wrote {a.out}: {delivered_payload:.1f} B/cycle, "
+              f"latency {direction_latency} cycles, outstanding {a.source_outstanding_depth}")
+        return
 
     round_fields = ({
         "round_completion_cycles": "",
@@ -400,18 +760,26 @@ def main():
         "injection_mode": a.injection_mode,
         "injection_rate": a.injection_rate,
         "injection_count": a.injection_count,
+        "source_outstanding_depth": (
+            "" if a.source_outstanding_depth is None else str(a.source_outstanding_depth)),
+        "source_outstanding_hwm": (
+            "" if source_outstanding_hwm is None else str(source_outstanding_hwm)),
         "seed": a.seed,
         "max_unique_ids": max_unique_ids,
         "max_outstanding": max_outstanding,
+        "r_rob_depth": a.r_rob_depth,
         "max_txns_per_id": a.max_txns_per_id,
         "ids_per_initiator": a.ids_per_initiator,
         "burst_len": a.burst_len,
         "stim_size": a.stim_size,
         "space": a.space,
         "mst_stall_random": mst_stall_random,
-        "offered_flits_per_node_cycle": str(round(offered_flits, 6)),
-        "offered_bytes_per_node_cycle": str(round(offered_bytes, 6)),
-        "offered_load_per_active_source": str(round(offered_flits, 6)),
+        "offered_flits_per_node_cycle": (
+            "" if offered_flits is None else str(round(offered_flits, 6))),
+        "offered_bytes_per_node_cycle": (
+            "" if offered_bytes is None else str(round(offered_bytes, 6))),
+        "offered_load_per_active_source": (
+            "" if offered_flits is None else str(round(offered_flits, 6))),
         "offered_load_mesh_avg": "" if offered_mesh_avg is None else str(
             round(offered_mesh_avg, 6)),
         "accepted_injection_load_mesh_avg": "" if accepted_injection is None else str(
@@ -436,8 +804,10 @@ def main():
         writer = csv.DictWriter(f, fieldnames=list(row))
         writer.writeheader()
         writer.writerow(row)
+    load = (f"offered {offered_flits:g} flits/node/cyc" if offered_flits is not None
+            else f"source outstanding depth {a.source_outstanding_depth}")
     print(f"wrote {a.out}: {bw:.1f} bits/cyc, nlat {row['mean_latency_network']}, "
-          f"plat {row['mean_latency_open']}, offered {offered_flits:g} flits/node/cyc")
+          f"plat {row['mean_latency_open']}, {load}")
 
 
 if __name__ == "__main__":

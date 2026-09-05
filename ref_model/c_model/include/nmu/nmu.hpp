@@ -48,6 +48,7 @@
 // collision in testbench). Use axi_slave_port() getter to obtain the
 // AxiSlavePort& for the testbench's AxiMaster<AxiSlavePort> wiring.
 #include "nmu/axi_slave_port.hpp"
+#include "ni/channel_mode.hpp"
 #include "ni/ni_stage.hpp"
 #include "nmu/depacketize.hpp"
 #include "nmu/packetize.hpp"
@@ -124,9 +125,9 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
     // axi_ch is a selector token for "which channel kind" (AW/W/AR), not the
     // literal encoding of a produced flit -- accept both classes' encodings.
     std::size_t occupancy(uint8_t axi_ch) const noexcept {
-        if (axi_ch == ni::AXI_CH_NarrowAw || axi_ch == ni::AXI_CH_DataAw) return s1_aw_.occupancy();
-        if (axi_ch == ni::AXI_CH_NarrowW || axi_ch == ni::AXI_CH_DataW) return s1_w_.occupancy();
-        if (axi_ch == ni::AXI_CH_NarrowAr || axi_ch == ni::AXI_CH_DataAr) return s1_ar_.occupancy();
+        if (axi_ch == ::ni::AXI_CH_NarrowAw || axi_ch == ::ni::AXI_CH_DataAw) return s1_aw_.occupancy();
+        if (axi_ch == ::ni::AXI_CH_NarrowW || axi_ch == ::ni::AXI_CH_DataW) return s1_w_.occupancy();
+        if (axi_ch == ::ni::AXI_CH_NarrowAr || axi_ch == ::ni::AXI_CH_DataAr) return s1_ar_.occupancy();
         return 0;
     }
 
@@ -160,17 +161,17 @@ struct NmuConfig {
     addr_trans::SamTable sam{};
     RobMode read_rob_mode = DEFAULT_ROB_MODE;
     // RoB pool depths, per direction. Enabled mode only.
-    std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH;
-    std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH;
+    std::size_t b_rob_depth = ::ni::NMU_ROB_B_DEPTH;
+    std::size_t r_rob_depth = ::ni::NMU_ROB_R_DEPTH;
     // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId). Enabled mode only.
-    std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID;
+    std::size_t max_txns_per_id = ::ni::NMU_MAX_TXNS_PER_ID;
     nmu::PortParams port_params{};
     std::size_t num_vc = 1;
     // DAT face VC count (S3a T4; AW/W only -- no AR rides DAT). REQ/RSP got
     // their own NOC_{REQ,RSP}_NUM_VC=1 params. Round-robins across [0, dat_num_vc).
-    std::size_t dat_num_vc = ni::NOC_DAT_NUM_VC;
-    std::size_t wormhole_per_input_depth = ni::NMU_ARBITER_FIFO_DEPTH;
-    std::size_t vc_allocator_pending_depth = ni::NMU_ARBITER_FIFO_DEPTH;
+    std::size_t dat_num_vc = ::ni::NOC_DAT_NUM_VC;
+    std::size_t wormhole_per_input_depth = ::ni::NMU_ARBITER_FIFO_DEPTH;
+    std::size_t vc_allocator_pending_depth = ::ni::NMU_ARBITER_FIFO_DEPTH;
     std::size_t ni_rsp_extra_depth = 0;  // extra shift stages on the response path
 };
 
@@ -190,6 +191,11 @@ class Nmu {
 
     // AXI facade for testbench wiring (AxiMaster<AxiSlavePort> binds here).
     AxiSlavePort& axi_slave_port() noexcept { return axi_slave_port_; }
+    void set_channel_mode(ni::ChannelMode mode) noexcept {
+        packetize_.set_channel_mode(mode);
+        depacketize_.set_channel_mode(mode);
+        rob_.set_channel_mode(mode);
+    }
 
     // Per-cycle tick — orchestrates sub-modules in upstream-first order.
     void tick();
@@ -216,11 +222,11 @@ class Nmu {
             if (stage == 0) return req_s1_bridge_.occupancy(axi_ch);
             if (stage == 1) {
                 // WormholeArbiter inputs: 0=AW, 1=W, 2=AR (either class)
-                if (axi_ch == ni::AXI_CH_NarrowAw || axi_ch == ni::AXI_CH_DataAw)
+                if (axi_ch == ::ni::AXI_CH_NarrowAw || axi_ch == ::ni::AXI_CH_DataAw)
                     return wormhole_arbiter_.pending_size(0);
-                if (axi_ch == ni::AXI_CH_NarrowW || axi_ch == ni::AXI_CH_DataW)
+                if (axi_ch == ::ni::AXI_CH_NarrowW || axi_ch == ::ni::AXI_CH_DataW)
                     return wormhole_arbiter_.pending_size(1);
-                if (axi_ch == ni::AXI_CH_NarrowAr || axi_ch == ni::AXI_CH_DataAr)
+                if (axi_ch == ::ni::AXI_CH_NarrowAr || axi_ch == ::ni::AXI_CH_DataAr)
                     return wormhole_arbiter_.pending_size(2);
             }
             if (stage == 2) {
@@ -240,8 +246,8 @@ class Nmu {
             // NmuRsp ROB Disabled: 2 stages
             //   S0 = Depacketize deque
             //   S1 = AxiSlavePort b_q/r_q
-            const bool is_b = (axi_ch == ni::AXI_CH_NarrowB || axi_ch == ni::AXI_CH_DataB);
-            const bool is_r = (axi_ch == ni::AXI_CH_NarrowR || axi_ch == ni::AXI_CH_DataR);
+            const bool is_b = (axi_ch == ::ni::AXI_CH_NarrowB || axi_ch == ::ni::AXI_CH_DataB);
+            const bool is_r = (axi_ch == ::ni::AXI_CH_NarrowR || axi_ch == ::ni::AXI_CH_DataR);
             bool rob_enabled = is_b ? true : (cfg_.read_rob_mode == RobMode::Enabled);
             if (stage == 0) {
                 if (is_b) return depacketize_.b_occupancy();
@@ -325,14 +331,14 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
       wormhole_arbiter_(vc_allocator_, /*num_inputs=*/3,
                         std::vector<router::ChannelPairing>{{0, 1}}, cfg_.wormhole_per_input_depth),
       dat_vc_allocator_(downstream_dat_req_, cfg_.dat_num_vc, cfg_.vc_allocator_pending_depth),
-      dat_wormhole_arbiter_(dat_vc_allocator_, /*num_inputs=*/2,
+      dat_wormhole_arbiter_(dat_vc_allocator_, /*num_inputs=*/3,
                             std::vector<router::ChannelPairing>{{0, 1}},
                             cfg_.wormhole_per_input_depth),
       depacketize_(downstream_rsp_, cfg_.port_params.depkt_b_q_depth,
                    cfg_.port_params.depkt_r_q_depth, downstream_dat_rsp_, cfg_.port_id),
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), wormhole_arbiter_.input(2),
-                 dat_wormhole_arbiter_.input(0), dat_wormhole_arbiter_.input(1), cfg_.src_id,
-                 cfg_.sam, cfg_.port_id),
+                 dat_wormhole_arbiter_.input(0), dat_wormhole_arbiter_.input(1),
+                 dat_wormhole_arbiter_.input(2), cfg_.src_id, cfg_.sam, cfg_.port_id),
       req_s1_bridge_(),
       rob_(req_s1_bridge_, depacketize_, cfg_.read_rob_mode, cfg_.sam, cfg_.b_rob_depth,
            cfg_.r_rob_depth, cfg_.max_txns_per_id, cfg_.port_id),

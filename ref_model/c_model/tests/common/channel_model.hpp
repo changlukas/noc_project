@@ -165,8 +165,8 @@ class ChannelModel {
     }
 
   private:
-    static constexpr std::size_t DST_ID_SPACE = 1u << ni::header::DST_ID_WIDTH;
-    static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
+    static constexpr std::size_t DST_ID_SPACE = 1u << ::ni::header::DST_ID_WIDTH;
+    static constexpr std::size_t NUM_VC_MAX = 1u << ::ni::header::VC_ID_WIDTH;  // 8
     // Default per-VC depth is effectively unlimited so that existing fixtures
     // that push more than any small sentinel to one VC are unaffected.
     // Tests that want to exercise credit exhaustion call set_per_vc_depth().

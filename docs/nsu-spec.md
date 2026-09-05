@@ -127,8 +127,8 @@ The downstream id is `remap_downstream_id(upstream_id, max_unique_ids)`:
 
 | `NSU_META_BUFFER_MAX_UNIQUE_IDS` | downstream id | consequence |
 |---|---|---|
-| 1 (default) | constant 3'h7 (7 = 2^3 - 1) for every request | the slave sees one id stream, AXI per-id ordering then forces the slave globally in order, so responses always match the single FIFO bucket |
-| 8 | passthrough (`upstream_id`) | the slave may complete different ids in any order, per-id buckets absorb it |
+| 1 | constant 3'h7 (7 = 2^3 - 1) for every request | the slave sees one id stream, AXI per-id ordering then forces the slave globally in order, so responses always match the single FIFO bucket |
+| 8 (default) | passthrough (`upstream_id`) | the slave may complete different ids in any order, per-id buckets absorb it |
 
 Only {1, 8} are legal. The constructor throws on any other value (`nsu/depacketize.hpp`), and the check survives NDEBUG builds. Example: `upstream_id` = 3'h5 with `max_unique_ids` = 1 becomes awid 3'h7 on the wire, and the B response with bid 3'h7 is translated back to bid 3'h5 in the flit.
 
@@ -352,7 +352,7 @@ second decoder. The complete generated type and array contract is in `rtl/README
 | `NSU_MAX_OUTSTANDING` [target RTL] | 32 | power of two, 1 to 256 | Response Queue transaction records, independently per read/write direction |
 | `NSU_QUEUE_DEPTH` [current model] | 16 | 1 to 1024 | single-clock AW/W/AR/B/R queue depth in `AxiMasterPort` |
 | `NSU_META_BUFFER_MAX_OUTSTANDING` | 32 | 1 to 256 | MetaBuffer shared pool, per direction |
-| `NSU_META_BUFFER_MAX_UNIQUE_IDS` | 1 | {1, 8} only, constructor throws otherwise | id remap in Depacketize |
+| `NSU_META_BUFFER_MAX_UNIQUE_IDS` | 8 | {1, 8} only, constructor throws otherwise | id remap in Depacketize |
 | `NSU_ARBITER_FIFO_DEPTH` [current model] | 4 | 1 to 64 | wormhole and VC-arbiter pending depths; not target NI VC storage |
 | `NOC_DAT_NUM_VC` | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector widths; wrapper-local `DAT_NUM_VC` is an alias |
 | `NOC_DAT_VC_MODE` | SHARED (0) | {SHARED (0), READ_WRITE_SPLIT (1)} | Target `DataR` eligible mask; system-wide with DAT router VA; current model implements SHARED only |

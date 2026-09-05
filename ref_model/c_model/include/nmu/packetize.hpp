@@ -42,6 +42,7 @@
 //   rsvd        — 0 by Flit default
 #include "axi/types.hpp"
 #include "flit.hpp"
+#include "ni/channel_mode.hpp"
 #include "nmu/addr_trans.hpp"
 #include "router/req_out.hpp"
 #include "request_io.hpp"
@@ -86,14 +87,24 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
     Packetize(router::NocReqOut& aw_out, router::NocReqOut& w_out, router::NocReqOut& ar_out,
               router::NocReqOut& dat_aw_out, router::NocReqOut& dat_w_out, uint8_t src_id,
               addr_trans::SamTable sam, uint8_t port_id = 0)
+        : Packetize(aw_out, w_out, ar_out, dat_aw_out, dat_w_out, dat_w_out, src_id,
+                    std::move(sam), port_id) {}
+
+    Packetize(router::NocReqOut& aw_out, router::NocReqOut& w_out, router::NocReqOut& ar_out,
+              router::NocReqOut& dat_aw_out, router::NocReqOut& dat_w_out,
+              router::NocReqOut& dat_ar_out, uint8_t src_id, addr_trans::SamTable sam,
+              uint8_t port_id = 0)
         : aw_out_(aw_out),
           w_out_(w_out),
           ar_out_(ar_out),
           dat_aw_out_(dat_aw_out),
           dat_w_out_(dat_w_out),
+          dat_ar_out_(dat_ar_out),
           src_id_(src_id),
           sam_(std::move(sam)),
           port_id_(port_id) {}
+
+    void set_channel_mode(ni::ChannelMode mode) noexcept { channel_mode_ = mode; }
 
     // ---- RequestPacketizer interface ----
     bool push_aw(const axi::AwBeat& b) override {
@@ -139,10 +150,12 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
     router::NocReqOut& ar_out_;
     router::NocReqOut& dat_aw_out_;
     router::NocReqOut& dat_w_out_;
+    router::NocReqOut& dat_ar_out_;
     uint8_t src_id_;
     addr_trans::SamTable sam_;
     // This NI's own endpoint at src_id, stamped into every request it issues.
     uint8_t port_id_ = 0;
+    ni::ChannelMode channel_mode_ = ni::ChannelMode::Native;
 
     // W FIFO carries the meta inherited from AW. local_addr/len/size/burst +
     // beat_counter feed the narrow class's lane re-anchor (axi::beat_addr):
@@ -174,7 +187,7 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     // AWUSER accessors mask to 2 b / 48 b, so without this a stray bit would be
     // silently dropped rather than rejected. The direct-path guard covers it by
     // testing AWUSER[57:8] as a whole.
-    if ((b.user >> ni::AXI_AWUSER_WIDTH) != 0) {
+    if ((b.user >> ::ni::AXI_AWUSER_WIDTH) != 0) {
         assert(false &&
                "nmu::Packetize::push_aw_with_meta: AWUSER bits above the field width are set");
         std::abort();  // belt-and-braces for NDEBUG
@@ -192,7 +205,8 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     // (8 B) does not fit. A stimulus/SAM-config error, not backpressure, so it
     // takes the same fatal shape as addr_trans / depacketize / rob use for a
     // permanent illegal input.
-    if (meta.cls == axi::AxiClass::Narrow && b.size > 3) {
+    if ((meta.cls == axi::AxiClass::Narrow || channel_mode_ != ni::ChannelMode::Native) &&
+        b.size > 3) {
         assert(false &&
                "nmu::Packetize::push_aw_with_meta: narrow class (SAM config space) requires "
                "AWSIZE <= 3 (8 B); larger does not fit the NarrowW payload");
@@ -202,7 +216,7 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     const bool is_data = (meta.cls == axi::AxiClass::Data);
 
     Flit f;
-    f.set_header_field("axi_ch", is_data ? ni::AXI_CH_DataAw : ni::AXI_CH_NarrowAw);
+    f.set_header_field("axi_ch", is_data ? ::ni::AXI_CH_DataAw : ::ni::AXI_CH_NarrowAw);
     f.set_header_field("src_id", src_id_);
     f.set_header_field("dst_id", meta.dst_id);
     f.set_header_field("dst_port_id", meta.dst_port);
@@ -224,7 +238,8 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     f.set_payload_field("AW", "awregion", b.region);
     f.set_payload_field("AW", "awqos", b.qos);
     f.set_payload_field("AW", "awuser", payload_user);
-    router::NocReqOut& out = is_data ? dat_aw_out_ : aw_out_;
+    router::NocReqOut& out =
+        is_data && channel_mode_ != ni::ChannelMode::TwoChannel64 ? dat_aw_out_ : aw_out_;
     if (!out.push_flit(f)) return false;
     w_meta_fifo_.push_back({meta.dst_id, meta.ordering_req, meta.ordering_tag, meta.cls,
                             meta.local_addr, b.len, b.size, b.burst, meta.collective_op,
@@ -244,9 +259,10 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
     if (w_meta_fifo_.empty()) return false;
     auto& meta = w_meta_fifo_.front();
     const bool is_data = (meta.cls == axi::AxiClass::Data);
-    const char* ch = is_data ? "DATA_W" : "NARROW_W";
+    const bool narrow_payload = !is_data || channel_mode_ != ni::ChannelMode::Native;
+    const char* ch = narrow_payload ? "NARROW_W" : "DATA_W";
     Flit f;
-    f.set_header_field("axi_ch", is_data ? ni::AXI_CH_DataW : ni::AXI_CH_NarrowW);
+    f.set_header_field("axi_ch", is_data ? ::ni::AXI_CH_DataW : ::ni::AXI_CH_NarrowW);
     f.set_header_field("src_id", src_id_);
     f.set_header_field("dst_id", meta.dst_id);
     f.set_header_field("dst_port_id", meta.dst_port);
@@ -259,11 +275,11 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
     f.set_header_field("collective_mask", meta.collective_mask);
     f.set_payload_field(ch, "wlast", b.last ? 1u : 0u);
     f.set_payload_field(ch, "wuser", b.user);
-    if (is_data) {
+    if (!narrow_payload) {
         f.set_payload_field(ch, "wstrb", b.strb);
-        f.set_payload_bytes(ch, "wdata", b.data.data(), ni::width::NOC_DATA_WIDTH);
+        f.set_payload_bytes(ch, "wdata", b.data.data(), ::ni::width::NOC_DATA_WIDTH);
     } else {
-        // Narrow: extract this beat's addressed 8 B lane from the shared
+        // Narrow payload: extract this beat's addressed 8 B lane from the shared
         // DATA_BYTES-wide WBeat. meta carries the AW basis (the flit's own
         // "AW" payload has no per-beat address); beat_counter positions this
         // beat within the burst (INCR/WRAP addresses move beat to beat).
@@ -272,9 +288,10 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
         const unsigned lane = axi::narrow_lane(addr);
         f.set_payload_field(ch, "wstrb", (b.strb >> (lane * axi::NARROW_DATA_BYTES)) & 0xFFull);
         f.set_payload_bytes(ch, "wdata", b.data.data() + lane * axi::NARROW_DATA_BYTES,
-                            ni::width::NOC_NARROW_DATA_WIDTH);
+                            ::ni::width::NOC_NARROW_DATA_WIDTH);
     }
-    router::NocReqOut& out = is_data ? dat_w_out_ : w_out_;
+    router::NocReqOut& out =
+        is_data && channel_mode_ != ni::ChannelMode::TwoChannel64 ? dat_w_out_ : w_out_;
     if (!out.push_flit(f)) return false;
     ++meta.beat_counter;
     if (b.last) w_meta_fifo_.pop_front();
@@ -283,7 +300,8 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
 
 inline bool Packetize::push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta) {
     // Same narrow-size reject as push_aw_with_meta (see comment there).
-    if (meta.cls == axi::AxiClass::Narrow && b.size > 3) {
+    if ((meta.cls == axi::AxiClass::Narrow || channel_mode_ != ni::ChannelMode::Native) &&
+        b.size > 3) {
         assert(false &&
                "nmu::Packetize::push_ar_with_meta: narrow class (SAM config space) requires "
                "ARSIZE <= 3 (8 B); larger does not fit the NarrowR payload");
@@ -291,7 +309,7 @@ inline bool Packetize::push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta
     }
     Flit f;
     f.set_header_field("axi_ch",
-                       meta.cls == axi::AxiClass::Data ? ni::AXI_CH_DataAr : ni::AXI_CH_NarrowAr);
+                       meta.cls == axi::AxiClass::Data ? ::ni::AXI_CH_DataAr : ::ni::AXI_CH_NarrowAr);
     f.set_header_field("src_id", src_id_);
     f.set_header_field("dst_id", meta.dst_id);
     f.set_header_field("dst_port_id", meta.dst_port);
@@ -311,7 +329,11 @@ inline bool Packetize::push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta
     f.set_payload_field("AR", "arregion", b.region);
     f.set_payload_field("AR", "arqos", b.qos);
     f.set_payload_field("AR", "aruser", b.user);
-    if (!ar_out_.push_flit(f)) return false;
+    router::NocReqOut& out = meta.cls == axi::AxiClass::Data &&
+                                     channel_mode_ == ni::ChannelMode::ThreeChannel64
+                                 ? dat_ar_out_
+                                 : ar_out_;
+    if (!out.push_flit(f)) return false;
     return true;
 }
 

@@ -20,6 +20,7 @@ module link_perf_monitor #(
 ) (
     input logic clk_i,
     input logic rst_ni,
+    input logic measure_en,
     input logic valid,                    // a flit is presented on the wire this cycle
     input logic ready,                    // ready_valid flow only: downstream accepts this cycle
     input logic [VC_ID_WIDTH-1:0] vc_id,  // credit flow only: full VC_ID field from flit header
@@ -48,15 +49,10 @@ module link_perf_monitor #(
         end else begin
             automatic longint next_flit;
             automatic longint next_stall;
-            if (FLOW == "ready_valid") begin
-                next_flit  = flit_count + ((valid && ready) ? 1 : 0);
-                next_stall = stall_cyc  + ((valid && !ready) ? 1 : 0);
-            end else begin
+            if (FLOW != "ready_valid") begin
                 // Credit reserves the slot before valid asserts, so every
                 // valid flit is a real transfer; the stall is "idle, but the
                 // credit VC buffer is full."
-                next_flit  = flit_count + (valid ? 1 : 0);
-                next_stall = stall_cyc  + ((!valid && any_vc_zero) ? 1 : 0);
                 for (int v = 0; v < NUM_VC; v++) begin
                     automatic int delta = 0;
                     if (credit_pulse[v]) delta = delta + 1;
@@ -64,10 +60,22 @@ module link_perf_monitor #(
                     credit[v] <= credit[v] + delta;
                 end
             end
-            flit_count <= next_flit;
-            stall_cyc  <= next_stall;
-            // live push (last-write-wins): final cycle's call carries the total.
-            cmodel_perf_link(LINK_NAME, next_flit, next_stall);
+            if (!measure_en) begin
+                flit_count <= 0;
+                stall_cyc  <= 0;
+            end else begin
+                if (FLOW == "ready_valid") begin
+                    next_flit  = flit_count + ((valid && ready) ? 1 : 0);
+                    next_stall = stall_cyc  + ((valid && !ready) ? 1 : 0);
+                end else begin
+                    next_flit  = flit_count + (valid ? 1 : 0);
+                    next_stall = stall_cyc  + ((!valid && any_vc_zero) ? 1 : 0);
+                end
+                flit_count <= next_flit;
+                stall_cyc  <= next_stall;
+                // live push (last-write-wins): final cycle's call carries the total.
+                cmodel_perf_link(LINK_NAME, next_flit, next_stall);
+            end
         end
     end
 

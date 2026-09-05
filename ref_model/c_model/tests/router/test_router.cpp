@@ -1359,6 +1359,88 @@ TEST(RouterVa, ZeroCreditVcIsNeverHeld) {
     EXPECT_EQ(east.received.size(), NOC_ROUTER_VC_DEPTH + 1);
 }
 
+TEST(RouterDiagnostics, IdleZeroCreditVcIsNotBlocked) {
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+
+    for (std::size_t k = 0; k < cfg.vc_depth; ++k) {
+        r.input(W).push_flit(make_pinned_flit(make_dst(3, 1), 0, 1));
+        for (int t = 0; t < 6 && east.received.size() < k + 1; ++t) r.tick();
+        ASSERT_EQ(east.received.size(), k + 1);
+    }
+    ASSERT_EQ(r.credit(E, 0), 0u);
+
+    EXPECT_FALSE(r.output_vc_credit_blocked(E, 0));
+}
+
+TEST(RouterDiagnostics, UnrelatedZeroCreditVcIsNotBlocked) {
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+
+    for (std::size_t k = 0; k < cfg.vc_depth; ++k) {
+        r.input(W).push_flit(make_pinned_flit(make_dst(3, 1), 0, 1));
+        for (int t = 0; t < 6 && east.received.size() < k + 1; ++t) r.tick();
+        ASSERT_EQ(east.received.size(), k + 1);
+    }
+    ASSERT_EQ(r.credit(E, 0), 0u);
+
+    r.input(W).push_flit(make_pinned_flit(make_dst(3, 1), 1, 0));
+    r.tick();  // stage 1 BW: the vc1 request is now visible at the FIFO front
+    EXPECT_FALSE(r.output_vc_credit_blocked(E, 0));
+}
+
+TEST(RouterDiagnostics, UnallocatedHeadCountsWhenSelectedVcHasZeroCreditAndOutputFifoIsFull) {
+    RouterConfig cfg = center_cfg();
+    cfg.vc_depth = 2;
+    cfg.output_fifo_depth = 2;
+    Router r(cfg);
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+
+    for (std::size_t k = 0; k <= cfg.vc_depth; ++k) {
+        r.input(W).push_flit(make_pinned_flit(make_dst(3, 1), 0, 1));
+        r.tick();
+    }
+    r.tick();  // fill the output FIFO; the third head retries VA at zero credit
+    ASSERT_EQ(r.output_fifo_size(E), cfg.output_fifo_depth);
+    ASSERT_EQ(r.credit(E, 0), 0u);
+    ASSERT_EQ(r.input_fifo_size(W, 0), 1u);
+    ASSERT_FALSE(r.va_out_vc(W, 0).has_value());
+
+    EXPECT_TRUE(r.output_vc_credit_blocked(E, 0));
+}
+
+TEST(RouterDiagnostics, RequestingWormReportsItsSelectedZeroCreditVc) {
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+
+    for (std::size_t k = 0; k <= cfg.vc_depth; ++k) {
+        r.input(W).push_flit(make_pinned_flit(make_dst(3, 1), 1, 0));
+        r.tick();
+    }
+    r.tick();  // drain the fourth flit; the fifth remains at the locked FIFO front
+    ASSERT_EQ(r.credit(E, 1), 0u);
+    ASSERT_EQ(r.input_fifo_size(W, 1), 1u);
+
+    EXPECT_TRUE(r.output_vc_credit_blocked(E, 1));
+    EXPECT_FALSE(r.output_vc_credit_blocked(E, 0));
+}
+
 TEST(RouterVaWorkConserving, HeadVaFailAlternateCandidateGrantedSameTick) {
     RouterConfig cfg = center_cfg();
     cfg.num_vc = 2;

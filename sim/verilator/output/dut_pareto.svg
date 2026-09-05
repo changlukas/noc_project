@@ -1,0 +1,200 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1900" height="506" viewBox="0 0 1900 506">
+<title>Measured-Set DUT Pareto View</title>
+<style>text{font-family:Arial,Helvetica,sans-serif;fill:#1f2933}.title{font-size:26px;font-weight:700}.head{font-size:15px;font-weight:700}.subhead{font-size:14px;fill:#52606d}.cell{font-size:15px}.config{font-size:16px;font-weight:700}.line{stroke:#bcccdc;stroke-width:1}.pareto{fill:#e7f3fa}.dominated{fill:#f5f7fa}.status-p{fill:#1f7a4d;font-weight:700}.status-d{fill:#7b8794}</style>
+<text class="title" x="34" y="36">Measured-Set DUT Pareto View</text>
+<text class="subhead" x="34" y="62">Each workload metric and storage category remains independent.</text>
+<text class="head" x="169" y="91" text-anchor="end">VC / Depth</text>
+<text class="subhead" x="169" y="116" text-anchor="end">flits/VC</text>
+<text class="head" x="301" y="91" text-anchor="middle">BG W</text>
+<text class="subhead" x="243.0" y="116" text-anchor="middle">BW %</text>
+<text class="subhead" x="359.0" y="116" text-anchor="middle">Time x</text>
+<text class="head" x="533" y="91" text-anchor="middle">Gather W</text>
+<text class="subhead" x="475.0" y="116" text-anchor="middle">BW %</text>
+<text class="subhead" x="591.0" y="116" text-anchor="middle">Time x</text>
+<text class="head" x="765" y="91" text-anchor="middle">Gather R</text>
+<text class="subhead" x="707.0" y="116" text-anchor="middle">BW %</text>
+<text class="subhead" x="823.0" y="116" text-anchor="middle">Time x</text>
+<text class="head" x="997" y="91" text-anchor="middle">Regional W</text>
+<text class="subhead" x="939.0" y="116" text-anchor="middle">BW %</text>
+<text class="subhead" x="1055.0" y="116" text-anchor="middle">Time x</text>
+<text class="head" x="1229" y="91" text-anchor="middle">Regional R</text>
+<text class="subhead" x="1171.0" y="116" text-anchor="middle">BW %</text>
+<text class="subhead" x="1287.0" y="116" text-anchor="middle">Time x</text>
+<text class="head" x="1399.0" y="91" text-anchor="middle">Router DAT</text>
+<text class="subhead" x="1399.0" y="116" text-anchor="middle">entries/input</text>
+<text class="head" x="1507.0" y="91" text-anchor="middle">NI RX DAT</text>
+<text class="subhead" x="1507.0" y="116" text-anchor="middle">entries/NI</text>
+<text class="head" x="1615.0" y="91" text-anchor="middle">NI TX DAT</text>
+<text class="subhead" x="1615.0" y="116" text-anchor="middle">entries/NI</text>
+<text class="head" x="1723.0" y="91" text-anchor="middle">Read RoB</text>
+<text class="subhead" x="1723.0" y="116" text-anchor="middle">beat slots/NI</text>
+<text class="head" x="1837.0" y="103" text-anchor="middle">Status</text>
+<g class="candidate-row">
+<rect class="pareto" x="24" y="128" width="1852" height="40"/>
+<text class="config" x="169" y="154" text-anchor="end">VC 1 / D 8</text>
+<text class="cell" x="243.0" y="154" text-anchor="middle">100.0</text>
+<text class="cell" x="359.0" y="154" text-anchor="middle">1.00</text>
+<text class="cell" x="475.0" y="154" text-anchor="middle">100.0</text>
+<text class="cell" x="591.0" y="154" text-anchor="middle">1.00</text>
+<text class="cell" x="707.0" y="154" text-anchor="middle">100.0</text>
+<text class="cell" x="823.0" y="154" text-anchor="middle">1.00</text>
+<text class="cell" x="939.0" y="154" text-anchor="middle">98.6</text>
+<text class="cell" x="1055.0" y="154" text-anchor="middle">1.01</text>
+<text class="cell" x="1171.0" y="154" text-anchor="middle">91.6</text>
+<text class="cell" x="1287.0" y="154" text-anchor="middle">1.09</text>
+<text class="cell" x="1399.0" y="154" text-anchor="middle">8</text>
+<text class="cell" x="1507.0" y="154" text-anchor="middle">8</text>
+<text class="cell" x="1615.0" y="154" text-anchor="middle">8</text>
+<text class="cell" x="1723.0" y="154" text-anchor="middle">128</text>
+<text class="cell status-p" x="1837.0" y="154" text-anchor="middle">Pareto</text>
+</g>
+<g class="candidate-row">
+<rect class="pareto" x="24" y="170" width="1852" height="40"/>
+<text class="config" x="169" y="196" text-anchor="end">VC 2 / D 8</text>
+<text class="cell" x="243.0" y="196" text-anchor="middle">100.0</text>
+<text class="cell" x="359.0" y="196" text-anchor="middle">1.00</text>
+<text class="cell" x="475.0" y="196" text-anchor="middle">100.0</text>
+<text class="cell" x="591.0" y="196" text-anchor="middle">1.00</text>
+<text class="cell" x="707.0" y="196" text-anchor="middle">100.0</text>
+<text class="cell" x="823.0" y="196" text-anchor="middle">1.00</text>
+<text class="cell" x="939.0" y="196" text-anchor="middle">86.4</text>
+<text class="cell" x="1055.0" y="196" text-anchor="middle">1.16</text>
+<text class="cell" x="1171.0" y="196" text-anchor="middle">92.1</text>
+<text class="cell" x="1287.0" y="196" text-anchor="middle">1.09</text>
+<text class="cell" x="1399.0" y="196" text-anchor="middle">16</text>
+<text class="cell" x="1507.0" y="196" text-anchor="middle">16</text>
+<text class="cell" x="1615.0" y="196" text-anchor="middle">8</text>
+<text class="cell" x="1723.0" y="196" text-anchor="middle">128</text>
+<text class="cell status-p" x="1837.0" y="196" text-anchor="middle">Pareto</text>
+</g>
+<g class="candidate-row">
+<rect class="pareto" x="24" y="212" width="1852" height="40"/>
+<text class="config" x="169" y="238" text-anchor="end">VC 1 / D 32</text>
+<text class="cell" x="243.0" y="238" text-anchor="middle">100.0</text>
+<text class="cell" x="359.0" y="238" text-anchor="middle">1.00</text>
+<text class="cell" x="475.0" y="238" text-anchor="middle">100.0</text>
+<text class="cell" x="591.0" y="238" text-anchor="middle">1.00</text>
+<text class="cell" x="707.0" y="238" text-anchor="middle">100.0</text>
+<text class="cell" x="823.0" y="238" text-anchor="middle">1.00</text>
+<text class="cell" x="939.0" y="238" text-anchor="middle">100.0</text>
+<text class="cell" x="1055.0" y="238" text-anchor="middle">1.00</text>
+<text class="cell" x="1171.0" y="238" text-anchor="middle">93.7</text>
+<text class="cell" x="1287.0" y="238" text-anchor="middle">1.07</text>
+<text class="cell" x="1399.0" y="238" text-anchor="middle">32</text>
+<text class="cell" x="1507.0" y="238" text-anchor="middle">32</text>
+<text class="cell" x="1615.0" y="238" text-anchor="middle">8</text>
+<text class="cell" x="1723.0" y="238" text-anchor="middle">128</text>
+<text class="cell status-p" x="1837.0" y="238" text-anchor="middle">Pareto</text>
+</g>
+<g class="candidate-row">
+<rect class="dominated" x="24" y="254" width="1852" height="40"/>
+<text class="config" x="169" y="280" text-anchor="end">VC 2 / D 16</text>
+<text class="cell" x="243.0" y="280" text-anchor="middle">100.0</text>
+<text class="cell" x="359.0" y="280" text-anchor="middle">1.00</text>
+<text class="cell" x="475.0" y="280" text-anchor="middle">100.0</text>
+<text class="cell" x="591.0" y="280" text-anchor="middle">1.00</text>
+<text class="cell" x="707.0" y="280" text-anchor="middle">100.0</text>
+<text class="cell" x="823.0" y="280" text-anchor="middle">1.00</text>
+<text class="cell" x="939.0" y="280" text-anchor="middle">85.8</text>
+<text class="cell" x="1055.0" y="280" text-anchor="middle">1.16</text>
+<text class="cell" x="1171.0" y="280" text-anchor="middle">92.1</text>
+<text class="cell" x="1287.0" y="280" text-anchor="middle">1.09</text>
+<text class="cell" x="1399.0" y="280" text-anchor="middle">32</text>
+<text class="cell" x="1507.0" y="280" text-anchor="middle">32</text>
+<text class="cell" x="1615.0" y="280" text-anchor="middle">8</text>
+<text class="cell" x="1723.0" y="280" text-anchor="middle">128</text>
+<text class="cell status-d" x="1837.0" y="280" text-anchor="middle">Dominated</text>
+</g>
+<g class="candidate-row">
+<rect class="dominated" x="24" y="296" width="1852" height="40"/>
+<text class="config" x="169" y="322" text-anchor="end">VC 4 / D 8</text>
+<text class="cell" x="243.0" y="322" text-anchor="middle">100.0</text>
+<text class="cell" x="359.0" y="322" text-anchor="middle">1.00</text>
+<text class="cell" x="475.0" y="322" text-anchor="middle">100.0</text>
+<text class="cell" x="591.0" y="322" text-anchor="middle">1.00</text>
+<text class="cell" x="707.0" y="322" text-anchor="middle">100.0</text>
+<text class="cell" x="823.0" y="322" text-anchor="middle">1.00</text>
+<text class="cell" x="939.0" y="322" text-anchor="middle">85.5</text>
+<text class="cell" x="1055.0" y="322" text-anchor="middle">1.17</text>
+<text class="cell" x="1171.0" y="322" text-anchor="middle">92.1</text>
+<text class="cell" x="1287.0" y="322" text-anchor="middle">1.09</text>
+<text class="cell" x="1399.0" y="322" text-anchor="middle">32</text>
+<text class="cell" x="1507.0" y="322" text-anchor="middle">32</text>
+<text class="cell" x="1615.0" y="322" text-anchor="middle">8</text>
+<text class="cell" x="1723.0" y="322" text-anchor="middle">128</text>
+<text class="cell status-d" x="1837.0" y="322" text-anchor="middle">Dominated</text>
+</g>
+<g class="candidate-row">
+<rect class="pareto" x="24" y="338" width="1852" height="40"/>
+<text class="config" x="169" y="364" text-anchor="end">VC 2 / D 32</text>
+<text class="cell" x="243.0" y="364" text-anchor="middle">100.0</text>
+<text class="cell" x="359.0" y="364" text-anchor="middle">1.00</text>
+<text class="cell" x="475.0" y="364" text-anchor="middle">100.0</text>
+<text class="cell" x="591.0" y="364" text-anchor="middle">1.00</text>
+<text class="cell" x="707.0" y="364" text-anchor="middle">100.0</text>
+<text class="cell" x="823.0" y="364" text-anchor="middle">1.00</text>
+<text class="cell" x="939.0" y="364" text-anchor="middle">86.1</text>
+<text class="cell" x="1055.0" y="364" text-anchor="middle">1.16</text>
+<text class="cell" x="1171.0" y="364" text-anchor="middle">100.0</text>
+<text class="cell" x="1287.0" y="364" text-anchor="middle">1.00</text>
+<text class="cell" x="1399.0" y="364" text-anchor="middle">64</text>
+<text class="cell" x="1507.0" y="364" text-anchor="middle">64</text>
+<text class="cell" x="1615.0" y="364" text-anchor="middle">8</text>
+<text class="cell" x="1723.0" y="364" text-anchor="middle">128</text>
+<text class="cell status-p" x="1837.0" y="364" text-anchor="middle">Pareto</text>
+</g>
+<g class="candidate-row">
+<rect class="dominated" x="24" y="380" width="1852" height="40"/>
+<text class="config" x="169" y="406" text-anchor="end">VC 4 / D 16</text>
+<text class="cell" x="243.0" y="406" text-anchor="middle">100.0</text>
+<text class="cell" x="359.0" y="406" text-anchor="middle">1.00</text>
+<text class="cell" x="475.0" y="406" text-anchor="middle">100.0</text>
+<text class="cell" x="591.0" y="406" text-anchor="middle">1.00</text>
+<text class="cell" x="707.0" y="406" text-anchor="middle">100.0</text>
+<text class="cell" x="823.0" y="406" text-anchor="middle">1.00</text>
+<text class="cell" x="939.0" y="406" text-anchor="middle">85.6</text>
+<text class="cell" x="1055.0" y="406" text-anchor="middle">1.17</text>
+<text class="cell" x="1171.0" y="406" text-anchor="middle">92.1</text>
+<text class="cell" x="1287.0" y="406" text-anchor="middle">1.09</text>
+<text class="cell" x="1399.0" y="406" text-anchor="middle">64</text>
+<text class="cell" x="1507.0" y="406" text-anchor="middle">64</text>
+<text class="cell" x="1615.0" y="406" text-anchor="middle">8</text>
+<text class="cell" x="1723.0" y="406" text-anchor="middle">128</text>
+<text class="cell status-d" x="1837.0" y="406" text-anchor="middle">Dominated</text>
+</g>
+<g class="candidate-row">
+<rect class="dominated" x="24" y="422" width="1852" height="40"/>
+<text class="config" x="169" y="448" text-anchor="end">VC 8 / D 8</text>
+<text class="cell" x="243.0" y="448" text-anchor="middle">100.0</text>
+<text class="cell" x="359.0" y="448" text-anchor="middle">1.00</text>
+<text class="cell" x="475.0" y="448" text-anchor="middle">100.0</text>
+<text class="cell" x="591.0" y="448" text-anchor="middle">1.00</text>
+<text class="cell" x="707.0" y="448" text-anchor="middle">100.0</text>
+<text class="cell" x="823.0" y="448" text-anchor="middle">1.00</text>
+<text class="cell" x="939.0" y="448" text-anchor="middle">85.5</text>
+<text class="cell" x="1055.0" y="448" text-anchor="middle">1.17</text>
+<text class="cell" x="1171.0" y="448" text-anchor="middle">92.1</text>
+<text class="cell" x="1287.0" y="448" text-anchor="middle">1.09</text>
+<text class="cell" x="1399.0" y="448" text-anchor="middle">64</text>
+<text class="cell" x="1507.0" y="448" text-anchor="middle">64</text>
+<text class="cell" x="1615.0" y="448" text-anchor="middle">8</text>
+<text class="cell" x="1723.0" y="448" text-anchor="middle">128</text>
+<text class="cell status-d" x="1837.0" y="448" text-anchor="middle">Dominated</text>
+</g>
+<line class="line" x1="185" y1="76" x2="185" y2="504"/>
+<line class="line" x1="301" y1="76" x2="301" y2="504"/>
+<line class="line" x1="417" y1="76" x2="417" y2="504"/>
+<line class="line" x1="533" y1="76" x2="533" y2="504"/>
+<line class="line" x1="649" y1="76" x2="649" y2="504"/>
+<line class="line" x1="765" y1="76" x2="765" y2="504"/>
+<line class="line" x1="881" y1="76" x2="881" y2="504"/>
+<line class="line" x1="997" y1="76" x2="997" y2="504"/>
+<line class="line" x1="1113" y1="76" x2="1113" y2="504"/>
+<line class="line" x1="1229" y1="76" x2="1229" y2="504"/>
+<line class="line" x1="1345" y1="76" x2="1345" y2="504"/>
+<line class="line" x1="1345" y1="76" x2="1345" y2="504"/>
+<line class="line" x1="1453" y1="76" x2="1453" y2="504"/>
+<line class="line" x1="1561" y1="76" x2="1561" y2="504"/>
+<line class="line" x1="1669" y1="76" x2="1669" y2="504"/>
+<line class="line" x1="1777" y1="76" x2="1777" y2="504"/>
+</svg>

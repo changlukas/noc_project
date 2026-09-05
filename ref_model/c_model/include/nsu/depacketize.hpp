@@ -1,6 +1,7 @@
 #pragma once
 #include "axi/types.hpp"
 #include "flit.hpp"
+#include "ni/channel_mode.hpp"
 #include "ni_flit_constants.h"
 #include "router/null_adapters.hpp"
 #include "router/req_in.hpp"
@@ -23,8 +24,8 @@ namespace ni::cmodel::nsu {
 
 // NSU-side request depacketizer. Stateful demux: tick() pulls flits from two
 // independent NocReqIn ingresses -- REQ and DAT (S3a T4 ingress + T6
-// steering: NMU's Packetize steers Data-class AW/W here; DAT never carries
-// Narrow* or DataAr -- see drain_ingress_'s defensive assert) -- reads
+// steering: DAT carries DataAw/DataW in Native, DataAw/DataW/DataAr in
+// ThreeChannel64, and no traffic in TwoChannel64; Narrow* never uses DAT) -- reads
 // axi_ch, and parks the flit per class, per docs/image/nsu.jpg: narrow AW/W
 // in their own S1 stage registers, data AW/W in a bounded queue per DAT VC
 // (dat_q_). S3a shared one register per channel across both classes; that
@@ -85,6 +86,7 @@ class Depacketize : public RequestDepacketizer {
     }
 
     void tick();
+    void set_channel_mode(ni::ChannelMode mode) noexcept { channel_mode_ = mode; }
 
     // RequestDepacketizer interface: takes from the narrow S1 stage register
     // or the data VC queue. Called by AxiMasterPort (S2) once per tick
@@ -93,26 +95,26 @@ class Depacketize : public RequestDepacketizer {
     std::optional<axi::WBeat> pop_w() override;
     std::optional<axi::ArBeat> pop_ar() override;
 
-    // stage_occupancy probe. axi_ch uses ni::AXI_CH_* constants. Narrow AW/W
+    // stage_occupancy probe. axi_ch uses ::ni::AXI_CH_* constants. Narrow AW/W
     // and AR are 0/1 register probes. DataAw / DataW count flits of that
     // channel across all VC queues, so they range 0 to
     // dat_num_vc * NOC_NI_DAT_RX_VC_DEPTH, not 0/1.
     std::size_t s1_occupancy(uint8_t axi_ch) const noexcept {
         switch (axi_ch) {
-            case ni::AXI_CH_NarrowAw:
+            case ::ni::AXI_CH_NarrowAw:
                 return s1_narrow_aw_.occupancy();
-            case ni::AXI_CH_NarrowW:
+            case ::ni::AXI_CH_NarrowW:
                 return s1_narrow_w_.occupancy();
-            case ni::AXI_CH_DataAw:
-            case ni::AXI_CH_DataW: {
+            case ::ni::AXI_CH_DataAw:
+            case ::ni::AXI_CH_DataW: {
                 std::size_t n = 0;
                 for (const auto& q : dat_q_)
-                    for (const auto& f : q)
-                        if (f.get_header_field("axi_ch") == axi_ch) ++n;
+                    for (const auto& entry : q)
+                        if (entry.flit.get_header_field("axi_ch") == axi_ch) ++n;
                 return n;
             }
-            case ni::AXI_CH_NarrowAr:
-            case ni::AXI_CH_DataAr:
+            case ::ni::AXI_CH_NarrowAr:
+            case ::ni::AXI_CH_DataAr:
                 return s1_ar_.occupancy();
             default:
                 return 0;
@@ -135,6 +137,7 @@ class Depacketize : public RequestDepacketizer {
     std::size_t max_unique_ids_;
     std::optional<Flit> pending_req_;
     std::optional<Flit> pending_dat_;
+    ni::ChannelMode channel_mode_ = ni::ChannelMode::Native;
 
     // AW / AR hold the raw flit until pop_aw / pop_ar admit it: the drain stage
     // needs the header's src_id / ordering_req / ordering_tag to allocate the MetaBuffer
@@ -148,10 +151,9 @@ class Depacketize : public RequestDepacketizer {
     // so a shared stage lets the two classes interleave and the W stream stops
     // agreeing with the AW stream on burst boundaries.
     //
-    // AR needs no split: DAT carries DataAw/DataW only, so every AR -- narrow
-    // and data alike -- arrives on REQ already ordered (drain_ingress_'s
-    // is_dat_ingress assert pins that), and AR owns no second channel to stay
-    // in step with.
+    // AR needs no class split. Native and TwoChannel64 route all AR on REQ;
+    // ThreeChannel64 routes DataAr on DAT and NarrowAr on REQ. Unlike W, AR
+    // has no separate address channel whose ordering must stay paired.
     router::PipelineStage<Flit> s1_narrow_aw_;
     router::PipelineStage<axi::WBeat> s1_narrow_w_;
     router::PipelineStage<Flit> s1_ar_;
@@ -162,11 +164,17 @@ class Depacketize : public RequestDepacketizer {
     // worms of different VCs arrive interleaved flit by flit and each VC has to
     // reassemble its own burst. Depth = NOC_NI_DAT_RX_VC_DEPTH, the router's
     // LOCAL credit seed: the sender never has more than that many unacknowledged
-    // flits per VC, so push cannot overflow. A slot is returned
+    // flits per VC, so DAT push cannot overflow. TwoChannel64 carries the same
+    // data class over unbounded REQ ready/valid ingress; when this queue is
+    // full, that ingress waits in pending_req_ instead. A slot is returned
     // (dat_credit_pending_) when pop_aw / pop_w consume the flit. Both
     // ingresses deposit data-class flits here (DAT in co-sim, REQ in the ctest
     // stubs).
-    std::vector<std::deque<Flit>> dat_q_;
+    struct DataFlit {
+        Flit flit;
+        bool from_dat;
+    };
+    std::vector<std::deque<DataFlit>> dat_q_;
     std::vector<std::size_t> dat_credit_pending_;
     uint8_t dat_aw_rr_ = 0;  // VC round-robin for data-class AW admission
 
@@ -180,10 +188,16 @@ class Depacketize : public RequestDepacketizer {
         AxiClass cls;
         uint32_t beats;
         uint8_t vc;  // data class: the VC queue its W beats arrive on
+        uint64_t local_addr;
+        uint8_t len;
+        uint8_t size;
+        axi::Burst burst;
     };
     std::deque<WBurst> w_order_;
     uint32_t w_beats_done_ = 0;    // beats served for w_order_.front()
     bool aw_prefer_data_ = false;  // round-robin between classes at pop_aw
+    bool s1_ar_from_dat_ = false;
+    uint8_t s1_ar_dat_vc_ = 0;
 
     // Narrow-class W lane re-anchor (S2 design doc §2 site 2): the AW basis a
     // W burst's beats need is decoded eagerly here, at AW arrival, and staged
@@ -193,8 +207,8 @@ class Depacketize : public RequestDepacketizer {
     // nmu::Rob's ar_lane_meta_): decode_w's data branch never pops, so an
     // unconditional push would leak one entry per data-class AW and, worse,
     // leave a stale front entry for the next narrow AW to misread.
-    // Data class ignores this FIFO entirely (full-width payload, decoded
-    // directly, no lane math).
+    // Native DataW is full-width. Normalized DataW uses the address basis in
+    // WBurst, so Data class never uses this FIFO.
     struct WAddrMeta {
         uint64_t local_addr;
         uint8_t len;
@@ -219,7 +233,7 @@ class Depacketize : public RequestDepacketizer {
     // replica land at the same offset in its own tile. Unconditional, so there
     // is no case left unhandled: no branch on collective_op, no mask to inspect.
     uint64_t rebase_(uint64_t addr, uint8_t axi_ch) const {
-        const bool is_data = axi_ch == ni::AXI_CH_DataAw || axi_ch == ni::AXI_CH_DataAr;
+        const bool is_data = axi_ch == ::ni::AXI_CH_DataAw || axi_ch == ::ni::AXI_CH_DataAr;
         const auto& c = space_coords_[is_data ? 1u : 0u];
         return address_map::rebase_node_coords(addr, c, node_.x, node_.y);
     }
@@ -248,14 +262,26 @@ inline axi::AwBeat Depacketize::decode_aw(const Flit& f) const {
 }
 
 inline axi::WBeat Depacketize::decode_w(const Flit& f) {
-    const bool is_data = f.get_header_field("axi_ch") == ni::AXI_CH_DataW;
-    const char* ch = is_data ? "DATA_W" : "NARROW_W";
+    const bool is_data = f.get_header_field("axi_ch") == ::ni::AXI_CH_DataW;
+    const bool narrow_payload = is_data && channel_mode_ != ni::ChannelMode::Native;
+    const char* ch = is_data && !narrow_payload ? "DATA_W" : "NARROW_W";
     axi::WBeat b{};
     b.last = f.get_payload_field(ch, "wlast") != 0;
     b.user = static_cast<uint8_t>(f.get_payload_field(ch, "wuser"));
-    if (is_data) {
+    if (is_data && !narrow_payload) {
         b.strb = f.get_payload_field(ch, "wstrb");
-        f.get_payload_bytes(ch, "wdata", b.data.data(), ni::width::NOC_DATA_WIDTH);
+        f.get_payload_bytes(ch, "wdata", b.data.data(), ::ni::width::NOC_DATA_WIDTH);
+        return b;
+    }
+    if (is_data) {
+        assert(!w_order_.empty() && w_order_.front().cls == AxiClass::Data &&
+               "nsu::Depacketize::decode_w: normalized DataW has no paired DataAw basis");
+        const WBurst& wb = w_order_.front();
+        const uint64_t addr = axi::beat_addr(wb.local_addr, wb.len, wb.size, wb.burst, w_beats_done_);
+        const unsigned lane = axi::narrow_lane(addr);
+        b.strb = f.get_payload_field(ch, "wstrb") << (lane * axi::NARROW_DATA_BYTES);
+        f.get_payload_bytes(ch, "wdata", b.data.data() + lane * axi::NARROW_DATA_BYTES,
+                            ::ni::width::NOC_NARROW_DATA_WIDTH);
         return b;
     }
     // Narrow: the flit carries only the addressed 8 B lane. w_addr_fifo_'s
@@ -268,7 +294,7 @@ inline axi::WBeat Depacketize::decode_w(const Flit& f) {
     const uint64_t narrow_strb = f.get_payload_field(ch, "wstrb");
     b.strb = narrow_strb << (lane * axi::NARROW_DATA_BYTES);
     f.get_payload_bytes(ch, "wdata", b.data.data() + lane * axi::NARROW_DATA_BYTES,
-                        ni::width::NOC_NARROW_DATA_WIDTH);
+                        ::ni::width::NOC_NARROW_DATA_WIDTH);
     ++am.beat_counter;
     if (b.last) w_addr_fifo_.pop_front();
     return b;
@@ -297,8 +323,8 @@ inline axi::ArBeat Depacketize::decode_ar(const Flit& f) const {
 // occupied (not yet consumed by the S2 AxiMasterPort), the flit is
 // backpressured into this ingress's own `pending` stash (head-of-line blocking
 // on single-FIFO ingress, same semantics as the original queue-based
-// implementation). Data AW/W go straight into their VC queue and are decoded
-// at the drain, so they never stash and never rate-limit each other.
+// implementation). Data AW/W go into their VC queue and are decoded at the
+// drain. Credited DAT cannot overflow it; REQ waits in `pending` when it is full.
 // Touches no MetaBuffer state; allocation happens in pop_aw / pop_ar.
 // Single-ingress HOL note: unlike the NMU request path, NSU depacketize has NO
 // source-side pairing lock on ingress. It demuxes into independent S1 registers
@@ -325,27 +351,41 @@ inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Fli
             std::abort();
         }
         uint64_t ch = f.get_header_field("axi_ch");
-        // DAT carries DataAw/DataW only (spec :348; DataAr and every Narrow*
-        // channel stay on REQ). A Narrow* AW/W arriving here would corrupt
+        // Native DAT carries DataAw/DataW; ThreeChannel64 DAT also carries
+        // DataAr. Every Narrow* channel stays on REQ. A Narrow* AW/W arriving here would corrupt
         // w_addr_fifo_'s FIFO-order contiguity invariant (its front entry
         // must always be the REQ-ingress narrow AW currently being served);
         // fail loud instead of silently mis-pairing narrow lanes.
-        assert((!is_dat_ingress || ch == ni::AXI_CH_DataAw || ch == ni::AXI_CH_DataW) &&
+        const bool dat_channel_ok =
+            channel_mode_ == ni::ChannelMode::Native
+                ? ch == ::ni::AXI_CH_DataAw || ch == ::ni::AXI_CH_DataW
+                : channel_mode_ == ni::ChannelMode::ThreeChannel64
+                      ? ch == ::ni::AXI_CH_DataAw || ch == ::ni::AXI_CH_DataW ||
+                            ch == ::ni::AXI_CH_DataAr
+                      : false;
+        assert((!is_dat_ingress || dat_channel_ok) &&
                "nsu::Depacketize::drain_ingress_: DAT ingress delivered a channel outside "
-               "{DataAw, DataW} -- spec :348 keeps Narrow*/DataAr off DAT");
+               "Native {DataAw, DataW} / ThreeChannel64 {DataAw, DataW, DataAr}");
         switch (ch) {
-            case ni::AXI_CH_DataAw:
-            case ni::AXI_CH_DataW: {
-                const auto vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
+            case ::ni::AXI_CH_DataAw:
+            case ::ni::AXI_CH_DataW: {
+                const auto vc = is_dat_ingress
+                                    ? static_cast<uint8_t>(f.get_header_field("vc_id"))
+                                    : uint8_t{0};
                 assert(vc < dat_q_.size() &&
                        "nsu::Depacketize: data flit names a VC beyond dat_num_vc");
-                assert(dat_q_[vc].size() < static_cast<std::size_t>(::ni::NOC_NI_DAT_RX_VC_DEPTH) &&
-                       "nsu::Depacketize: per-VC ingress overflow -- sender credit discipline "
-                       "broken");
-                dat_q_[vc].push_back(f);
+                if (dat_q_[vc].size() >=
+                    static_cast<std::size_t>(::ni::NOC_NI_DAT_RX_VC_DEPTH)) {
+                    assert(!is_dat_ingress &&
+                           "nsu::Depacketize: per-VC ingress overflow -- sender credit "
+                           "discipline broken");
+                    pending = f;
+                    return;
+                }
+                dat_q_[vc].push_back({f, is_dat_ingress});
                 break;
             }
-            case ni::AXI_CH_NarrowAw: {
+            case ::ni::AXI_CH_NarrowAw: {
                 if (s1_narrow_aw_.full()) {
                     pending = f;
                     return;
@@ -361,7 +401,7 @@ inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Fli
                 w_addr_fifo_.push_back({aw.addr, aw.len, aw.size, aw.burst, /*beat_counter=*/0});
                 break;
             }
-            case ni::AXI_CH_NarrowW: {
+            case ::ni::AXI_CH_NarrowW: {
                 if (s1_narrow_w_.full()) {
                     pending = f;
                     return;
@@ -369,13 +409,15 @@ inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Fli
                 s1_narrow_w_.accept(decode_w(f));
                 break;
             }
-            case ni::AXI_CH_NarrowAr:
-            case ni::AXI_CH_DataAr:
+            case ::ni::AXI_CH_NarrowAr:
+            case ::ni::AXI_CH_DataAr:
                 if (s1_ar_.full()) {
                     pending = f;
                     return;
                 }
                 s1_ar_.accept(f);
+                s1_ar_from_dat_ = is_dat_ingress;
+                s1_ar_dat_vc_ = static_cast<uint8_t>(f.get_header_field("vc_id"));
                 break;
             default:
                 assert(false &&
@@ -383,7 +425,7 @@ inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Fli
                        "outside {NarrowAw, NarrowW, NarrowAr, DataAw, DataW, DataAr} — NSU request "
                        "path only accepts request channels. Likely cause: NMU packetizer stamped "
                        "wrong axi_ch into a request flit, NoC fabric misrouted a response flit "
-                       "into the request ingress, or codegen drift changed ni::AXI_CH_* encoding "
+                       "into the request ingress, or codegen drift changed ::ni::AXI_CH_* encoding "
                        "without rebuilding both sides.");
                 std::abort();
         }
@@ -402,8 +444,8 @@ inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Fli
         // at a time per ingress (head-of-line blocking on that ingress's
         // single stream). The two ingresses drain independently -- REQ
         // blocked on a full register does not stall DAT, and vice versa.
-        // Data AW/W hold no register and never stall the loop: they are
-        // bounded by their VC queue's credit, not by a per-tick admission.
+        // Data AW/W hold no register. DAT is bounded by credit; REQ stalls in
+        // `pending` when the shared data-class VC queue is full.
     }
 }
 
@@ -413,11 +455,10 @@ inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Fli
 inline void Depacketize::tick() {
     drain_ingress_(req_in_, pending_req_, /*is_dat_ingress=*/false);
     drain_ingress_(dat_req_in_, pending_dat_, /*is_dat_ingress=*/true);
-    // DAT carries DataAw/DataW only, and both go straight into a VC queue that
-    // the sender's credit guarantees has room. Nothing on DAT can stash.
-    assert(!pending_dat_ &&
-           "nsu::Depacketize::tick: a DAT flit stashed -- DAT carries only "
-           "data AW/W, which never backpressure");
+    // Native DAT carries only DataAw/DataW, which cannot stash. ThreeChannel64
+    // may stash DataAr when the shared AR stage is occupied.
+    assert((channel_mode_ == ni::ChannelMode::ThreeChannel64 || !pending_dat_) &&
+           "nsu::Depacketize::tick: only ThreeChannel64 DataAr may stash from DAT");
 }
 
 // pop_aw/pop_w/pop_ar: S2 consumer interface — take from the narrow S1
@@ -435,7 +476,7 @@ inline std::optional<axi::AwBeat> Depacketize::pop_aw() {
     for (std::size_t k = 0; k < dat_q_.size(); ++k) {
         const auto v = static_cast<uint8_t>((dat_aw_rr_ + k) % dat_q_.size());
         if (!dat_q_[v].empty() &&
-            dat_q_[v].front().get_header_field("axi_ch") == ni::AXI_CH_DataAw) {
+            dat_q_[v].front().flit.get_header_field("axi_ch") == ::ni::AXI_CH_DataAw) {
             data_vc = v;
             break;
         }
@@ -447,19 +488,21 @@ inline std::optional<axi::AwBeat> Depacketize::pop_aw() {
     if (meta_.write_full()) return std::nullopt;
     Flit f;
     if (take_data) {
-        f = dat_q_[*data_vc].front();
+        const auto entry = dat_q_[*data_vc].front();
+        f = entry.flit;
         dat_q_[*data_vc].pop_front();
-        ++dat_credit_pending_[*data_vc];
+        if (entry.from_dat) ++dat_credit_pending_[*data_vc];
         dat_aw_rr_ = static_cast<uint8_t>((*data_vc + 1) % dat_q_.size());
     } else {
         f = s1_narrow_aw_.take();
     }
     axi::AwBeat b = decode_aw(f);
     w_order_.push_back({take_data ? AxiClass::Data : AxiClass::Narrow,
-                        static_cast<uint32_t>(b.len) + 1u, take_data ? *data_vc : uint8_t{0}});
+                        static_cast<uint32_t>(b.len) + 1u, take_data ? *data_vc : uint8_t{0},
+                        b.addr, b.len, b.size, b.burst});
     const uint8_t downstream_id = remap_downstream_id(b.id, max_unique_ids_);
     const AxiClass cls =
-        (f.get_header_field("axi_ch") == ni::AXI_CH_DataAw) ? AxiClass::Data : AxiClass::Narrow;
+        (f.get_header_field("axi_ch") == ::ni::AXI_CH_DataAw) ? AxiClass::Data : AxiClass::Narrow;
     MetaEntry e{
         static_cast<uint8_t>(f.get_header_field("src_id")),
         b.id,
@@ -487,12 +530,13 @@ inline std::optional<axi::WBeat> Depacketize::pop_w() {
     if (front.cls == AxiClass::Data) {
         auto& q = dat_q_[front.vc];
         if (q.empty()) return std::nullopt;
-        assert(q.front().get_header_field("axi_ch") == ni::AXI_CH_DataW &&
+        assert(q.front().flit.get_header_field("axi_ch") == ::ni::AXI_CH_DataW &&
                "nsu::Depacketize::pop_w: W stream on this VC interrupted by a non-W flit -- "
                "fabric broke per-VC wormhole contiguity");
-        b = decode_w(q.front());
+        b = decode_w(q.front().flit);
+        const bool from_dat = q.front().from_dat;
         q.pop_front();
-        ++dat_credit_pending_[front.vc];
+        if (from_dat) ++dat_credit_pending_[front.vc];
     } else {
         if (!s1_narrow_w_.full()) return std::nullopt;
         b = s1_narrow_w_.take();
@@ -510,10 +554,14 @@ inline std::optional<axi::ArBeat> Depacketize::pop_ar() {
     if (!s1_ar_.full()) return std::nullopt;
     if (meta_.read_full()) return std::nullopt;
     const Flit f = s1_ar_.take();
+    if (s1_ar_from_dat_) {
+        ++dat_credit_pending_[s1_ar_dat_vc_];
+        s1_ar_from_dat_ = false;
+    }
     axi::ArBeat b = decode_ar(f);
     const uint8_t downstream_id = remap_downstream_id(b.id, max_unique_ids_);
     const AxiClass cls =
-        (f.get_header_field("axi_ch") == ni::AXI_CH_DataAr) ? AxiClass::Data : AxiClass::Narrow;
+        (f.get_header_field("axi_ch") == ::ni::AXI_CH_DataAr) ? AxiClass::Data : AxiClass::Narrow;
     // Positional init: MetaEntry is append-only for that reason. C++17 has no
     // designated initializers to pin field names, so inserting a field ahead of
     // the AR basis below would silently shift b.addr/len/size/burst. Members

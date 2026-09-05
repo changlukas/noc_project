@@ -50,6 +50,7 @@
 #include "wrap/flit_bytes.hpp"      // FlitBytes, FLIT_BYTES
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "wrap/nmu_wrap_io.hpp"
+#include "ni/channel_mode.hpp"
 #include "ni_params.h"  // NOC_ROUTER_VC_DEPTH — DAT sender credit seed
 #include "flit.hpp"
 #include "nmu/nmu_standalone.hpp"
@@ -77,12 +78,12 @@ class NmuWrap {
     // AXI channel.
     void init(const char* config_path, uint8_t src_id = 0, uint8_t port_id = 0,
               uint8_t dat_num_vc = ::ni::NOC_DAT_NUM_VC,
-              std::size_t queue_depth = ni::NMU_QUEUE_DEPTH,
+              std::size_t queue_depth = ::ni::NMU_QUEUE_DEPTH,
               nmu::RobMode rob_mode = nmu::DEFAULT_ROB_MODE,
-              std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
-              std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
-              std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID) {
-        using namespace ni::cmodel::nmu;
+              std::size_t b_rob_depth = ::ni::NMU_ROB_B_DEPTH,
+              std::size_t r_rob_depth = ::ni::NMU_ROB_R_DEPTH,
+              std::size_t max_txns_per_id = ::ni::NMU_MAX_TXNS_PER_ID) {
+        using namespace ::ni::cmodel::nmu;
         if (config_path == nullptr || config_path[0] == '\0') {
             throw std::invalid_argument(
                 "NmuWrap::init: config_path is required (a sim/configs file with an endpoints "
@@ -132,10 +133,10 @@ class NmuWrap {
         cfg.port_params.ar_queue_depth = queue_depth;
         cfg.port_params.b_queue_depth = queue_depth;
         cfg.port_params.r_queue_depth = queue_depth;
-        cfg.port_params.depkt_b_q_depth = ni::NMU_DEPKT_Q_DEPTH;
-        cfg.port_params.depkt_r_q_depth = ni::NMU_DEPKT_Q_DEPTH;
-        cfg.wormhole_per_input_depth = ni::NMU_ARBITER_FIFO_DEPTH;
-        cfg.vc_allocator_pending_depth = ni::NMU_ARBITER_FIFO_DEPTH;
+        cfg.port_params.depkt_b_q_depth = ::ni::NMU_DEPKT_Q_DEPTH;
+        cfg.port_params.depkt_r_q_depth = ::ni::NMU_DEPKT_Q_DEPTH;
+        cfg.wormhole_per_input_depth = ::ni::NMU_ARBITER_FIFO_DEPTH;
+        cfg.vc_allocator_pending_depth = ::ni::NMU_ARBITER_FIFO_DEPTH;
         nmu_ = std::make_unique<nmu::NmuStandalone>(std::move(cfg));
         // REQ egress: ready/valid, no credit (spec §4.3) — set_inputs feeds
         // the live ready flag from tx_req_ready every tick.
@@ -157,12 +158,21 @@ class NmuWrap {
         prev_wready_ = false;
         prev_arready_ = false;
         w_expected_ = 0;
+        ticked_ = false;
     }
 
     void set_inputs(const NmuInputs& in) { in_ = in; }
 
+    void set_channel_mode(::ni::cmodel::ni::ChannelMode mode) {
+        if (ticked_) {
+            throw std::logic_error("NmuWrap::set_channel_mode: must be configured before first tick");
+        }
+        nmu_->set_channel_mode(mode);
+    }
+
     void tick() {
         if (!nmu_) return;
+        ticked_ = true;
         auto& port = nmu_->axi_slave_port();
 
         // Step 1a: inject RSP/DAT rsp flits (if valid) BEFORE nmu_.tick() so
@@ -337,6 +347,7 @@ class NmuWrap {
     bool prev_wready_ = false;
     bool prev_arready_ = false;
     uint32_t w_expected_ = 0;  // W beats remaining of the open burst window
+    bool ticked_ = false;
 
     // Flit <-> FlitBytes helpers live in wrap/flit_byte_conv.hpp; calls use
     // flit_from_bytes(...) / flit_to_bytes(...) directly via ADL.

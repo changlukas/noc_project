@@ -281,10 +281,10 @@ class SimpleRouter {
     // reduce by opcode alone (floo_output_arbiter.sv:57-64) because its
     // CollectB is a distinct code — our overload of MULTICAST is not.
     static bool is_b_channel(uint64_t axi_ch) {
-        return axi_ch == ni::AXI_CH_NarrowB || axi_ch == ni::AXI_CH_DataB;
+        return axi_ch == ::ni::AXI_CH_NarrowB || axi_ch == ::ni::AXI_CH_DataB;
     }
     static bool is_collect_b(const Flit& f) {
-        return f.get_header_field("collective_op") != ni::COLLECTIVE_OP_UNICAST &&
+        return f.get_header_field("collective_op") != ::ni::COLLECTIVE_OP_UNICAST &&
                is_b_channel(f.get_header_field("axi_ch"));
     }
 
@@ -337,7 +337,7 @@ class SimpleRouter {
     PortMask head_expected_mask(const Flit& f) const {
         const auto dst = static_cast<uint8_t>(f.get_header_field("dst_id"));
         const auto dst_port = static_cast<uint8_t>(f.get_header_field("dst_port_id"));
-        if (f.get_header_field("collective_op") == ni::COLLECTIVE_OP_UNICAST) {
+        if (f.get_header_field("collective_op") == ::ni::COLLECTIVE_OP_UNICAST) {
             return port_bit(compute_route(dst, dst_port));
         }
         // Reserved-code guard (OUR RULE, spec §6 :356 leaves codes 2-3
@@ -348,7 +348,7 @@ class SimpleRouter {
         // keeps that keying intact and catches BOTH cases in one place, which
         // narrowing is_collect_b() to `== MULTICAST` would not (it would only
         // hide the B case, turning it into a silently unmerged plain forward).
-        if (f.get_header_field("collective_op") != ni::COLLECTIVE_OP_MULTICAST) {
+        if (f.get_header_field("collective_op") != ::ni::COLLECTIVE_OP_MULTICAST) {
             assert(false &&
                    "SimpleRouter: reserved collective_op code on a flit (only UNICAST "
                    "and MULTICAST are defined)");
@@ -362,8 +362,8 @@ class SimpleRouter {
         // reads are unicast everywhere). A collective AW/W is legal REQ fork
         // traffic and is therefore neither rejected nor rejectable here.
         const auto axi_ch = f.get_header_field("axi_ch");
-        if (axi_ch == ni::AXI_CH_NarrowR || axi_ch == ni::AXI_CH_DataR ||
-            axi_ch == ni::AXI_CH_NarrowAr || axi_ch == ni::AXI_CH_DataAr) {
+        if (axi_ch == ::ni::AXI_CH_NarrowR || axi_ch == ::ni::AXI_CH_DataR ||
+            axi_ch == ::ni::AXI_CH_NarrowAr || axi_ch == ::ni::AXI_CH_DataAr) {
             assert(false &&
                    "SimpleRouter: non-B collective flit on a read channel — reads are unicast "
                    "everywhere, so the header is mis-stamped");
@@ -596,7 +596,7 @@ inline void SimpleRouter::tick() {
             if (route_lock_[in][vc] == 0) continue;
             const auto& q = input_fifo_[in][vc];
             if (q.empty()) continue;
-            if (q.front().get_header_field("collective_op") == ni::COLLECTIVE_OP_UNICAST) {
+            if (q.front().get_header_field("collective_op") == ::ni::COLLECTIVE_OP_UNICAST) {
                 // T3b follow-up (OUR RULE): a MULTI-HOT latch can only have
                 // been seeded by a collective head, and in-order link delivery
                 // means the front under a held latch belongs to that same
