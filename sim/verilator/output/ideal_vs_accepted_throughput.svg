@@ -1,132 +1,90 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="829" viewBox="0 0 1600 829">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="565" viewBox="0 0 1600 565">
 <title>Ideal Throughput Bound versus Accepted Throughput</title>
 <style>text{font-family:Arial,Helvetica,sans-serif;fill:#1f2933}.title{font-size:26px;font-weight:700}.axis{font-size:16px;fill:#52606d}.label{font-size:17px}.value{font-size:15px}.grid{stroke:#d9e2ec;stroke-width:1}.ideal{fill:#9fb3c8}.accepted{fill:#2f6f9f}</style>
 <text class="title" x="34" y="36">Ideal Throughput Bound vs Accepted Throughput</text>
 <rect class="ideal" x="1110" y="18" width="20" height="12"/><text class="axis" x="1138" y="30">Ideal Bound</text>
 <rect class="accepted" x="1270" y="18" width="20" height="12"/><text class="axis" x="1298" y="30">Accepted</text>
 <text class="axis" x="910" y="67" text-anchor="middle">B/cycle</text>
-<line class="grid" x1="410.0" y1="78" x2="410.0" y2="809"/>
+<line class="grid" x1="410.0" y1="78" x2="410.0" y2="545"/>
 <text class="axis" x="410.0" y="94" text-anchor="middle">0</text>
-<line class="grid" x1="610.0" y1="78" x2="610.0" y2="809"/>
+<line class="grid" x1="610.0" y1="78" x2="610.0" y2="545"/>
 <text class="axis" x="610.0" y="94" text-anchor="middle">240</text>
-<line class="grid" x1="810.0" y1="78" x2="810.0" y2="809"/>
+<line class="grid" x1="810.0" y1="78" x2="810.0" y2="545"/>
 <text class="axis" x="810.0" y="94" text-anchor="middle">480</text>
-<line class="grid" x1="1010.0" y1="78" x2="1010.0" y2="809"/>
+<line class="grid" x1="1010.0" y1="78" x2="1010.0" y2="545"/>
 <text class="axis" x="1010.0" y="94" text-anchor="middle">720</text>
-<line class="grid" x1="1210.0" y1="78" x2="1210.0" y2="809"/>
+<line class="grid" x1="1210.0" y1="78" x2="1210.0" y2="545"/>
 <text class="axis" x="1210.0" y="94" text-anchor="middle">960</text>
-<line class="grid" x1="1410.0" y1="78" x2="1410.0" y2="809"/>
+<line class="grid" x1="1410.0" y1="78" x2="1410.0" y2="545"/>
 <text class="axis" x="1410.0" y="94" text-anchor="middle">1200</text>
 <g class="metric-row">
-<text class="label" x="392" y="117" text-anchor="end">Broadcast - Row W</text>
+<text class="label" x="392" y="117" text-anchor="end">Row-wise Multicast W</text>
 <rect class="ideal" x="410" y="100" width="840.2" height="10"/>
 <rect class="accepted" x="410" y="114" width="523.9" height="10"/>
 <text class="value" x="1258.2" y="109">1008.2</text>
 <text class="value" x="941.9" y="124">628.6</text>
 </g>
 <g class="metric-row">
-<text class="label" x="392" y="161" text-anchor="end">Broadcast - Column W</text>
+<text class="label" x="392" y="161" text-anchor="end">Column-wise Multicast W</text>
 <rect class="ideal" x="410" y="144" width="840.2" height="10"/>
 <rect class="accepted" x="410" y="158" width="523.9" height="10"/>
 <text class="value" x="1258.2" y="153">1008.2</text>
 <text class="value" x="941.9" y="168">628.6</text>
 </g>
 <g class="metric-row">
-<text class="label" x="392" y="205" text-anchor="end">Broadcast - Local 2x2 W</text>
+<text class="label" x="392" y="205" text-anchor="end">Local Multicast (2×2) W</text>
 <rect class="ideal" x="410" y="188" width="840.2" height="10"/>
 <rect class="accepted" x="410" y="202" width="555.9" height="10"/>
 <text class="value" x="1258.2" y="197">1008.2</text>
 <text class="value" x="973.9" y="212">667.0</text>
 </g>
 <g class="metric-row">
-<text class="label" x="392" y="249" text-anchor="end">Broadcast - Global W</text>
+<text class="label" x="392" y="249" text-anchor="end">Global Multicast W</text>
 <rect class="ideal" x="410" y="232" width="840.2" height="10"/>
 <rect class="accepted" x="410" y="246" width="446.7" height="10"/>
 <text class="value" x="1258.2" y="241">1008.2</text>
 <text class="value" x="864.7" y="256">536.1</text>
 </g>
 <g class="metric-row">
-<text class="label" x="392" y="293" text-anchor="end">Gather - Global, root 0 W</text>
-<rect class="ideal" x="410" y="276" width="52.5" height="10"/>
-<rect class="accepted" x="410" y="290" width="52.4" height="10"/>
-<text class="value" x="470.5" y="285">63.0</text>
-<text class="value" x="470.4" y="300">62.9</text>
+<text class="label" x="392" y="293" text-anchor="end">All-to-All W</text>
+<rect class="ideal" x="410" y="276" width="787.7" height="10"/>
+<rect class="accepted" x="410" y="290" width="452.5" height="10"/>
+<text class="value" x="1205.7" y="285">945.2</text>
+<text class="value" x="870.5" y="300">543.0</text>
 </g>
 <g class="metric-row">
-<text class="label" x="392" y="337" text-anchor="end">Gather - Local 2x2 W</text>
-<rect class="ideal" x="410" y="320" width="210.1" height="10"/>
-<rect class="accepted" x="410" y="334" width="207.9" height="10"/>
-<text class="value" x="628.1" y="329">252.1</text>
-<text class="value" x="625.9" y="344">249.4</text>
+<text class="label" x="392" y="337" text-anchor="end">Pipeline P2P W</text>
+<rect class="ideal" x="410" y="320" width="787.7" height="10"/>
+<rect class="accepted" x="410" y="334" width="764.9" height="10"/>
+<text class="value" x="1205.7" y="329">945.2</text>
+<text class="value" x="1182.9" y="344">917.9</text>
 </g>
 <g class="metric-row">
-<text class="label" x="392" y="381" text-anchor="end">All-to-All W</text>
-<rect class="ideal" x="410" y="364" width="787.7" height="10"/>
-<rect class="accepted" x="410" y="378" width="452.5" height="10"/>
-<text class="value" x="1205.7" y="373">945.2</text>
-<text class="value" x="870.5" y="388">543.0</text>
+<text class="label" x="392" y="381" text-anchor="end">Hierarchical All-to-All W</text>
+<rect class="ideal" x="410" y="364" width="420.1" height="10"/>
+<rect class="accepted" x="410" y="378" width="212.3" height="10"/>
+<text class="value" x="838.1" y="373">504.1</text>
+<text class="value" x="630.3" y="388">254.7</text>
 </g>
 <g class="metric-row">
-<text class="label" x="392" y="425" text-anchor="end">Neighbor Exchange W</text>
-<rect class="ideal" x="410" y="408" width="630.2" height="10"/>
-<rect class="accepted" x="410" y="422" width="469.3" height="10"/>
-<text class="value" x="1048.2" y="417">756.2</text>
-<text class="value" x="887.3" y="432">563.1</text>
+<text class="label" x="392" y="425" text-anchor="end">All-to-All R</text>
+<rect class="ideal" x="410" y="408" width="800.0" height="10"/>
+<rect class="accepted" x="410" y="422" width="251.0" height="10"/>
+<text class="value" x="1218.0" y="417">960.0</text>
+<text class="value" x="669.0" y="432">301.2</text>
 </g>
 <g class="metric-row">
-<text class="label" x="392" y="469" text-anchor="end">Pipeline P2P W</text>
-<rect class="ideal" x="410" y="452" width="787.7" height="10"/>
-<rect class="accepted" x="410" y="466" width="764.9" height="10"/>
-<text class="value" x="1205.7" y="461">945.2</text>
-<text class="value" x="1182.9" y="476">917.9</text>
+<text class="label" x="392" y="469" text-anchor="end">Pipeline P2P R</text>
+<rect class="ideal" x="410" y="452" width="800.0" height="10"/>
+<rect class="accepted" x="410" y="466" width="776.5" height="10"/>
+<text class="value" x="1218.0" y="461">960.0</text>
+<text class="value" x="1194.5" y="476">931.8</text>
 </g>
 <g class="metric-row">
-<text class="label" x="392" y="513" text-anchor="end">Regional Exchange W</text>
-<rect class="ideal" x="410" y="496" width="420.1" height="10"/>
-<rect class="accepted" x="410" y="510" width="212.3" height="10"/>
-<text class="value" x="838.1" y="505">504.1</text>
-<text class="value" x="630.3" y="520">254.7</text>
-</g>
-<g class="metric-row">
-<text class="label" x="392" y="557" text-anchor="end">Gather - Global, root 0 R</text>
-<rect class="ideal" x="410" y="540" width="53.3" height="10"/>
-<rect class="accepted" x="410" y="554" width="47.7" height="10"/>
-<text class="value" x="471.3" y="549">64.0</text>
-<text class="value" x="465.7" y="564">57.2</text>
-</g>
-<g class="metric-row">
-<text class="label" x="392" y="601" text-anchor="end">Gather - Local 2x2 R</text>
-<rect class="ideal" x="410" y="584" width="213.3" height="10"/>
-<rect class="accepted" x="410" y="598" width="194.8" height="10"/>
-<text class="value" x="631.3" y="593">256.0</text>
-<text class="value" x="612.8" y="608">233.7</text>
-</g>
-<g class="metric-row">
-<text class="label" x="392" y="645" text-anchor="end">All-to-All R</text>
-<rect class="ideal" x="410" y="628" width="800.0" height="10"/>
-<rect class="accepted" x="410" y="642" width="251.0" height="10"/>
-<text class="value" x="1218.0" y="637">960.0</text>
-<text class="value" x="669.0" y="652">301.2</text>
-</g>
-<g class="metric-row">
-<text class="label" x="392" y="689" text-anchor="end">Neighbor Exchange R</text>
-<rect class="ideal" x="410" y="672" width="640.0" height="10"/>
-<rect class="accepted" x="410" y="686" width="411.9" height="10"/>
-<text class="value" x="1058.0" y="681">768.0</text>
-<text class="value" x="829.9" y="696">494.3</text>
-</g>
-<g class="metric-row">
-<text class="label" x="392" y="733" text-anchor="end">Pipeline P2P R</text>
-<rect class="ideal" x="410" y="716" width="800.0" height="10"/>
-<rect class="accepted" x="410" y="730" width="776.5" height="10"/>
-<text class="value" x="1218.0" y="725">960.0</text>
-<text class="value" x="1194.5" y="740">931.8</text>
-</g>
-<g class="metric-row">
-<text class="label" x="392" y="777" text-anchor="end">Regional Exchange R</text>
-<rect class="ideal" x="410" y="760" width="426.7" height="10"/>
-<rect class="accepted" x="410" y="774" width="225.6" height="10"/>
-<text class="value" x="844.7" y="769">512.0</text>
-<text class="value" x="643.6" y="784">270.7</text>
+<text class="label" x="392" y="513" text-anchor="end">Hierarchical All-to-All R</text>
+<rect class="ideal" x="410" y="496" width="426.7" height="10"/>
+<rect class="accepted" x="410" y="510" width="225.6" height="10"/>
+<text class="value" x="844.7" y="505">512.0</text>
+<text class="value" x="643.6" y="520">270.7</text>
 </g>
 </svg>

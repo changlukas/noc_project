@@ -67,5 +67,5 @@
 <text class="node-id" x="505" y="400" fill="#ffffff">15</text>
 <circle cx="390" cy="33" r="9" fill="#4c78a8"/><text class="legend" x="406" y="38">Source</text>
 <circle cx="500" cy="33" r="9" fill="#f2a65a"/><text class="legend" x="516" y="38">Destination</text>
-<circle cx="390" cy="62" r="9" fill="#8064a2"/><text class="legend" x="406" y="67">Source + Destination</text>
+<circle cx="390" cy="62" r="9" fill="#8064a2"/><text class="legend" x="406" y="67">Source and Destination</text>
 </svg>

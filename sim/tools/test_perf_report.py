@@ -275,16 +275,16 @@ def test_report_uses_one_common_metric_table_without_rate_terms(tmp_path):
     text = pr.report(tmp_path)
     assert re.findall(r"^## .+$", text, re.M) == [
         "## 1. 測試設定與量測方法",
-        "## 2. AI Communication Types",
+        "## 2. MHA、MoE 與 Pipeline Traffic Models",
         "## 3. Performance Results",
         "## 4. Burst Length Characterization",
-        "## 5. Hardware Multicast vs Repeated Unicast",
+        "## 5. Multicast vs Repeated Unicast",
         "## 6. VC 與 Buffer Trade-off",
         "## 7. RR vs RRD",
         "## 8. Compute Overlap Coverage",
     ]
     assert "Latency<br>(cycles/transaction)" not in text
-    assert "| Communication Type | Direction | Ideal Throughput Bound (B/cycle) | Accepted Throughput at Outstanding Depth 32 (B/cycle) | % of Ideal Throughput |" in text
+    assert "| Traffic Model | Direction | Ideal Throughput Bound (B/cycle) | Accepted Throughput (B/cycle) | Throughput Efficiency (%) |" in text
     assert "Throughput<br>(B/cycle)" not in text
     assert "Completion Time<br>(cycles/run)" not in text
     assert "Peak Link Utilization<br>(%)" not in text
@@ -295,10 +295,30 @@ def test_report_uses_one_common_metric_table_without_rate_terms(tmp_path):
     assert "Broadcast is Write-only" not in text
     assert "Reference transaction bytes = 64 beats * 64 B/beat = 4096 B" in text
     assert "Transaction bytes = Burst Length * 64 B/beat" in text
-    assert "Baseline DUT：DAT VCs = 2" in text
+    assert "Reference DUT：DAT VCs = 2" in text
     assert "量測流程" in text and "表格解讀" in text
     assert "Throughput Saturation Depth" not in text
     assert "traffic_patterns/broadcast_row.svg" in text
+    assert "| Traffic | AI Workload |" in text
+    assert "| Traffic Model | AI Workload | Data Movement | Evidence |" not in text
+    assert "| All-Gather | MHA |" in text
+    assert "All-Reduce" not in text
+    assert "[TBD]" in text
+    assert "Completion Time = final B completion cycle - common start cycle" in text
+    assert "Speedup = Repeated Unicast Completion Time / Multicast Completion Time" in text
+    assert "Multicast Injected Flits = Source Count * Rounds * (1 + Burst Length)" in text
+    assert ("Repeated Unicast Injected Flits = Source Count * Rounds * "
+            "(Fanout - 1) * (1 + Burst Length)") in text
+    assert "Row-wise Multicast = 4 * 16 * 65 = 4160 flits" in text
+    assert "Global Repeated Unicast = 1 * 16 * 15 * 65 = 15600 flits" in text
+    assert "Payload per destination per round = 64 beats * 64 B/beat = 4096 B = 4 KiB" in text
+    assert "Payload per destination per run = 4096 B * 16 rounds = 65536 B = 64 KiB" in text
+    assert "injected payload per source per run" not in text
+    assert "每個 destination 發出一筆獨立 Write transaction" in text
+    assert "Neighbor Exchange" not in text
+    assert "Gather - Global" not in text
+    assert ";" not in text and "；" not in text
+    assert "—" not in text and "–" not in text
 
 
 def test_main_metric_uses_outstanding_32_and_pattern_resource_bound(tmp_path):
@@ -315,7 +335,7 @@ def test_fixed_outstanding_32_baseline_is_complete_without_a_sweep(tmp_path):
 
     text = pr.report(tmp_path)
 
-    assert "Accepted Throughput at Outstanding Depth 32 (B/cycle)" in text
+    assert "Accepted Throughput (B/cycle)" in text
 
 
 def test_burst_rows_require_fixed_payload_and_fixed_outstanding(tmp_path):
@@ -384,21 +404,25 @@ def test_multicast_comparison_pairs_hardware_and_repeated_unicast(tmp_path):
         "source_requests"] == 256
 
     text = pr._multicast_table(rows)
-    assert "Destination count" in text
-    assert "source injected flits" in text
-    assert "Completion time" in text
-    assert "| Broadcast - Global | 16 | 1040 | 600 | 15600 | 1500 | 2.50 |" in text
+    assert "Destination Set" in text
+    assert "Fanout" in text
+    assert "Multicast Injected Flits" in text
+    assert "Repeated Unicast Injected Flits" in text
+    assert "Completion Time" in text
+    assert "Multicast scope" not in text
+    assert "Destination count" not in text
+    assert "| Global Multicast | 16 | 1040 | 600 | 15600 | 1500 | 2.50 |" in text
     assert "source requests" not in text.lower()
     assert "throughput" not in text.lower()
 
 
-def test_report_defines_multicast_destination_and_source_flit_counts(tmp_path):
+def test_report_defines_multicast_fanout_and_injected_flits(tmp_path):
     _complete_baseline(tmp_path)
 
     text = pr.report(tmp_path)
 
-    assert ("Destination count 包含 producer 本身的 local member；"
-            "Source injected flits 不計入 B／CollectB。") in text
+    assert ("Fanout 包含 source 本身。Local delivery 不經過 mesh link。"
+            "Injected Flits 不包含 B／CollectB。") in text
 
 
 @pytest.mark.parametrize(("field", "value", "message"), [
@@ -499,7 +523,7 @@ def test_report_rejects_incomplete_baseline(tmp_path):
 
 def test_traffic_figures_cover_every_communication_type(tmp_path):
     paths = pr.write_traffic_figures(tmp_path)
-    assert {path.stem for path in paths} == set(pr.WRITE_MAPPINGS)
+    assert {path.stem for path in paths} == set(pr.GALLERY_MAPPINGS)
     assert pr._traffic_roles("gather_submesh")[1] == {5, 6, 9, 10}
     for path in paths:
         svg = path.read_text(encoding="utf-8")
@@ -514,7 +538,7 @@ def test_compute_overlap_requires_an_explicit_pe_budget(tmp_path):
     text = pr.report(tmp_path)
     assert "PE compute budget = [TBD] cycles/round" in text
     assert "Compute overlap coverage (%) = min(100, PE compute budget / NoC completion cycles * 100)" in text
-    assert "尚未選定 PE compute budget，因此不提供數值" in text
+    assert "PE compute budget 尚未定義，因此不提供數值" in text
 
 
 def test_tradeoff_pareto_keeps_each_workload_throughput_and_completion_objective(
@@ -557,20 +581,28 @@ def test_tradeoff_pareto_keeps_each_workload_throughput_and_completion_objective
             )
     text = pr.report(tmp_path)
     assert "DAT VCs" in text
-    assert "VC depth (flits/VC)" in text
-    assert "Router DAT entries/input" in text
-    assert "NI RX DAT entries/NI" in text
-    assert "Fixed NI TX DAT entries/NI" in text
-    assert "Read RoB beat slots/NI" in text
-    assert "Limiting throughput workload" in text
-    assert "Limiting completion workload" in text
-    assert "Broadcast - Global Write" in text
-    assert "Gather - Global, root 0 Write" in text
-    assert "| 1 | 8 | 8 | 8 | 8 | 128 |" in text
-    assert "| 2 | 16 | 32 | 32 | 8 | 128 |" in text
-    assert "| 4 | 8 | 32 | 32 | 8 | 128 |" in text
-    assert "selection uses every workload/direction" in text
-    assert "Pareto candidates" in text
+    assert "Router VC depth = 8 flits/VC" in text
+    assert "DAT Router Buffer Capacity (flits/input)" not in text
+    assert "NI RX DAT Buffer Capacity (flits/NI)" not in text
+    assert "Fixed NI TX DAT entries/NI" not in text
+    assert "NI TX DAT depth = 8 entries/NI" in text
+    assert "Read RoB depth = 128 beat slots/NI" in text
+    assert "Min. Normalized Throughput (%)" in text
+    assert "Max. Normalized Completion Time (×)" in text
+    assert "Performance Improvement vs Previous Configuration" in text
+    assert "Global Multicast Write" in text
+    assert "Hierarchical All-to-All" in text
+    assert "| DAT configuration | Performance Improvement vs Previous Configuration |" in text
+    assert "| 1 VC × 8 flits | Baseline |" in text
+    assert "Write: higher Throughput" in text
+    assert "Write: lower Completion Time" in text
+    assert "Hierarchical A2A" not in text
+    assert "每個 workload 與 direction 都是獨立 objective" in text
+    assert "Pareto-dominates" in text
+    assert "Non-dominated" in text
+    assert "Measured non-dominated set" in text
+    assert "Overall Pareto" not in text
+    assert "Pareto front" not in text
     assert "storage proxy" not in text
     assert "95%" not in text
     assert "量測建議" not in text
@@ -605,38 +637,45 @@ def test_report_level_svgs_cover_main_rows_and_each_pareto_dimension(tmp_path):
     pr.write_report_figures(tmp_path, baseline, tradeoff)
 
     assert {path.name for path in paths} == {
-        "ideal_vs_accepted_throughput.svg", "dut_pareto.svg"}
+        "ideal_vs_accepted_throughput.svg",
+        "hierarchical_alltoall_buffer_tradeoff.svg"}
     assert first_render == {
         path.name: path.read_text(encoding="utf-8") for path in paths}
     for svg in first_render.values():
         assert re.search(r"[\u4e00-\u9fff]", svg) is None
 
     throughput = first_render["ideal_vs_accepted_throughput.svg"]
-    assert throughput.count('class="metric-row"') == 16
+    assert throughput.count('class="metric-row"') == 10
     assert "B/cycle" in throughput
     assert "Ideal Bound" in throughput and "Accepted" in throughput
-    assert "Broadcast - Global W" in throughput
-    assert "Regional Exchange R" in throughput
+    assert "Global Multicast W" in throughput
+    assert "Hierarchical All-to-All R" in throughput
 
-    pareto = first_render["dut_pareto.svg"]
-    assert pareto.count('class="candidate-row"') == 8
-    assert "Pareto" in pareto and "Dominated" in pareto
-    for label in ("BG W", "Gather W", "Gather R", "Regional W", "Regional R"):
-        assert label in pareto
-    for label in ("Router DAT", "NI RX DAT", "NI TX DAT", "Read RoB"):
-        assert label in pareto
-    assert "BW %" in pareto and "Time x" in pareto
-    assert "entries/input" in pareto
-    assert "entries/NI" in pareto
-    assert "beat slots/NI" in pareto
-    assert "flits/VC" in pareto
+    tradeoff_plot = first_render["hierarchical_alltoall_buffer_tradeoff.svg"]
+    assert tradeoff_plot.count('class="panel"') == 2
+    assert tradeoff_plot.count('class="candidate-point"') == 16
+    assert "DAT Router Buffer Capacity (flits/input)" in tradeoff_plot
+    assert ">Write</text>" in tradeoff_plot
+    assert ">Read</text>" in tradeoff_plot
+    assert ">Throughput (B/cycle)</text>" in tradeoff_plot
+    assert 'transform="rotate(-90' in tradeoff_plot
+    assert "Non-dominated" in tradeoff_plot and "Dominated" in tradeoff_plot
+    assert "Overall Pareto" not in tradeoff_plot
 
 
-def test_report_embeds_only_the_two_report_level_svgs(tmp_path):
+def test_report_embeds_the_report_level_svgs(tmp_path):
     _complete_baseline(tmp_path)
     _complete_tradeoff_config(tmp_path, 1, 8)
 
     text = pr.report(tmp_path)
 
     assert "![Ideal and accepted throughput](ideal_vs_accepted_throughput.svg)" in text
-    assert "![Measured-set DUT Pareto view](dut_pareto.svg)" in text
+    assert "![DUT configuration" not in text
+    assert "### DUT Configuration Performance" in text
+    assert "Measured / Ideal (Efficiency)" in text
+    assert "| Config | Multicast W | Hier. A2A W | Hier. A2A R |" in text
+    assert ("| 1 VC × 8 | 400 / 1008 (40%) | 400 / 504 (79%) | "
+            "400 / 512 (78%) |") in text
+    assert ("![Hierarchical All-to-All buffer trade-off]"
+            "(hierarchical_alltoall_buffer_tradeoff.svg)" in text)
+    assert "DAT Router Buffer Capacity = DAT VC count × Router VC depth" in text

@@ -217,3 +217,37 @@ Status: Complete
 Goal: Generate clean AI-workload results and measured-set Pareto candidates.
 Success Criteria: The report uses standard metrics, lists storage categories separately, identifies limiting workloads, and makes no unsupported PPA claim.
 Status: Complete
+
+## Auxiliary task: MHA, MoE, and Pipeline report consolidation
+
+### Stage 1: Report contract
+Goal: Limit the report vocabulary to the approved MHA, MoE, and Pipeline traffic models and identify which models have measured evidence.
+Success Criteria: Existing results are not relabeled as All-Gather or All-Reduce, standard NoC terms are used, and unrelated generated data is preserved.
+Status: Complete
+
+### Stage 2: Generator and focused tests
+Goal: Simplify the VC and buffer comparison and remove formulaic prose from the generated report.
+Success Criteria: The generator emits the approved structure, visible prose contains no semicolons or em dashes, and focused tests cover the new contract.
+Status: Complete
+
+### Stage 3: Report regeneration and verification
+Goal: Regenerate the Markdown report from existing evidence and run focused checks.
+Success Criteria: Focused pytest passes and the generated report matches the approved terminology without changing measured values.
+Status: Complete
+
+## Auxiliary task: Hierarchical All-to-All buffer trade-off plot
+
+### Stage 1: Figure contract
+Goal: Define one Pareto scatter plot using measured Hierarchical All-to-All Read and Write results.
+Success Criteria: Tests require DAT Router Buffer Capacity in flits/input, Throughput in B/cycle, configuration labels, and Pareto status.
+Status: Complete
+
+### Stage 2: Report generation
+Goal: Generate the plot from the existing trade-off rows and embed it in the VC and Buffer section.
+Success Criteria: Regenerating the report produces the same SVG and preserves all measured values.
+Status: Complete
+
+### Stage 3: Verification
+Goal: Run the focused report tests and verify the generated Markdown and SVG.
+Success Criteria: Focused pytest passes and the report explains how to read cost, performance, Dominated points, and the Pareto front.
+Status: Complete

@@ -1,19 +1,19 @@
-# AI Inference NoC Performance Report — mesh_4x4
+# AI Inference NoC Performance Report: mesh_4x4
 
 ## 1. 測試設定與量測方法
 
-- Native AXI data width：512 bits，即 64 B/beat。主表使用 Burst Length 64 beats，因此每筆 transaction 為 4096 B。
-- Load control：Outstanding Depth = 32 transactions/initiator。每個 mapping 執行 16 rounds，seed=1。
-- Baseline DUT：DAT VCs = 2、Router VC depth = 8 flits/VC、NI RX DAT depth = 8 flits/VC、NI TX DAT depth = 8 entries、Read RoB = 128 beat slots。
-- Write slot 從 AW admission 保留到 B。Read slot 從 AR handshake 保留到對應的 RLAST。
-- Read memory 與 checker data 在量測前完成 prefill。Read 與 Write 分開執行。
+- Native AXI data width：512 bits，即 64 B/beat。Reference Burst Length 為 64 beats，每筆 transaction 為 4096 B。
+- Load control：Outstanding Depth = 32 transactions/initiator。每個 traffic mapping 執行 16 rounds，seed = 1。
+- Reference DUT：DAT VCs = 2、Router VC depth = 8 flits/VC、NI RX DAT depth = 8 flits/VC、NI TX DAT depth = 8 entries、Read RoB = 128 beat slots。
+- Write transaction 從 AW admission 佔用一個 slot，收到 B 後釋放。Read transaction 從 AR handshake 佔用一個 slot，收到 RLAST 後釋放。
+- Read memory 與 checker data 在量測前完成 prefill。Read 與 Write 分開量測。
 
 量測流程：
 
-1. 選擇 Communication type 與 Read／Write 方向。
-2. 固定 Outstanding Depth 32，各 initiator 持續送出 transaction，直到用滿可用 slot。
+1. 選擇 Traffic Model 與 Read／Write 方向。
+2. 固定 Outstanding Depth 32。每個 initiator 持續送出 transaction，直到用滿可用 slot。
 3. Write 收到 B 或 Read 收到 RLAST 時釋放一個 slot。
-4. 記錄整組 workload 的 completion time、delivered bandwidth 與 DAT-link utilization。
+4. 記錄整組 workload 的 Completion Time、Accepted Throughput 與 DAT link utilization。
 
 公式：
 
@@ -23,83 +23,70 @@ Reference transaction bytes = 64 beats * 64 B/beat = 4096 B
 Logical delivered bytes = payload deliveries * Transaction bytes
 Accepted Throughput (B/cycle) = Logical delivered bytes / Completion Time
 Ideal Throughput Bound (B/cycle) = logical delivered bytes / busiest resource serialization cycles
-% of Ideal Throughput = Accepted Throughput at Outstanding Depth 32 / Ideal Throughput Bound * 100
-DAT-link utilization (%) = transferred DAT flits / measured cycles * 100
+Throughput Efficiency (%) = Accepted Throughput / Ideal Throughput Bound * 100
+DAT link utilization (%) = transferred DAT flits / measured cycles * 100
 ```
 
-## 2. AI Communication Types
+## 2. MHA、MoE 與 Pipeline Traffic Models
 
-| Communication type | 量測方向 |
+| Traffic | AI Workload |
 |---|---:|
-| Broadcast - Row | Write |
-| Broadcast - Column | Write |
-| Broadcast - Local 2x2 | Write |
-| Broadcast - Global | Write |
-| Gather - Global, root 0 | Write / Read |
-| Gather - Local 2x2 | Write / Read |
-| All-to-All | Write / Read |
-| Neighbor Exchange | Write / Read |
-| Pipeline P2P | Write / Read |
-| Regional Exchange | Write / Read |
+| Multicast | MHA |
+| All-Gather | MHA |
+| All-to-All | MoE |
+| Hierarchical All-to-All | MoE |
+| Pipeline P2P | Model Pipeline |
 
-箭頭表示 AI payload 的 dataflow 方向。Read 的 request 反向送往資料來源，response 再沿箭頭方向回到 consumer。
+All-Gather traffic schedule 尚未實作，因此欄位標為 [TBD]。既有 Gather 是 many-to-one traffic，不納入本報告。
 
-| **Broadcast - Row** | **Broadcast - Column** |
+下圖只顯示已有量測資料的 mapping。Multicast 依 destination group 分成 Row-wise、Column-wise、Local 2×2 與 Global。Hierarchical All-to-All 目前只量到 inter-region phase。箭頭表示 payload 方向。Read request 逆向送往資料來源，response 再沿箭頭方向送到 consumer。
+
+| **Row-wise Multicast** | **Column-wise Multicast** |
 |---|---|
-| ![Broadcast - Row](traffic_patterns/broadcast_row.svg) | ![Broadcast - Column](traffic_patterns/broadcast_col.svg) |
+| ![Row-wise Multicast](traffic_patterns/broadcast_row.svg) | ![Column-wise Multicast](traffic_patterns/broadcast_col.svg) |
 
-| **Broadcast - Local 2x2** | **Broadcast - Global** |
+| **Local Multicast (2×2)** | **Global Multicast** |
 |---|---|
-| ![Broadcast - Local 2x2](traffic_patterns/broadcast_submesh.svg) | ![Broadcast - Global](traffic_patterns/broadcast_global.svg) |
+| ![Local Multicast (2×2)](traffic_patterns/broadcast_submesh.svg) | ![Global Multicast](traffic_patterns/broadcast_global.svg) |
 
-| **Gather - Global, root 0** | **Gather - Local 2x2** |
+| **All-to-All** | **Pipeline P2P** |
 |---|---|
-| ![Gather - Global, root 0](traffic_patterns/gather_global_root0.svg) | ![Gather - Local 2x2](traffic_patterns/gather_submesh.svg) |
+| ![All-to-All](traffic_patterns/alltoall.svg) | ![Pipeline P2P](traffic_patterns/pipeline.svg) |
 
-| **All-to-All** | **Neighbor Exchange** |
-|---|---|
-| ![All-to-All](traffic_patterns/alltoall.svg) | ![Neighbor Exchange](traffic_patterns/neighbor_exchange.svg) |
-
-| **Pipeline P2P** | **Regional Exchange** |
-|---|---|
-| ![Pipeline P2P](traffic_patterns/pipeline.svg) | ![Regional Exchange](traffic_patterns/many_to_many.svg) |
+| **Hierarchical All-to-All** |
+|---|
+| ![Hierarchical All-to-All](traffic_patterns/many_to_many.svg) |
 
 ## 3. Performance Results
 
-Reference configuration：baseline DUT、Burst Length 64 beats、Outstanding Depth 32。
+Reference configuration：Reference DUT、Burst Length 64 beats、Outstanding Depth 32。
 
-| Communication Type | Direction | Ideal Throughput Bound (B/cycle) | Accepted Throughput at Outstanding Depth 32 (B/cycle) | % of Ideal Throughput |
+| Traffic Model | Direction | Ideal Throughput Bound (B/cycle) | Accepted Throughput (B/cycle) | Throughput Efficiency (%) |
 |---|---:|---:|---:|---:|
-| Broadcast - Row | Write | 1008.2 | 628.6 | 62.4 |
-| Broadcast - Column | Write | 1008.2 | 628.6 | 62.4 |
-| Broadcast - Local 2x2 | Write | 1008.2 | 667.0 | 66.2 |
-| Broadcast - Global | Write | 1008.2 | 536.1 | 53.2 |
-| Gather - Global, root 0 | Write | 63.0 | 62.9 | 99.7 |
-| Gather - Local 2x2 | Write | 252.1 | 249.4 | 99.0 |
+| Row-wise Multicast | Write | 1008.2 | 628.6 | 62.4 |
+| Column-wise Multicast | Write | 1008.2 | 628.6 | 62.4 |
+| Local Multicast (2×2) | Write | 1008.2 | 667.0 | 66.2 |
+| Global Multicast | Write | 1008.2 | 536.1 | 53.2 |
 | All-to-All | Write | 945.2 | 543.0 | 57.4 |
-| Neighbor Exchange | Write | 756.2 | 563.1 | 74.5 |
 | Pipeline P2P | Write | 945.2 | 917.9 | 97.1 |
-| Regional Exchange | Write | 504.1 | 254.7 | 50.5 |
-| Gather - Global, root 0 | Read | 64.0 | 57.2 | 89.4 |
-| Gather - Local 2x2 | Read | 256.0 | 233.7 | 91.3 |
+| Hierarchical All-to-All | Write | 504.1 | 254.7 | 50.5 |
 | All-to-All | Read | 960.0 | 301.2 | 31.4 |
-| Neighbor Exchange | Read | 768.0 | 494.3 | 64.4 |
 | Pipeline P2P | Read | 960.0 | 931.8 | 97.1 |
-| Regional Exchange | Read | 512.0 | 270.7 | 52.9 |
+| Hierarchical All-to-All | Read | 512.0 | 270.7 | 52.9 |
 
 ![Ideal and accepted throughput](ideal_vs_accepted_throughput.svg)
 
 表格解讀：
 
-1. `Ideal Throughput Bound` 由每個 pattern 的 physical resource serialization 上限決定。
-2. `Accepted Throughput` 只取 Outstanding Depth 32 的量測值。
-3. `% of Ideal Throughput` 比較同一 Communication Type 與 Direction 的量測值和理想上限。
+1. `Ideal Throughput Bound` 由該 mapping 最忙的 physical resource 決定。
+2. `Accepted Throughput` 是 Reference configuration 的量測值。
+3. `Throughput Efficiency` 比較同一 Traffic Model 與 Direction 的量測值和理想上限。數值越接近 100% 越好。
 
 ## 4. Burst Length Characterization
 
-Burst Length 是 workload axis。所有列都使用 baseline DUT（DAT VCs 2、Router／NI RX depth 8）、Outstanding Depth 32，並固定每個 flow/round 為 4096 B。
+Burst Length 是 workload parameter，不是 DUT configuration。所有列使用 Reference DUT 與 Outstanding Depth 32。每個 flow 每輪固定傳輸 4096 B。
 
-| Communication Type | Direction | Burst Length (beats) | Transactions/flow/round | Accepted Throughput (B/cycle) | Completion time (cycles/run) |
+| Traffic Model | Direction | Burst Length (beats) | Transactions/flow/round | Accepted Throughput (B/cycle) | Completion time (cycles/run) |
 |---|---:|---:|---:|---:|---:|
 | All-to-All | Read | 1 | 64 | 268.5 | 58573 |
 | All-to-All | Read | 4 | 16 | 196.8 | 79913 |
@@ -109,18 +96,10 @@ Burst Length 是 workload axis。所有列都使用 baseline DUT（DAT VCs 2、R
 | All-to-All | Write | 4 | 16 | 530.4 | 29655 |
 | All-to-All | Write | 16 | 4 | 510.1 | 30833 |
 | All-to-All | Write | 64 | 1 | 543.0 | 28968 |
-| Broadcast - Global | Write | 1 | 64 | 17.4 | 60420 |
-| Broadcast - Global | Write | 4 | 16 | 66.0 | 15876 |
-| Broadcast - Global | Write | 16 | 4 | 221.2 | 4740 |
-| Broadcast - Global | Write | 64 | 1 | 536.1 | 1956 |
-| Gather - Global, root 0 | Read | 1 | 64 | 31.6 | 31111 |
-| Gather - Global, root 0 | Read | 4 | 16 | 57.6 | 17057 |
-| Gather - Global, root 0 | Read | 16 | 4 | 57.2 | 17183 |
-| Gather - Global, root 0 | Read | 64 | 1 | 57.2 | 17183 |
-| Gather - Global, root 0 | Write | 1 | 64 | 32.0 | 30761 |
-| Gather - Global, root 0 | Write | 4 | 16 | 51.1 | 19241 |
-| Gather - Global, root 0 | Write | 16 | 4 | 60.1 | 16361 |
-| Gather - Global, root 0 | Write | 64 | 1 | 62.9 | 15641 |
+| Global Multicast | Write | 1 | 64 | 17.4 | 60420 |
+| Global Multicast | Write | 4 | 16 | 66.0 | 15876 |
+| Global Multicast | Write | 16 | 4 | 221.2 | 4740 |
+| Global Multicast | Write | 64 | 1 | 536.1 | 1956 |
 | Pipeline P2P | Read | 1 | 64 | 473.1 | 2078 |
 | Pipeline P2P | Read | 4 | 16 | 931.8 | 1055 |
 | Pipeline P2P | Read | 16 | 4 | 931.8 | 1055 |
@@ -130,64 +109,133 @@ Burst Length 是 workload axis。所有列都使用 baseline DUT（DAT VCs 2、R
 | Pipeline P2P | Write | 16 | 4 | 878.5 | 1119 |
 | Pipeline P2P | Write | 64 | 1 | 917.9 | 1071 |
 
-## 5. Hardware Multicast vs Repeated Unicast
+## 5. Multicast vs Repeated Unicast
 
-兩種實作使用相同 baseline DUT、Broadcast producer、member、issue order、AXI-ID policy 與 4096 B/flow/round。
+本節使用 Write traffic。兩種模式使用相同 Reference DUT、source、Destination Set、issue order、AXI-ID policy 與 4096 B/flow/round。Outstanding Depth 固定為 32，共執行 16 rounds。
 
-Destination count 包含 producer 本身的 local member；Source injected flits 不計入 B／CollectB。
+量測流程：
 
-| Broadcast shape | Destination count | Hardware source injected flits | Hardware Completion time (cycles) | Repeated-unicast source injected flits | Repeated-unicast Completion time (cycles) | Hardware speedup (x) |
+1. 所有 active sources 在同一個 cycle 開始發送。
+2. Multicast 每個 source 每個 round 發出一筆 Write transaction。Router 在路徑分叉處複製 flit。
+3. Repeated Unicast 對每個 destination 發出一筆獨立 Write transaction，最多保留 32 筆 outstanding transactions。
+4. 最後一個 active source 收到所有 B responses 時結束量測。
+
+```text
+Injected Flits = sum of DAT flits at source injection ports
+Completion Time = final B completion cycle - common start cycle
+Speedup = Repeated Unicast Completion Time / Multicast Completion Time
+```
+
+Fanout 包含 source 本身。Local delivery 不經過 mesh link。Injected Flits 不包含 B／CollectB。
+
+每個 node 的 payload：
+
+```text
+Payload per destination per round = 64 beats * 64 B/beat = 4096 B = 4 KiB
+Payload per destination per run = 4096 B * 16 rounds = 65536 B = 64 KiB
+```
+
+Injected Flits 對應方式：
+
+```text
+DAT flits per transaction = 1 header flit + Burst Length
+Multicast Injected Flits = Source Count * Rounds * (1 + Burst Length)
+Repeated Unicast Injected Flits = Source Count * Rounds * (Fanout - 1) * (1 + Burst Length)
+Injection Ratio = Repeated Unicast Injected Flits / Multicast Injected Flits = Fanout - 1
+
+Burst Length = 64 beats, so each Write transaction injects 65 DAT flits
+Row-wise Multicast = 4 * 16 * 65 = 4160 flits
+Row-wise Repeated Unicast = 4 * 16 * 3 * 65 = 12480 flits
+Global Multicast = 1 * 16 * 65 = 1040 flits
+Global Repeated Unicast = 1 * 16 * 15 * 65 = 15600 flits
+```
+
+| Destination Set | Fanout | Multicast Injected Flits | Multicast Completion Time (cycles) | Repeated Unicast Injected Flits | Repeated Unicast Completion Time (cycles) | Speedup (×) |
 |---|---:|---:|---:|---:|---:|---:|
-| Broadcast - Row | 4 | 4160 | 1668 | 12480 | 4880 | 2.93 |
-| Broadcast - Column | 4 | 4160 | 1668 | 12480 | 4880 | 2.93 |
-| Broadcast - Local 2x2 | 4 | 4160 | 1572 | 12480 | 4784 | 3.04 |
-| Broadcast - Global | 16 | 1040 | 1956 | 15600 | 17648 | 9.02 |
+| Row-wise Multicast | 4 | 4160 | 1668 | 12480 | 4880 | 2.93 |
+| Column-wise Multicast | 4 | 4160 | 1668 | 12480 | 4880 | 2.93 |
+| Local Multicast (2×2) | 4 | 4160 | 1572 | 12480 | 4784 | 3.04 |
+| Global Multicast | 16 | 1040 | 1956 | 15600 | 17648 | 9.02 |
 
 ## 6. VC 與 Buffer Trade-off
 
-Fixed-depth 與 equal-total-entry sweep 比較性能和每個 Router input 的 DAT buffer entries。
+本表比較 DAT VC count、VC depth、DAT Router buffer capacity 與 NI RX DAT buffer capacity。只使用已有 trade-off 量測的 Global Multicast 和 Hierarchical All-to-All。
 
 ```text
-DAT buffer entries per Router input = DAT VC count * Router VC depth
+DAT Router Buffer Capacity = DAT VC count × Router VC depth
 ```
 
-| DAT VCs | VC depth (flits/VC) | Router DAT entries/input | NI RX DAT entries/NI | Fixed NI TX DAT entries/NI | Read RoB beat slots/NI | Limiting throughput workload | Accepted Throughput retention (%) | Limiting completion workload | Completion Time ratio (x) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 8 | 8 | 8 | 8 | 128 | Regional Exchange Read | 91.6 | Regional Exchange Read | 1.09 |
-| 2 | 8 | 16 | 16 | 8 | 128 | Regional Exchange Write | 86.4 | Regional Exchange Write | 1.16 |
-| 1 | 32 | 32 | 32 | 8 | 128 | Regional Exchange Read | 93.7 | Regional Exchange Read | 1.07 |
-| 2 | 32 | 64 | 64 | 8 | 128 | Regional Exchange Write | 86.1 | Regional Exchange Write | 1.16 |
+固定條件：NI TX DAT depth = 8 entries/NI。Read RoB depth = 128 beat slots/NI。
 
-- 表格只列 Pareto candidates；任一未列設定都被另一設定在所有成本與性能維度支配。
-- Pareto selection uses every workload/direction 的 Accepted Throughput 與 Completion Time 作為獨立 objective；limiting 欄只供顯示。
-- Accepted Throughput retention 越高越好；Completion Time ratio 越接近 1.00 越好。
-- Router DAT、NI RX DAT、NI TX DAT 與 Read RoB 是獨立成本維度，不相加。
-- 尚無 approved PPA limits，因此不從 Pareto candidates 選擇最終設定。
+```text
+Normalized Throughput = measured throughput / highest measured throughput
+Normalized Completion Time = measured completion time / fastest measured completion time
+```
 
-Read RoB 固定為 128 beat slots。HWM 到達 128，但缺少對應的 non-zero admission-stall counter，因此本輪不啟動 Read RoB sweep，也不宣稱 RoB 限制 throughput。
+- Pareto-dominates：所有量測項目都不差，且至少一項更好。
+- Non-dominated：沒有其他 measured configuration 可以 Pareto-dominate 該設定。
+- Dominated：至少有一個 measured configuration 可以 Pareto-dominate 該設定。
+- Measured non-dominated set：所有 Non-dominated measured configurations 的集合。
+- 每個 workload 與 direction 都是獨立 objective。括號內列出該設定表現最差的 workload。
+- Normalized throughput 越接近 100% 越好。Normalized completion time 越接近 1.00× 越好。
+- Router DAT、NI RX DAT、NI TX DAT 與 Read RoB 是不同的儲存成本，不可直接相加。
+- 目前沒有 PPA limit，因此表格不指定最終 DUT configuration。
 
-![Measured-set DUT Pareto view](dut_pareto.svg)
+| DAT configuration | Performance Improvement vs Previous Configuration | Min. Normalized Throughput (%) | Max. Normalized Completion Time (×) |
+|---|---:|---:|---:|
+| 1 VC × 8 flits | Baseline | 91.6 (Hierarchical All-to-All Read) | 1.09 (Hierarchical All-to-All Read) |
+| 2 VC × 8 flits | Read: higher Throughput, lower Completion Time | 86.4 (Hierarchical All-to-All Write) | 1.16 (Hierarchical All-to-All Write) |
+| 1 VC × 32 flits | Write: higher Throughput, lower Completion Time<br>Read: higher Throughput, lower Completion Time | 93.7 (Hierarchical All-to-All Read) | 1.07 (Hierarchical All-to-All Read) |
+| 2 VC × 32 flits | Read: higher Throughput, lower Completion Time | 86.1 (Hierarchical All-to-All Write) | 1.16 (Hierarchical All-to-All Write) |
+
+![Hierarchical All-to-All buffer trade-off](hierarchical_alltoall_buffer_tradeoff.svg)
+
+圖表解讀：
+
+1. X 軸越往右代表每個 Router input 配置更多 DAT buffer flits。這是 storage cost，不是 synthesis area。
+2. Y 軸越高代表相同 workload 在每個 cycle 完成更多 payload bytes。
+3. Non-dominated configuration 無法在成本不增加的條件下繼續提升所有量測性能。
+4. Dominated configuration 的成本不低，且 Read 與 Write performance 都可由其他設定取代。
+
+Read RoB 固定為 128 beat slots。HWM 到達 128，但沒有對應的 non-zero admission-stall counter。本輪不執行 Read RoB sweep，也不判定 RoB 限制 throughput。
+
+### DUT Configuration Performance
+
+Cell = Measured / Ideal (Efficiency)
+
+Unit: B/cycle
+
+| Config | Multicast W | Hier. A2A W | Hier. A2A R |
+|---|---:|---:|---:|
+| 1 VC × 8 | 536 / 1008 (53%) | 291 / 504 (58%) | 269 / 512 (53%) |
+| 2 VC × 8 | 536 / 1008 (53%) | 255 / 504 (51%) | 271 / 512 (53%) |
+| 1 VC × 32 | 536 / 1008 (53%) | 295 / 504 (58%) | 275 / 512 (54%) |
+| 2 VC × 16 | 536 / 1008 (53%) | 253 / 504 (50%) | 271 / 512 (53%) |
+| 4 VC × 8 | 536 / 1008 (53%) | 252 / 504 (50%) | 271 / 512 (53%) |
+| 2 VC × 32 | 536 / 1008 (53%) | 254 / 504 (50%) | 294 / 512 (57%) |
+| 4 VC × 16 | 536 / 1008 (53%) | 252 / 504 (50%) | 271 / 512 (53%) |
+| 8 VC × 8 | 536 / 1008 (53%) | 252 / 504 (50%) | 271 / 512 (53%) |
 
 ## 7. RR vs RRD
 
-此 64-bit common-payload 測試中，node 0 的 Control probes 位於完整的 Pipeline P2P background interval 內。RR 使用 shared-edge REQ／RSP；RRD 的 background 改走同一 directed geometric edge 的 DAT。
+此 64-bit common-payload 測試把 node 0 的 Control probe 放在完整的 Pipeline P2P background interval 內。RR 讓 background 與 Control 共用 REQ／RSP。RRD 讓 background 改走相同 directed geometric edge 的 DAT。
 
-Control Completion Time 從第一次 request `VALID` assertion 開始，到對應的 B/R handshake 結束，因此包含 source admission backpressure。
+Control Completion Time 從第一次 request `VALID` assertion 開始，到對應的 B/R handshake 結束，包含 source admission backpressure。
 
 | Control case | RR mean Completion Time (cycles/transaction) | RRD mean Completion Time (cycles/transaction) | Completion Time reduction (cycles/transaction) | Completion Time reduction (%) |
 |---|---:|---:|---:|---:|
 | Control Write | 1992.89 | 500.17 | 1492.72 | 74.9 |
 | Control Read | 533.01 | 500.55 | 32.46 | 6.1 |
 
-Completion Time reduction = RR mean Completion Time - RRD mean Completion Time；正值表示獨立 DAT 降低 Control blocking。此結果不是 512-bit bandwidth。
+Completion Time reduction = RR mean Completion Time - RRD mean Completion Time。正值表示獨立 DAT 降低 Control blocking。此結果不代表 512-bit bandwidth。
 
 ## 8. Compute Overlap Coverage
 
-這是 workload 檢查，不是實測 PE utilization。必須先指定 PE compute budget 才能產生數值。
+此項比較 NoC Completion Time 與指定的 PE compute budget，不是實測 PE utilization。
 
 ```text
 PE compute budget = [TBD] cycles/round
 Compute overlap coverage (%) = min(100, PE compute budget / NoC completion cycles * 100)
 ```
 
-尚未選定 PE compute budget，因此不提供數值。
+PE compute budget 尚未定義，因此不提供數值。

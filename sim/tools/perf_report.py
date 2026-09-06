@@ -23,26 +23,32 @@ READ_MAPPINGS = (
 )
 TRADEOFF_CELLS = (
     ("write", "broadcast_global"),
-    ("write", "gather_global_root0"),
-    ("read", "gather_global_root0"),
     ("write", "many_to_many"),
     ("read", "many_to_many"),
 )
 BURST_BEATS = (1, 4, 16, 64)
 BURST_MAPPINGS = ("broadcast_global", "gather_global_root0", "alltoall", "pipeline")
+REPORT_BURST_MAPPINGS = ("broadcast_global", "alltoall", "pipeline")
 NI_TX_DAT_DEPTH = 8
 
+REPORT_WRITE_MAPPINGS = (
+    "broadcast_row", "broadcast_col", "broadcast_submesh", "broadcast_global",
+    "alltoall", "pipeline", "many_to_many",
+)
+REPORT_READ_MAPPINGS = ("alltoall", "pipeline", "many_to_many")
+GALLERY_MAPPINGS = REPORT_WRITE_MAPPINGS
+
 DISPLAY_NAME = {
-    "broadcast_row": "Broadcast - Row",
-    "broadcast_col": "Broadcast - Column",
-    "broadcast_submesh": "Broadcast - Local 2x2",
-    "broadcast_global": "Broadcast - Global",
-    "gather_global_root0": "Gather - Global, root 0",
-    "gather_submesh": "Gather - Local 2x2",
+    "broadcast_row": "Row-wise Multicast",
+    "broadcast_col": "Column-wise Multicast",
+    "broadcast_submesh": "Local Multicast (2×2)",
+    "broadcast_global": "Global Multicast",
+    "gather_global_root0": "Global Gather (root 0)",
+    "gather_submesh": "Local Gather (2x2)",
     "alltoall": "All-to-All",
     "neighbor_exchange": "Neighbor Exchange",
     "pipeline": "Pipeline P2P",
-    "many_to_many": "Regional Exchange",
+    "many_to_many": "Hierarchical All-to-All",
 }
 
 def _one_csv(path):
@@ -306,8 +312,8 @@ def _table(headers, rows):
 
 def _performance_data(rows):
     data = []
-    for direction, mappings in (("write", WRITE_MAPPINGS),
-                                ("read", READ_MAPPINGS)):
+    for direction, mappings in (("write", REPORT_WRITE_MAPPINGS),
+                                ("read", REPORT_READ_MAPPINGS)):
         for mapping in mappings:
             item = next(row for row in rows
                         if row["direction"] == direction
@@ -327,8 +333,18 @@ def _performance_data(rows):
 
 def _traffic_gallery():
     lines = []
-    for index in range(0, len(WRITE_MAPPINGS), 2):
-        left, right = WRITE_MAPPINGS[index:index + 2]
+    for index in range(0, len(GALLERY_MAPPINGS), 2):
+        pair = GALLERY_MAPPINGS[index:index + 2]
+        left = pair[0]
+        right = pair[1] if len(pair) == 2 else None
+        if right is None:
+            lines += [
+                f"| **{DISPLAY_NAME[left]}** |",
+                "|---|",
+                f"| ![{DISPLAY_NAME[left]}](traffic_patterns/{left}.svg) |",
+                "",
+            ]
+            continue
         lines += [
             f"| **{DISPLAY_NAME[left]}** | **{DISPLAY_NAME[right]}** |",
             "|---|---|",
@@ -446,7 +462,7 @@ def _traffic_svg(mapping):
     lines += [
         '<circle cx="390" cy="33" r="9" fill="#4c78a8"/><text class="legend" x="406" y="38">Source</text>',
         '<circle cx="500" cy="33" r="9" fill="#f2a65a"/><text class="legend" x="516" y="38">Destination</text>',
-        '<circle cx="390" cy="62" r="9" fill="#8064a2"/><text class="legend" x="406" y="67">Source + Destination</text>',
+        '<circle cx="390" cy="62" r="9" fill="#8064a2"/><text class="legend" x="406" y="67">Source and Destination</text>',
         '</svg>',
     ]
     return "\n".join(lines) + "\n"
@@ -456,7 +472,7 @@ def write_traffic_figures(destination):
     destination = pathlib.Path(destination) / "traffic_patterns"
     destination.mkdir(parents=True, exist_ok=True)
     paths = []
-    for mapping in WRITE_MAPPINGS:
+    for mapping in GALLERY_MAPPINGS:
         path = destination / f"{mapping}.svg"
         path.write_text(_traffic_svg(mapping), encoding="utf-8", newline="\n")
         paths.append(path)
@@ -514,14 +530,15 @@ def _burst_table(rows):
              for row in rows}
     if found != required:
         sys.exit("perf_report: incomplete Burst Length characterization")
+    report_rows = [row for row in rows if row["mapping"] in REPORT_BURST_MAPPINGS]
     return _table([
-        "Communication Type", "Direction", "Burst Length (beats)",
+        "Traffic Model", "Direction", "Burst Length (beats)",
         "Transactions/flow/round", "Accepted Throughput (B/cycle)",
         "Completion time (cycles/run)",
     ], [[DISPLAY_NAME[row["mapping"]], row["direction"].title(),
          row["burst_beats"], row["transactions_per_flow"],
          f"{row['bandwidth']:.1f}", row["completion_cycles"]]
-        for row in rows])
+        for row in report_rows])
 
 
 def _multicast_table(rows):
@@ -546,10 +563,10 @@ def _multicast_table(rows):
             f"{repeated['completion_cycles'] / hardware['completion_cycles']:.2f}",
         ])
     return _table([
-        "Broadcast shape", "Destination count",
-        "Hardware source injected flits", "Hardware Completion time (cycles)",
-        "Repeated-unicast source injected flits",
-        "Repeated-unicast Completion time (cycles)", "Hardware speedup (x)",
+        "Destination Set", "Fanout",
+        "Multicast Injected Flits", "Multicast Completion Time (cycles)",
+        "Repeated Unicast Injected Flits",
+        "Repeated Unicast Completion Time (cycles)", "Speedup (×)",
     ], table_rows)
 
 
@@ -632,33 +649,85 @@ def _tradeoff_table(baseline_rows, tradeoff_rows):
     summaries = [row for row in _tradeoff_summaries(baseline_rows, tradeoff_rows)
                  if row["pareto"]]
     table_rows = []
+    previous = None
     for row in summaries:
         vc, depth, _ni_rx_depth = row["config"]
-        router_entries, ni_rx_entries, ni_tx_entries, r_rob_depth = row["costs"]
         throughput_direction, throughput_mapping = row["throughput_cell"]
         completion_direction, completion_mapping = row["completion_cell"]
+        improvements = []
+        if previous is None:
+            improvements.append("Baseline")
+        else:
+            for direction in ("write", "read"):
+                indices = [index for index, cell in enumerate(TRADEOFF_CELLS)
+                           if cell[0] == direction]
+                metrics = []
+                if any(row["throughput"][index] > previous["throughput"][index]
+                       for index in indices):
+                    metrics.append("higher Throughput")
+                if any(row["completion"][index] < previous["completion"][index]
+                       for index in indices):
+                    metrics.append("lower Completion Time")
+                if metrics:
+                    improvements.append(f"{direction.title()}: {', '.join(metrics)}")
         table_rows.append([
-            vc, depth, router_entries, ni_rx_entries, ni_tx_entries, r_rob_depth,
-            f"{DISPLAY_NAME[throughput_mapping]} {throughput_direction.title()}",
-            f"{row['throughput_retention']:.1f}",
-            f"{DISPLAY_NAME[completion_mapping]} {completion_direction.title()}",
-            f"{row['completion_ratio']:.2f}",
+            f"{vc} VC × {depth} flits", "<br>".join(improvements) or "None",
+            f"{row['throughput_retention']:.1f} "
+            f"({DISPLAY_NAME[throughput_mapping]} {throughput_direction.title()})",
+            f"{row['completion_ratio']:.2f} "
+            f"({DISPLAY_NAME[completion_mapping]} {completion_direction.title()})",
         ])
+        previous = row
     table = _table([
-        "DAT VCs", "VC depth (flits/VC)", "Router DAT entries/input",
-        "NI RX DAT entries/NI", "Fixed NI TX DAT entries/NI",
-        "Read RoB beat slots/NI",
-        "Limiting throughput workload", "Accepted Throughput retention (%)",
-        "Limiting completion workload", "Completion Time ratio (x)",
+        "DAT configuration", "Performance Improvement vs Previous Configuration",
+        "Min. Normalized Throughput (%)",
+        "Max. Normalized Completion Time (×)",
     ], table_rows)
     guidance = "\n".join([
-        "- 表格只列 Pareto candidates；任一未列設定都被另一設定在所有成本與性能維度支配。",
-        "- Pareto selection uses every workload/direction 的 Accepted Throughput 與 Completion Time 作為獨立 objective；limiting 欄只供顯示。",
-        "- Accepted Throughput retention 越高越好；Completion Time ratio 越接近 1.00 越好。",
-        "- Router DAT、NI RX DAT、NI TX DAT 與 Read RoB 是獨立成本維度，不相加。",
-        "- 尚無 approved PPA limits，因此不從 Pareto candidates 選擇最終設定。",
+        "固定條件：NI TX DAT depth = 8 entries/NI。Read RoB depth = 128 beat slots/NI。",
+        "",
+        "```text",
+        "Normalized Throughput = measured throughput / highest measured throughput",
+        "Normalized Completion Time = measured completion time / fastest measured completion time",
+        "```",
+        "",
+        "- Pareto-dominates：所有量測項目都不差，且至少一項更好。",
+        "- Non-dominated：沒有其他 measured configuration 可以 Pareto-dominate 該設定。",
+        "- Dominated：至少有一個 measured configuration 可以 Pareto-dominate 該設定。",
+        "- Measured non-dominated set：所有 Non-dominated measured configurations 的集合。",
+        "- 每個 workload 與 direction 都是獨立 objective。括號內列出該設定表現最差的 workload。",
+        "- Normalized throughput 越接近 100% 越好。Normalized completion time 越接近 1.00× 越好。",
+        "- Router DAT、NI RX DAT、NI TX DAT 與 Read RoB 是不同的儲存成本，不可直接相加。",
+        "- 目前沒有 PPA limit，因此表格不指定最終 DUT configuration。",
     ])
-    return table + "\n\n" + guidance
+    return guidance + "\n\n" + table
+
+
+def _configuration_performance_table(baseline_rows, tradeoff_rows):
+    summaries = _tradeoff_summaries(baseline_rows, tradeoff_rows)
+    source_rows = baseline_rows + tradeoff_rows
+    ideals = []
+    for direction, mapping in TRADEOFF_CELLS:
+        item = next(row for row in source_rows
+                    if row["direction"] == direction
+                    and row["mapping"] == mapping
+                    and row["outstanding"] == 32)
+        ideals.append(pm.ideal_throughput_bound(
+            mapping, direction, item["burst_beats"], item["rounds"],
+            item["multicast_mode"]))
+
+    table_rows = []
+    for row in summaries:
+        vc, depth, _ni_rx_depth = row["config"]
+        values = [
+            f'{measured:.0f} / {ideal:.0f} '
+            f'({100.0 * measured / ideal:.0f}%)'
+            for measured, ideal in zip(row["throughput"], ideals)
+        ]
+        table_rows.append([f"{vc} VC × {depth}", *values])
+    return _table(
+        ["Config", "Multicast W", "Hier. A2A W", "Hier. A2A R"],
+        table_rows)
 
 
 def _ideal_vs_accepted_svg(rows):
@@ -702,72 +771,76 @@ def _ideal_vs_accepted_svg(rows):
     return "\n".join(lines) + "\n"
 
 
-def _dut_pareto_svg(baseline_rows, tradeoff_rows):
+def _hierarchical_alltoall_buffer_tradeoff_svg(baseline_rows, tradeoff_rows):
     summaries = _tradeoff_summaries(baseline_rows, tradeoff_rows)
-    width = 1900
-    left = 185
-    metric_width = 116
-    cost_width = 108
-    status_width = 120
-    row_height = 42
-    height = 170 + row_height * len(summaries)
-    workload_labels = ("BG W", "Gather W", "Gather R", "Regional W", "Regional R")
-    best_bandwidth = [max(row["throughput"][index] for row in summaries)
-                      for index in range(len(TRADEOFF_CELLS))]
-    fastest_completion = [min(row["completion"][index] for row in summaries)
-                          for index in range(len(TRADEOFF_CELLS))]
-    performance_width = len(TRADEOFF_CELLS) * 2 * metric_width
-    costs_x = left + performance_width
-    status_x = costs_x + 4 * cost_width
+    panels = (("Write", 1), ("Read", 2))
+    width = 1480
+    height = 620
+    plot_top = 125
+    plot_height = 380
+    plot_width = 545
+    panel_lefts = (115, 805)
+    capacities = [row["costs"][0] for row in summaries]
+    values = [row["throughput"][index]
+              for _label, index in panels for row in summaries]
+    spread = max(values) - min(values)
+    padding = max(5.0, spread * 0.12)
+    y_min = max(0.0, math.floor((min(values) - padding) / 10.0) * 10.0)
+    y_max = math.ceil((max(values) + padding) / 10.0) * 10.0
+    if y_max == y_min:
+        y_max += 10.0
+    x_max = max(capacities)
+    label_offsets = {
+        (1, 8): -14,
+        (2, 8): -14,
+        (1, 32): -14,
+        (2, 16): 20,
+        (4, 8): 38,
+        (2, 32): -14,
+        (4, 16): 20,
+        (8, 8): 38,
+    }
     lines = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        '<title>Measured-Set DUT Pareto View</title>',
-        '<style>text{font-family:Arial,Helvetica,sans-serif;fill:#1f2933}.title{font-size:26px;font-weight:700}.head{font-size:15px;font-weight:700}.subhead{font-size:14px;fill:#52606d}.cell{font-size:15px}.config{font-size:16px;font-weight:700}.line{stroke:#bcccdc;stroke-width:1}.pareto{fill:#e7f3fa}.dominated{fill:#f5f7fa}.status-p{fill:#1f7a4d;font-weight:700}.status-d{fill:#7b8794}</style>',
-        '<text class="title" x="34" y="36">Measured-Set DUT Pareto View</text>',
-        '<text class="subhead" x="34" y="62">Each workload metric and storage category remains independent.</text>',
-        f'<text class="head" x="{left - 16}" y="91" text-anchor="end">VC / Depth</text>',
-        f'<text class="subhead" x="{left - 16}" y="116" text-anchor="end">flits/VC</text>',
+        '<title>Hierarchical All-to-All Throughput versus DAT Router Buffer Capacity</title>',
+        '<style>text{font-family:Arial,Helvetica,sans-serif;fill:#1f2933}.title{font-size:26px;font-weight:700}.panel-title{font-size:20px;font-weight:700}.axis{font-size:15px;fill:#52606d}.label{font-size:14px;font-weight:700}.grid{stroke:#d9e2ec;stroke-width:1}.frame{fill:none;stroke:#829ab1;stroke-width:1.2}.pareto-point{fill:#2f6f9f;stroke:#174a70;stroke-width:1.5}.dominated-point{fill:#aeb8c2;stroke:#68737d;stroke-width:1.5}</style>',
+        '<text class="title" x="34" y="38">Hierarchical All-to-All Throughput vs DAT Router Buffer Capacity</text>',
+        '<circle class="pareto-point" cx="1100" cy="31" r="7"/><text class="axis" x="1115" y="36">Non-dominated</text>',
+        '<circle class="dominated-point" cx="1240" cy="31" r="7"/><text class="axis" x="1255" y="36">Dominated</text>',
+        f'<text class="axis" x="34" y="{plot_top + plot_height / 2:.1f}" text-anchor="middle" transform="rotate(-90 34 {plot_top + plot_height / 2:.1f})">Throughput (B/cycle)</text>',
     ]
-    for index, label in enumerate(workload_labels):
-        x = left + index * 2 * metric_width
-        lines.append(f'<text class="head" x="{x + metric_width}" y="91" text-anchor="middle">{label}</text>')
-        lines.append(f'<text class="subhead" x="{x + metric_width / 2}" y="116" text-anchor="middle">BW %</text>')
-        lines.append(f'<text class="subhead" x="{x + 1.5 * metric_width}" y="116" text-anchor="middle">Time x</text>')
-    cost_headers = (
-        ("Router DAT", "entries/input"),
-        ("NI RX DAT", "entries/NI"),
-        ("NI TX DAT", "entries/NI"),
-        ("Read RoB", "beat slots/NI"),
-    )
-    for index, (label, unit) in enumerate(cost_headers):
-        x = costs_x + (index + 0.5) * cost_width
-        lines.append(f'<text class="head" x="{x}" y="91" text-anchor="middle">{label}</text>')
-        lines.append(f'<text class="subhead" x="{x}" y="116" text-anchor="middle">{unit}</text>')
-    lines.append(f'<text class="head" x="{status_x + status_width / 2}" y="103" text-anchor="middle">Status</text>')
-    for index, row in enumerate(summaries):
-        y = 128 + index * row_height
-        row_class = "pareto" if row["pareto"] else "dominated"
-        lines += [
-            '<g class="candidate-row">',
-            f'<rect class="{row_class}" x="24" y="{y}" width="{width - 48}" height="{row_height - 2}"/>',
-            f'<text class="config" x="{left - 16}" y="{y + 26}" text-anchor="end">VC {row["config"][0]} / D {row["config"][1]}</text>',
-        ]
-        for cell in range(len(TRADEOFF_CELLS)):
-            throughput = 100.0 * row["throughput"][cell] / best_bandwidth[cell]
-            completion = row["completion"][cell] / fastest_completion[cell]
-            x = left + cell * 2 * metric_width
-            lines.append(f'<text class="cell" x="{x + metric_width / 2}" y="{y + 26}" text-anchor="middle">{throughput:.1f}</text>')
-            lines.append(f'<text class="cell" x="{x + 1.5 * metric_width}" y="{y + 26}" text-anchor="middle">{completion:.2f}</text>')
-        for cost, value in enumerate(row["costs"]):
-            lines.append(f'<text class="cell" x="{costs_x + (cost + 0.5) * cost_width}" y="{y + 26}" text-anchor="middle">{value}</text>')
-        status = "Pareto" if row["pareto"] else "Dominated"
-        status_class = "status-p" if row["pareto"] else "status-d"
-        lines.append(f'<text class="cell {status_class}" x="{status_x + status_width / 2}" y="{y + 26}" text-anchor="middle">{status}</text>')
+    for panel_index, (direction, metric_index) in enumerate(panels):
+        left = panel_lefts[panel_index]
+        bottom = plot_top + plot_height
+        lines.append('<g class="panel">')
+        lines.append(f'<text class="panel-title" x="{left + plot_width / 2:.1f}" y="88" text-anchor="middle">{direction}</text>')
+        for tick in range(5):
+            value = y_min + (y_max - y_min) * tick / 4
+            y = bottom - plot_height * tick / 4
+            lines.append(f'<line class="grid" x1="{left}" y1="{y:.1f}" x2="{left + plot_width}" y2="{y:.1f}"/>')
+            lines.append(f'<text class="axis" x="{left - 12}" y="{y + 5:.1f}" text-anchor="end">{value:.0f}</text>')
+        for tick in range(5):
+            value = x_max * tick / 4
+            x = left + plot_width * tick / 4
+            lines.append(f'<line class="grid" x1="{x:.1f}" y1="{plot_top}" x2="{x:.1f}" y2="{bottom}"/>')
+            lines.append(f'<text class="axis" x="{x:.1f}" y="{bottom + 25}" text-anchor="middle">{value:.0f}</text>')
+        lines.append(f'<rect class="frame" x="{left}" y="{plot_top}" width="{plot_width}" height="{plot_height}"/>')
+        lines.append(f'<text class="axis" x="{left + plot_width / 2:.1f}" y="{bottom + 58}" text-anchor="middle">DAT Router Buffer Capacity (flits/input)</text>')
+        for row in summaries:
+            capacity = row["costs"][0]
+            value = row["throughput"][metric_index]
+            x = left + plot_width * capacity / x_max
+            y = bottom - plot_height * (value - y_min) / (y_max - y_min)
+            point_class = "pareto-point" if row["pareto"] else "dominated-point"
+            vc, depth, _ni_rx_depth = row["config"]
+            label_y = y + label_offsets.get((vc, depth), -14)
+            lines += [
+                '<g class="candidate-point">',
+                f'<circle class="{point_class}" cx="{x:.1f}" cy="{y:.1f}" r="7"/>',
+                f'<text class="label" x="{x:.1f}" y="{label_y:.1f}" text-anchor="middle">{vc} VC × {depth}</text>',
+                '</g>',
+            ]
         lines.append('</g>')
-    for x in [left + index * metric_width for index in range(11)]:
-        lines.append(f'<line class="line" x1="{x}" y1="76" x2="{x}" y2="{height - 2}"/>')
-    for x in [costs_x + index * cost_width for index in range(5)]:
-        lines.append(f'<line class="line" x1="{x}" y1="76" x2="{x}" y2="{height - 2}"/>')
     lines.append('</svg>')
     return "\n".join(lines) + "\n"
 
@@ -777,7 +850,9 @@ def write_report_figures(destination, baseline_rows, tradeoff_rows):
     destination.mkdir(parents=True, exist_ok=True)
     figures = {
         "ideal_vs_accepted_throughput.svg": _ideal_vs_accepted_svg(baseline_rows),
-        "dut_pareto.svg": _dut_pareto_svg(baseline_rows, tradeoff_rows),
+        "hierarchical_alltoall_buffer_tradeoff.svg":
+            _hierarchical_alltoall_buffer_tradeoff_svg(
+                baseline_rows, tradeoff_rows),
     }
     paths = []
     for name, svg in figures.items():
@@ -792,9 +867,12 @@ def report(out_root):
     rows = collect_rows(root / "baseline")
     _require_complete(rows)
     first = rows[0]
-    communication_rows = [
-        [DISPLAY_NAME[mapping], "Write" + (" / Read" if mapping in READ_MAPPINGS else "")]
-        for mapping in WRITE_MAPPINGS
+    traffic_model_rows = [
+        ["Multicast", "MHA"],
+        ["All-Gather", "MHA"],
+        ["All-to-All", "MoE"],
+        ["Hierarchical All-to-All", "MoE"],
+        ["Pipeline P2P", "Model Pipeline"],
     ]
     performance_rows = [
         [DISPLAY_NAME[item["mapping"]], item["direction"].title(),
@@ -812,22 +890,24 @@ def report(out_root):
                     "[TBD] 本輪尚未重新產生 RR／RRD 結果。")
     tradeoff_rows = collect_rows(root / "tradeoff")
     tradeoff_text = _tradeoff_table(rows, tradeoff_rows)
+    configuration_performance_text = _configuration_performance_table(
+        rows, tradeoff_rows)
     burst_text = _burst_table(collect_burst_rows(root / "burst"))
     multicast_text = _multicast_table(
         collect_multicast_rows(root / "multicast_compare"))
     return "\n".join([
-        "# AI Inference NoC Performance Report — mesh_4x4", "",
+        "# AI Inference NoC Performance Report: mesh_4x4", "",
         "## 1. 測試設定與量測方法", "",
-        "- Native AXI data width：512 bits，即 64 B/beat。主表使用 Burst Length 64 beats，因此每筆 transaction 為 4096 B。",
-        f"- Load control：Outstanding Depth = 32 transactions/initiator。每個 mapping 執行 16 rounds，seed={first['seed']}。",
-        "- Baseline DUT：DAT VCs = 2、Router VC depth = 8 flits/VC、NI RX DAT depth = 8 flits/VC、NI TX DAT depth = 8 entries、Read RoB = 128 beat slots。",
-        "- Write slot 從 AW admission 保留到 B。Read slot 從 AR handshake 保留到對應的 RLAST。",
-        "- Read memory 與 checker data 在量測前完成 prefill。Read 與 Write 分開執行。", "",
+        "- Native AXI data width：512 bits，即 64 B/beat。Reference Burst Length 為 64 beats，每筆 transaction 為 4096 B。",
+        f"- Load control：Outstanding Depth = 32 transactions/initiator。每個 traffic mapping 執行 16 rounds，seed = {first['seed']}。",
+        "- Reference DUT：DAT VCs = 2、Router VC depth = 8 flits/VC、NI RX DAT depth = 8 flits/VC、NI TX DAT depth = 8 entries、Read RoB = 128 beat slots。",
+        "- Write transaction 從 AW admission 佔用一個 slot，收到 B 後釋放。Read transaction 從 AR handshake 佔用一個 slot，收到 RLAST 後釋放。",
+        "- Read memory 與 checker data 在量測前完成 prefill。Read 與 Write 分開量測。", "",
         "量測流程：", "",
-        "1. 選擇 Communication type 與 Read／Write 方向。",
-        "2. 固定 Outstanding Depth 32，各 initiator 持續送出 transaction，直到用滿可用 slot。",
+        "1. 選擇 Traffic Model 與 Read／Write 方向。",
+        "2. 固定 Outstanding Depth 32。每個 initiator 持續送出 transaction，直到用滿可用 slot。",
         "3. Write 收到 B 或 Read 收到 RLAST 時釋放一個 slot。",
-        "4. 記錄整組 workload 的 completion time、delivered bandwidth 與 DAT-link utilization。", "",
+        "4. 記錄整組 workload 的 Completion Time、Accepted Throughput 與 DAT link utilization。", "",
         "公式：", "",
         "```text",
         "Transaction bytes = Burst Length * 64 B/beat",
@@ -835,53 +915,91 @@ def report(out_root):
         "Logical delivered bytes = payload deliveries * Transaction bytes",
         "Accepted Throughput (B/cycle) = Logical delivered bytes / Completion Time",
         "Ideal Throughput Bound (B/cycle) = logical delivered bytes / busiest resource serialization cycles",
-        "% of Ideal Throughput = Accepted Throughput at Outstanding Depth 32 / Ideal Throughput Bound * 100",
-        "DAT-link utilization (%) = transferred DAT flits / measured cycles * 100",
+        "Throughput Efficiency (%) = Accepted Throughput / Ideal Throughput Bound * 100",
+        "DAT link utilization (%) = transferred DAT flits / measured cycles * 100",
         "```", "",
-        "## 2. AI Communication Types", "",
-        _table(["Communication type", "量測方向"], communication_rows), "",
-        "箭頭表示 AI payload 的 dataflow 方向。Read 的 request 反向送往資料來源，response 再沿箭頭方向回到 consumer。", "",
+        "## 2. MHA、MoE 與 Pipeline Traffic Models", "",
+        _table(["Traffic", "AI Workload"], traffic_model_rows), "",
+        "All-Gather traffic schedule 尚未實作，因此欄位標為 [TBD]。既有 Gather 是 many-to-one traffic，不納入本報告。", "",
+        "下圖只顯示已有量測資料的 mapping。Multicast 依 destination group 分成 Row-wise、Column-wise、Local 2×2 與 Global。Hierarchical All-to-All 目前只量到 inter-region phase。箭頭表示 payload 方向。Read request 逆向送往資料來源，response 再沿箭頭方向送到 consumer。", "",
         _traffic_gallery(), "",
         "## 3. Performance Results", "",
-        "Reference configuration：baseline DUT、Burst Length 64 beats、Outstanding Depth 32。", "",
+        "Reference configuration：Reference DUT、Burst Length 64 beats、Outstanding Depth 32。", "",
         _table([
-            "Communication Type", "Direction",
+            "Traffic Model", "Direction",
             "Ideal Throughput Bound (B/cycle)",
-            "Accepted Throughput at Outstanding Depth 32 (B/cycle)",
-            "% of Ideal Throughput",
+            "Accepted Throughput (B/cycle)",
+            "Throughput Efficiency (%)",
         ], performance_rows), "",
         "![Ideal and accepted throughput](ideal_vs_accepted_throughput.svg)", "",
         "表格解讀：", "",
-        "1. `Ideal Throughput Bound` 由每個 pattern 的 physical resource serialization 上限決定。",
-        "2. `Accepted Throughput` 只取 Outstanding Depth 32 的量測值。",
-        "3. `% of Ideal Throughput` 比較同一 Communication Type 與 Direction 的量測值和理想上限。", "",
+        "1. `Ideal Throughput Bound` 由該 mapping 最忙的 physical resource 決定。",
+        "2. `Accepted Throughput` 是 Reference configuration 的量測值。",
+        "3. `Throughput Efficiency` 比較同一 Traffic Model 與 Direction 的量測值和理想上限。數值越接近 100% 越好。", "",
         "## 4. Burst Length Characterization", "",
-        "Burst Length 是 workload axis。所有列都使用 baseline DUT（DAT VCs 2、Router／NI RX depth 8）、Outstanding Depth 32，並固定每個 flow/round 為 4096 B。", "",
+        "Burst Length 是 workload parameter，不是 DUT configuration。所有列使用 Reference DUT 與 Outstanding Depth 32。每個 flow 每輪固定傳輸 4096 B。", "",
         burst_text, "",
-        "## 5. Hardware Multicast vs Repeated Unicast", "",
-        "兩種實作使用相同 baseline DUT、Broadcast producer、member、issue order、AXI-ID policy 與 4096 B/flow/round。", "",
-        "Destination count 包含 producer 本身的 local member；Source injected flits 不計入 B／CollectB。", "",
+        "## 5. Multicast vs Repeated Unicast", "",
+        "本節使用 Write traffic。兩種模式使用相同 Reference DUT、source、Destination Set、issue order、AXI-ID policy 與 4096 B/flow/round。Outstanding Depth 固定為 32，共執行 16 rounds。", "",
+        "量測流程：", "",
+        "1. 所有 active sources 在同一個 cycle 開始發送。",
+        "2. Multicast 每個 source 每個 round 發出一筆 Write transaction。Router 在路徑分叉處複製 flit。",
+        "3. Repeated Unicast 對每個 destination 發出一筆獨立 Write transaction，最多保留 32 筆 outstanding transactions。",
+        "4. 最後一個 active source 收到所有 B responses 時結束量測。", "",
+        "```text",
+        "Injected Flits = sum of DAT flits at source injection ports",
+        "Completion Time = final B completion cycle - common start cycle",
+        "Speedup = Repeated Unicast Completion Time / Multicast Completion Time",
+        "```", "",
+        "Fanout 包含 source 本身。Local delivery 不經過 mesh link。Injected Flits 不包含 B／CollectB。", "",
+        "每個 node 的 payload：", "",
+        "```text",
+        "Payload per destination per round = 64 beats * 64 B/beat = 4096 B = 4 KiB",
+        "Payload per destination per run = 4096 B * 16 rounds = 65536 B = 64 KiB",
+        "```", "",
+        "Injected Flits 對應方式：", "",
+        "```text",
+        "DAT flits per transaction = 1 header flit + Burst Length",
+        "Multicast Injected Flits = Source Count * Rounds * (1 + Burst Length)",
+        "Repeated Unicast Injected Flits = Source Count * Rounds * (Fanout - 1) * (1 + Burst Length)",
+        "Injection Ratio = Repeated Unicast Injected Flits / Multicast Injected Flits = Fanout - 1",
+        "",
+        "Burst Length = 64 beats, so each Write transaction injects 65 DAT flits",
+        "Row-wise Multicast = 4 * 16 * 65 = 4160 flits",
+        "Row-wise Repeated Unicast = 4 * 16 * 3 * 65 = 12480 flits",
+        "Global Multicast = 1 * 16 * 65 = 1040 flits",
+        "Global Repeated Unicast = 1 * 16 * 15 * 65 = 15600 flits",
+        "```", "",
         multicast_text, "",
         "## 6. VC 與 Buffer Trade-off", "",
-        "Fixed-depth 與 equal-total-entry sweep 比較性能和每個 Router input 的 DAT buffer entries。", "",
+        "本表比較 DAT VC count、VC depth、DAT Router buffer capacity 與 NI RX DAT buffer capacity。只使用已有 trade-off 量測的 Global Multicast 和 Hierarchical All-to-All。", "",
         "```text",
-        "DAT buffer entries per Router input = DAT VC count * Router VC depth",
+        "DAT Router Buffer Capacity = DAT VC count × Router VC depth",
         "```", "",
         tradeoff_text, "",
-        "Read RoB 固定為 128 beat slots。HWM 到達 128，但缺少對應的 non-zero admission-stall counter，因此本輪不啟動 Read RoB sweep，也不宣稱 RoB 限制 throughput。", "",
-        "![Measured-set DUT Pareto view](dut_pareto.svg)", "",
+        "![Hierarchical All-to-All buffer trade-off](hierarchical_alltoall_buffer_tradeoff.svg)", "",
+        "圖表解讀：", "",
+        "1. X 軸越往右代表每個 Router input 配置更多 DAT buffer flits。這是 storage cost，不是 synthesis area。",
+        "2. Y 軸越高代表相同 workload 在每個 cycle 完成更多 payload bytes。",
+        "3. Non-dominated configuration 無法在成本不增加的條件下繼續提升所有量測性能。",
+        "4. Dominated configuration 的成本不低，且 Read 與 Write performance 都可由其他設定取代。", "",
+        "Read RoB 固定為 128 beat slots。HWM 到達 128，但沒有對應的 non-zero admission-stall counter。本輪不執行 Read RoB sweep，也不判定 RoB 限制 throughput。", "",
+        "### DUT Configuration Performance", "",
+        "Cell = Measured / Ideal (Efficiency)", "",
+        "Unit: B/cycle", "",
+        configuration_performance_text, "",
         "## 7. RR vs RRD", "",
-        "此 64-bit common-payload 測試中，node 0 的 Control probes 位於完整的 Pipeline P2P background interval 內。RR 使用 shared-edge REQ／RSP；RRD 的 background 改走同一 directed geometric edge 的 DAT。", "",
-        "Control Completion Time 從第一次 request `VALID` assertion 開始，到對應的 B/R handshake 結束，因此包含 source admission backpressure。", "",
+        "此 64-bit common-payload 測試把 node 0 的 Control probe 放在完整的 Pipeline P2P background interval 內。RR 讓 background 與 Control 共用 REQ／RSP。RRD 讓 background 改走相同 directed geometric edge 的 DAT。", "",
+        "Control Completion Time 從第一次 request `VALID` assertion 開始，到對應的 B/R handshake 結束，包含 source admission backpressure。", "",
         channel_text, "",
-        "Completion Time reduction = RR mean Completion Time - RRD mean Completion Time；正值表示獨立 DAT 降低 Control blocking。此結果不是 512-bit bandwidth。", "",
+        "Completion Time reduction = RR mean Completion Time - RRD mean Completion Time。正值表示獨立 DAT 降低 Control blocking。此結果不代表 512-bit bandwidth。", "",
         "## 8. Compute Overlap Coverage", "",
-        "這是 workload 檢查，不是實測 PE utilization。必須先指定 PE compute budget 才能產生數值。", "",
+        "此項比較 NoC Completion Time 與指定的 PE compute budget，不是實測 PE utilization。", "",
         "```text",
         "PE compute budget = [TBD] cycles/round",
         "Compute overlap coverage (%) = min(100, PE compute budget / NoC completion cycles * 100)",
         "```", "",
-        "尚未選定 PE compute budget，因此不提供數值。", "",
+        "PE compute budget 尚未定義，因此不提供數值。", "",
     ])
 
 
