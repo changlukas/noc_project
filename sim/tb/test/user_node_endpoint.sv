@@ -273,6 +273,9 @@ module user_node_endpoint #(
     // per-pair axi_err_slv instead (axi_xbar_unmuxed.sv:253-266), which is the
     // DECERR the fault test is looking for.
     localparam int unsigned DATA_TARGET    = TILE_TARGETS - 1;
+    // Boundary rows have one real window followed by padding above NoC egress.
+    localparam int unsigned KV_MEMORY_TARGET =
+        TILE_BASE_ADDR[DATA_TARGET] < NOC_EGRESS_BASE ? DATA_TARGET : 0;
     localparam int unsigned NMU_TARGET     = TILE_TARGETS;  // last master port
     localparam int unsigned XBAR_MST_PORTS = TILE_TARGETS + 1;
 
@@ -531,6 +534,37 @@ module user_node_endpoint #(
     ) tile_mem [TILE_TARGETS-1:0] ();
 
     for (genvar t = 0; t < TILE_TARGETS; t++) begin : g_tile_mem
+        // Observe committed bytes, after the memory's acquisition time.
+        always @(posedge clk_i) begin
+            #(TestTime + 1ps);
+            if (rst_ni && i_mem.i_sim_mem.mon_w[0].valid &&
+                ($test$plusargs("control_sequence") ||
+                 ($test$plusargs("kv_overlap") && t == 0 && control_expected.size() != 0))) begin
+                automatic logic [ADDR_WIDTH-1:0] address = i_mem.i_sim_mem.mon_w[0].addr;
+                automatic logic [63:0] value = '0;
+                for (int k = 0; k < 8; k++) begin
+                    if (!i_mem.i_sim_mem.mem.exists(address + k))
+                        $fatal(1, "control delivery contains unwritten byte");
+                    value[k*8 +: 8] = i_mem.i_sim_mem.mem[address + k];
+                end
+                control_receive(address, value);
+            end
+            if (rst_ni && $test$plusargs("kv_overlap") && t == KV_MEMORY_TARGET &&
+                kv_sink_ranges.size() != 0 && i_mem.i_sim_mem.mon_w[0].valid) begin
+                automatic logic [ADDR_WIDTH-1:0] address = i_mem.i_sim_mem.mon_w[0].addr;
+                automatic bit found = 1'b0;
+                foreach (kv_sink_ranges[i]) begin
+                    if (address == kv_sink_ranges[i].next_addr &&
+                        address < kv_sink_ranges[i].address + kv_sink_ranges[i].length) begin
+                        kv_sink_ranges[i].next_addr += DATA_WIDTH / 8;
+                        kv_sink_received_bytes += DATA_WIDTH / 8;
+                        found = 1'b1;
+                        break;
+                    end
+                end
+                if (!found) $fatal(1, "unexpected or duplicate KV write at %h", address);
+            end
+        end
         axi_delayer_intf #(
             .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_ADDR_WIDTH(ADDR_WIDTH),
             .AXI_DATA_WIDTH(DATA_WIDTH),  .AXI_USER_WIDTH(AWUSER_WIDTH),
@@ -680,6 +714,204 @@ module user_node_endpoint #(
     end
 
     file_master_t file_master;
+    typedef struct {
+        logic [ADDR_WIDTH-1:0] address;
+        logic [63:0] value;
+        int bit_index;
+        string stage;
+        int source;
+    } control_receive_t;
+    control_receive_t control_expected[$];
+    logic [63:0] control_received_reg = '0;
+
+    typedef struct {
+        logic [ADDR_WIDTH-1:0] address, next_addr;
+        int unsigned length;
+    } kv_sink_range_t;
+    kv_sink_range_t kv_sink_ranges[$];
+    longint unsigned kv_sink_received_bytes = 0;
+
+    task automatic load_kv_memory();
+        int fd, code;
+        kv_sink_range_t entry;
+        preload_read_memory();
+        preload_read_scoreboard();
+        fd = $fopen($sformatf("%s/node%0d/kv_sink.txt", stim_dir, NODE_ID), "r");
+        if (!fd) $fatal(1, "missing KV sink ranges");
+        forever begin
+            code = $fscanf(fd, "%h %d", entry.address, entry.length);
+            if (code < 0) break;
+            if (code != 2 || entry.length == 0 || entry.length % (DATA_WIDTH / 8) != 0)
+                $fatal(1, "invalid KV sink range");
+            entry.next_addr = entry.address;
+            kv_sink_ranges.push_back(entry);
+        end
+        $fclose(fd);
+    endtask
+
+    task automatic run_kv_overlap();
+        int fd, control_count, bulk_writes;
+        longint unsigned control_offset, epoch, expected_sink_bytes = 0;
+        logic [63:0] final_mask = '0;
+        bit control_ready = 1'b0;
+        fd = $fopen($sformatf("%s/node%0d/kv_schedule.txt", stim_dir, NODE_ID), "r");
+        if (!fd || $fscanf(fd, "%d", control_count) != 1 ||
+            control_count < 0 || control_count > file_master.aw_queue.size())
+            $fatal(1, "invalid KV control schedule");
+        $fclose(fd);
+        if (!$value$plusargs("control_offset=%d", control_offset))
+            $fatal(1, "missing control readiness offset");
+        epoch = cycle_cnt;
+        bulk_writes = file_master.aw_queue.size() - control_count;
+        foreach (kv_sink_ranges[i]) expected_sink_bytes += kv_sink_ranges[i].length;
+        foreach (control_expected[i]) final_mask[control_expected[i].bit_index] = 1'b1;
+        if (bulk_writes != 0 || file_master.num_reads != 0)
+            $display("[kv_start] node=%0d cycle=%0d", NODE_ID, epoch);
+        fork
+            begin
+                if (control_count != 0) begin
+                    if (NODE_ID == 0) begin
+                        while (cycle_cnt < epoch + control_offset) @(posedge clk_i);
+                    end else begin
+                        wait (control_received_reg[0]);
+                    end
+                    control_ready = 1'b1;
+                    $display("[kv_control_ready] node=%0d cycle=%0d", NODE_ID, cycle_cnt);
+                end
+            end
+            begin
+                while (file_master.aw_queue.size() != 0) begin
+                    automatic int index, beats;
+                    automatic bit is_control;
+                    automatic file_master_t::b_beat_t response;
+                    @(posedge clk_i);
+                    if (control_count != 0 && !control_ready && bulk_writes == 0) continue;
+                    is_control = control_count != 0 && control_ready;
+                    index = is_control ? 0 : control_count;
+                    beats = int'(file_master.aw_queue[index].ax_len) + 1;
+                    $display("[kv_issue] node=%0d flow=%s address=%h cycle=%0d",
+                             NODE_ID, is_control ? "control" : "kv",
+                             file_master.aw_queue[index].ax_addr, cycle_cnt);
+                    fork
+                        file_master.drv.send_aw(file_master.aw_queue[index]);
+                        begin
+                            repeat (beats) begin
+                                file_master.drv.send_w(file_master.w_queue[index]);
+                                file_master.w_queue.delete(index);
+                            end
+                        end
+                        file_master.drv.recv_b(response);
+                    join
+                    if (response.b_resp != axi_pkg::RESP_OKAY) $fatal(1, "KV/control write failed");
+                    file_master.aw_queue.delete(index);
+                    void'(file_master.b_outst.pop_front());
+                    if (is_control) begin
+                        control_count--;
+                    end else begin
+                        bulk_writes--;
+                        if (bulk_writes == 0)
+                            $display("[kv_done] node=%0d cycle=%0d", NODE_ID, cycle_cnt);
+                    end
+                end
+            end
+            begin
+                while (file_master.ar_queue.size() != 0) begin
+                    automatic file_master_t::r_beat_t response;
+                    @(posedge clk_i);
+                    $display("[kv_issue] node=%0d flow=kv address=%h cycle=%0d",
+                             NODE_ID, file_master.ar_queue[0].ax_addr, cycle_cnt);
+                    fork
+                        file_master.drv.send_ar(file_master.ar_queue[0]);
+                        begin
+                            do file_master.drv.recv_r(response); while (!response.r_last);
+                        end
+                    join
+                    void'(file_master.ar_queue.pop_front());
+                    void'(file_master.r_outst.pop_front());
+                    if (file_master.ar_queue.size() == 0)
+                        $display("[kv_done] node=%0d cycle=%0d", NODE_ID, cycle_cnt);
+                end
+            end
+        join
+        wait (control_received_reg == final_mask && kv_sink_received_bytes == expected_sink_bytes);
+        foreach (kv_sink_ranges[i]) begin
+            if (kv_sink_ranges[i].next_addr != kv_sink_ranges[i].address + kv_sink_ranges[i].length)
+                $fatal(1, "incomplete KV sink range");
+            for (int unsigned k = 0; k < kv_sink_ranges[i].length; k++) begin
+                automatic logic [ADDR_WIDTH-1:0] addr = kv_sink_ranges[i].address + k;
+                if (!g_tile_mem[KV_MEMORY_TARGET].i_mem.i_sim_mem.mem.exists(addr) ||
+                    g_tile_mem[KV_MEMORY_TARGET].i_mem.i_sim_mem.mem[addr] !== read_data_pattern(addr))
+                    $fatal(1, "KV destination mismatch at %h", addr);
+            end
+        end
+        $display("[kv_endpoint_done] node=%0d writes=%0d reads=%0d sink_bytes=%0d cycle=%0d",
+                 NODE_ID, file_master.num_writes, file_master.num_reads, expected_sink_bytes, cycle_cnt);
+    endtask
+
+    task automatic control_receive(input logic [ADDR_WIDTH-1:0] address,
+                                   input logic [63:0] value);
+        foreach (control_expected[i]) begin
+            if (control_expected[i].address == address) begin
+                if (value !== control_expected[i].value || control_received_reg[control_expected[i].bit_index])
+                    $fatal(1, "control payload mismatch or duplicate at node%0d addr=%h", NODE_ID, address);
+                control_received_reg[control_expected[i].bit_index] = 1'b1;
+                $display("[control_receive] stage=%s source=%0d destination=%0d cycle=%0d",
+                         control_expected[i].stage, control_expected[i].source, NODE_ID, cycle_cnt);
+                return;
+            end
+        end
+        $fatal(1, "unexpected control delivery node%0d addr=%h", NODE_ID, address);
+    endtask
+
+    task automatic load_control_receives();
+        int fd, code;
+        control_receive_t entry;
+        fd = $fopen($sformatf("%s/node%0d/control_receives.txt", stim_dir, NODE_ID), "r");
+        if (!fd) $fatal(1, "missing control receive file");
+        forever begin
+            code = $fscanf(fd, "%h %h %d %s %d", entry.address, entry.value,
+                           entry.bit_index, entry.stage, entry.source);
+            if (code < 0) break;
+            if (code != 5 || entry.bit_index < 0 || entry.bit_index >= $bits(control_received_reg))
+                $fatal(1, "invalid control receive record");
+            control_expected.push_back(entry);
+        end
+        $fclose(fd);
+    endtask
+
+    task automatic run_control_sequence();
+        int fd, job = 0;
+        logic [63:0] wait_mask, final_mask = '0;
+        string stage, extra;
+        file_master_t::b_beat_t response;
+        fd = $fopen($sformatf("%s/node%0d/control_waits.txt", stim_dir, NODE_ID), "r");
+        if (!fd || file_master.num_reads != 0) $fatal(1, "invalid control stimulus");
+        while (file_master.aw_queue.size()) begin
+            if ($fscanf(fd, "%h %s", wait_mask, stage) != 2)
+                $fatal(1, "missing control prerequisite");
+            // axi_driver measures TestTime relative to this rising edge.
+            while ((control_received_reg & wait_mask) != wait_mask) @(posedge clk_i);
+            $display("[control_ready] stage=%s source=%0d job=%0d cycle=%0d", stage, NODE_ID, job, cycle_cnt);
+            if (file_master.aw_queue[0].ax_size != 3 || file_master.aw_queue[0].ax_len != 0 ||
+                file_master.w_queue.size() == 0 || !file_master.w_queue[0].w_last)
+                $fatal(1, "control requires one 8-byte beat");
+            fork
+                file_master.drv.send_aw(file_master.aw_queue[0]);
+                file_master.drv.send_w(file_master.w_queue[0]);
+                file_master.drv.recv_b(response);
+            join
+            if (response.b_resp != axi_pkg::RESP_OKAY) $fatal(1, "control write failed");
+            void'(file_master.aw_queue.pop_front());
+            void'(file_master.w_queue.pop_front());
+            void'(file_master.b_outst.pop_front());
+            job++;
+        end
+        if ($fscanf(fd, "%s", extra) == 1) $fatal(1, "excess control prerequisites");
+        $fclose(fd);
+        foreach (control_expected[i]) final_mask[control_expected[i].bit_index] = 1'b1;
+        while (control_received_reg != final_mask) @(negedge clk_i);
+        $display("[control_done] node=%0d writes=%0d cycle=%0d", NODE_ID, job, cycle_cnt);
+    endtask
     mcast_preload_scoreboard scoreboard;
     bit scoreboard_ready = 1'b0;
     bit read_prefill_fault = 1'b0;
@@ -785,6 +1017,22 @@ module user_node_endpoint #(
     longint unsigned aw_slots[$], ar_slots[$];
     longint unsigned srcq_w_sum, srcq_r_sum;
     int      unsigned srcq_w_n,  srcq_r_n;
+
+    // Windowed sources have no open-loop slots. Count address-channel wait
+    // cycles at the driver's interface, avoiding Active/NBA timestamp races
+    // when the common start is asserted by a nonblocking assignment.
+    always @(posedge clk_i) begin
+        if (rst_ni && (get_injection_mode() == 3 || get_injection_mode() == 4)) begin
+            if (master_dv.aw_valid) begin
+                if (master_dv.aw_ready) srcq_w_n++;
+                else srcq_w_sum++;
+            end
+            if ((get_injection_mode() == 4 || compare_started) && master_dv.ar_valid) begin
+                if (master_dv.ar_ready) srcq_r_n++;
+                else srcq_r_sum++;
+            end
+        end
+    end
 
     always_ff @(posedge clk_i) begin
         if (rst_ni) begin
@@ -931,8 +1179,6 @@ module user_node_endpoint #(
                 stimulus_start_cycle_o = admitted_cycle;
             source_aw_admitted += 1;
             file_master.drv.send_aw(file_master.aw_queue[0]);
-            srcq_w_sum += cycle_cnt - admitted_cycle;
-            srcq_w_n++;
             void'(file_master.aw_queue.pop_front());
         end
     endtask
@@ -959,10 +1205,6 @@ module user_node_endpoint #(
                 stimulus_start_cycle_o = admitted_cycle;
             file_master.drv.send_ar(file_master.ar_queue[0]);
             source_ar_admitted += 1;
-            if (compare_started) begin
-                srcq_r_sum += cycle_cnt - admitted_cycle;
-                srcq_r_n++;
-            end
             void'(file_master.ar_queue.pop_front());
         end
     endtask
@@ -1033,7 +1275,14 @@ module user_node_endpoint #(
                         data ^= 8'h01;
                         fault_applied = 1'b1;
                     end
-                    g_tile_mem[DATA_TARGET].i_mem.i_sim_mem.mem[addr + k] = data;
+                    if ($test$plusargs("kv_overlap")) begin
+                        if (addr < TILE_BASE_ADDR[KV_MEMORY_TARGET] ||
+                            addr + n_bytes > TILE_BASE_ADDR[KV_MEMORY_TARGET] + TILE_SIZE[KV_MEMORY_TARGET])
+                            $fatal(1, "KV preload outside endpoint memory");
+                        g_tile_mem[KV_MEMORY_TARGET].i_mem.i_sim_mem.mem[addr + k] = data;
+                    end else begin
+                        g_tile_mem[DATA_TARGET].i_mem.i_sim_mem.mem[addr + k] = data;
+                    end
                 end
             end else if (!$feof(fd)) begin
                 $fatal(1, "Malformed Mode 4 Read memory prefill file %s", path);
@@ -1285,6 +1534,8 @@ module user_node_endpoint #(
         read_path  = $sformatf("%s/node%0d/read.txt",  stim_dir, NODE_ID);
         file_master = new(master_dv);
         file_master.load_files(read_path, write_path);
+        if ($test$plusargs("control_sequence") || $test$plusargs("kv_overlap")) load_control_receives();
+        if ($test$plusargs("kv_overlap")) load_kv_memory();
         expected_txn_cnt_o = int'(file_master.num_writes + file_master.num_reads);
         expected_write_cnt_o = int'(file_master.num_writes);
         injection_rate = 1.0;
@@ -1369,8 +1620,14 @@ module user_node_endpoint #(
                 // Directed two-phase: phase 1 drains all writes (wait_b =>
                 // committed at the slave); phase 2 issues reads, checked by the
                 // scoreboard against golden.
-                fork file_master.run_aw(); file_master.run_w(); file_master.wait_b(); join
-                fork file_master.run_ar(); file_master.wait_r(); join
+                if ($test$plusargs("kv_overlap")) begin
+                    run_kv_overlap();
+                end else if ($test$plusargs("control_sequence")) begin
+                    run_control_sequence();
+                end else begin
+                    fork file_master.run_aw(); file_master.run_w(); file_master.wait_b(); join
+                    fork file_master.run_ar(); file_master.wait_r(); join
+                end
             end
             1: begin
                 // Continuous: one phase, reads and writes interleaved, each

@@ -1,5 +1,8 @@
-#!/usr/bin/env python3
-"""Render the AI NoC performance report at Outstanding Depth 32."""
+"""Validate NoC measurement data and export explicit DMA records as JSON.
+
+The authored report is maintained in docs/perf_report_restructured.md.
+Legacy counter readers remain available for existing measurement validation.
+"""
 
 import argparse
 import csv
@@ -7,9 +10,18 @@ import html
 import json
 import math
 import pathlib
+import os
+import re
+import shlex
 import sys
 
 import pattern_metrics as pm
+from ai_scenario_figures import write_scenario_figures
+from lifecycle_routes import write_figures as write_lifecycle_figures
+from host_control_preview import write_figures as write_host_figures
+from dense_traffic_preview import write_figure as write_dense_figure
+from ai_mapping_preview import write_figures as write_mapping_figures
+from ai_mapping_preview import PLACEMENTS
 
 
 WRITE_MAPPINGS = (
@@ -48,7 +60,7 @@ DISPLAY_NAME = {
     "alltoall": "All-to-All",
     "neighbor_exchange": "Neighbor Exchange",
     "pipeline": "Pipeline P2P",
-    "many_to_many": "Hierarchical All-to-All",
+    "many_to_many": "Cyclic Inter-region Many-to-Many",
 }
 
 def _one_csv(path):
@@ -417,16 +429,19 @@ def _traffic_roles(mapping):
 def _traffic_svg(mapping):
     width, height = 700, 520
     node_x = lambda node: 145 + (node % 4) * 120
-    node_y = lambda node: 145 + (node // 4) * 85
+    node_y = lambda node: 400 - (node // 4) * 85
     sources, destinations = _traffic_roles(mapping)
     lines = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
         '<title>' + html.escape(DISPLAY_NAME[mapping]) + ' on a 4 x 4 mesh</title>',
         '<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#b23a3a"/></marker><marker id="arrow-start" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 Z" fill="#b23a3a"/></marker></defs>',
         '<style>text{font-family:Arial,Helvetica,sans-serif;fill:#1f2933}.title{font-size:24px;font-weight:700}.subtitle{font-size:15px;fill:#52606d}.node{stroke:#334e68;stroke-width:1.6}.node-id{font-size:17px;font-weight:700;text-anchor:middle;dominant-baseline:middle}.mesh{stroke:#cbd5e1;stroke-width:4}.flow{stroke:#b23a3a;stroke-width:4;fill:none;marker-end:url(#arrow)}.both{marker-start:url(#arrow-start)}.region{stroke-width:2;stroke-dasharray:7 5;fill-opacity:.12}.legend{font-size:14px}</style>',
-        f'<text class="title" x="35" y="38">{html.escape(DISPLAY_NAME[mapping])}</text>',
-        '<text class="subtitle" x="35" y="65">4 x 4 Mesh</text>',
+        f'<text class="title" x="35" y="38">{html.escape("Cyclic inter-region exchange" if mapping == "many_to_many" else DISPLAY_NAME[mapping])}</text>',
+        '<text class="subtitle" x="35" y="65">4 x 4 Mesh: (0,0) at bottom left</text>',
     ]
+    for coordinate in range(4):
+        lines.append(f'<text class="subtitle" x="{node_x(coordinate)}" y="442" text-anchor="middle">x={coordinate}</text>')
+        lines.append(f'<text class="subtitle" x="73" y="{node_y(4 * coordinate) + 5}" text-anchor="end">y={coordinate}</text>')
     for y in range(4):
         for x in range(3):
             lines.append(f'<line class="mesh" x1="{node_x(4*y+x)}" y1="{node_y(4*y+x)}" x2="{node_x(4*y+x+1)}" y2="{node_y(4*y+x+1)}"/>')
@@ -436,7 +451,7 @@ def _traffic_svg(mapping):
     if mapping in ("broadcast_submesh", "gather_submesh", "many_to_many"):
         colors = ("#4c78a8", "#f58518", "#54a24b", "#b279a2")
         for index, base in enumerate((0, 2, 8, 10)):
-            x, y = node_x(base) - 42, node_y(base) - 37
+            x, y = node_x(base) - 42, min(node_y(base), node_y(base + 4)) - 37
             lines.append(f'<rect class="region" x="{x}" y="{y}" width="204" height="159" rx="12" stroke="{colors[index]}" fill="{colors[index]}"/>')
     for src, dst, bidirectional in _traffic_routes(mapping):
         x1, y1, x2, y2 = node_x(src), node_y(src), node_x(dst), node_y(dst)
@@ -448,21 +463,22 @@ def _traffic_svg(mapping):
         cls = "flow both" if bidirectional else "flow"
         lines.append(f'<line class="{cls}" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"{dash}/>')
     if mapping == "many_to_many":
-        centers = ((205, 188), (445, 188), (445, 358), (205, 358))
+        centers = tuple((node_x(base) + 60, node_y(base) - 42.5)
+                        for base in (0, 2, 10, 8))
         for src, dst in zip(centers, centers[1:] + centers[:1]):
             lines.append(f'<line class="flow" x1="{src[0]}" y1="{src[1]}" x2="{dst[0]}" y2="{dst[1]}"/>')
-        lines.append('<text class="subtitle" x="350" y="455" text-anchor="middle">Complete exchange to the next region</text>')
+        lines.append('<text class="subtitle" x="350" y="467" text-anchor="middle">Each node sends to all four nodes in the next region</text>')
     elif mapping == "alltoall":
-        lines.append('<text class="subtitle" x="350" y="455" text-anchor="middle">Representative bidirectional paths</text>')
+        lines.append('<text class="subtitle" x="350" y="467" text-anchor="middle">All other nodes are destinations. Dashed arrows show examples.</text>')
     for node in range(16):
         in_source, in_destination = node in sources, node in destinations
         fill = "#8064a2" if in_source and in_destination else "#4c78a8" if in_source else "#f2a65a" if in_destination else "#ffffff"
-        lines.append(f'<circle class="node" cx="{node_x(node)}" cy="{node_y(node)}" r="24" fill="{fill}"/>')
+        lines.append(f'<circle class="node" data-node="{node}" cx="{node_x(node)}" cy="{node_y(node)}" r="24" fill="{fill}"/>')
         lines.append(f'<text class="node-id" x="{node_x(node)}" y="{node_y(node)}" fill="{"#ffffff" if in_source or in_destination else "#1f2933"}">{node}</text>')
     lines += [
-        '<circle cx="390" cy="33" r="9" fill="#4c78a8"/><text class="legend" x="406" y="38">Source</text>',
-        '<circle cx="500" cy="33" r="9" fill="#f2a65a"/><text class="legend" x="516" y="38">Destination</text>',
-        '<circle cx="390" cy="62" r="9" fill="#8064a2"/><text class="legend" x="406" y="67">Source and Destination</text>',
+        '<circle cx="95" cy="497" r="9" fill="#4c78a8"/><text class="legend" x="111" y="502">Source</text>',
+        '<circle cx="235" cy="497" r="9" fill="#f2a65a"/><text class="legend" x="251" y="502">Destination</text>',
+        '<circle cx="405" cy="497" r="9" fill="#8064a2"/><text class="legend" x="421" y="502">Source and Destination</text>',
         '</svg>',
     ]
     return "\n".join(lines) + "\n"
@@ -691,16 +707,16 @@ def _tradeoff_table(baseline_rows, tradeoff_rows):
         "Normalized Completion Time = measured completion time / fastest measured completion time",
         "```",
         "",
-        "- Pareto-dominates：所有量測項目都不差，且至少一項更好。",
+        "- Pareto-dominates：各項 storage cost 不增加，各 workload／direction 的 throughput 不降低、completion time 不增加，且至少一項成本或性能嚴格改善。",
         "- Non-dominated：沒有其他 measured configuration 可以 Pareto-dominate 該設定。",
         "- Dominated：至少有一個 measured configuration 可以 Pareto-dominate 該設定。",
         "- Measured non-dominated set：所有 Non-dominated measured configurations 的集合。",
-        "- 每個 workload 與 direction 都是獨立 objective。括號內列出該設定表現最差的 workload。",
+        "- Global Multicast Write、Cyclic M2M Write 與 Read 各自的 throughput、completion time 都是獨立 objective。各 workload 分別正規化，括號標出該設定最差的一項。",
         "- Normalized throughput 越接近 100% 越好。Normalized completion time 越接近 1.00× 越好。",
-        "- Router DAT、NI RX DAT、NI TX DAT 與 Read RoB 是不同的儲存成本，不可直接相加。",
+        "- Router DAT flits/input、NI RX DAT flits/NI、NI TX DAT entries/NI 與 Read RoB beat slots/NI 分別比較，不可直接相加。",
         "- 目前沒有 PPA limit，因此表格不指定最終 DUT configuration。",
     ])
-    return guidance + "\n\n" + table
+    return guidance + "\n\n" + "### 6.2 Non-dominated configurations\n\n下表列出量測集合中的取捨。Improvement 欄只列相對前一列改善的項目，未列退步項目，不能視為逐列全面升級。完整數值見 6.3。" + "\n\n" + table
 
 
 def _configuration_performance_table(baseline_rows, tradeoff_rows):
@@ -726,7 +742,7 @@ def _configuration_performance_table(baseline_rows, tradeoff_rows):
         ]
         table_rows.append([f"{vc} VC × {depth}", *values])
     return _table(
-        ["Config", "Multicast W", "Hier. A2A W", "Hier. A2A R"],
+        ["Config", "Multicast W", "Cyclic M2M W", "Cyclic M2M R"],
         table_rows)
 
 
@@ -802,9 +818,9 @@ def _hierarchical_alltoall_buffer_tradeoff_svg(baseline_rows, tradeoff_rows):
     }
     lines = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        '<title>Hierarchical All-to-All Throughput versus DAT Router Buffer Capacity</title>',
+        '<title>Cyclic Inter-region Many-to-Many Throughput versus DAT Router Buffer Capacity</title>',
         '<style>text{font-family:Arial,Helvetica,sans-serif;fill:#1f2933}.title{font-size:26px;font-weight:700}.panel-title{font-size:20px;font-weight:700}.axis{font-size:15px;fill:#52606d}.label{font-size:14px;font-weight:700}.grid{stroke:#d9e2ec;stroke-width:1}.frame{fill:none;stroke:#829ab1;stroke-width:1.2}.pareto-point{fill:#2f6f9f;stroke:#174a70;stroke-width:1.5}.dominated-point{fill:#aeb8c2;stroke:#68737d;stroke-width:1.5}</style>',
-        '<text class="title" x="34" y="38">Hierarchical All-to-All Throughput vs DAT Router Buffer Capacity</text>',
+        '<text class="title" x="34" y="38">Cyclic M2M Throughput vs DAT Router Buffer Capacity</text>',
         '<circle class="pareto-point" cx="1100" cy="31" r="7"/><text class="axis" x="1115" y="36">Non-dominated</text>',
         '<circle class="dominated-point" cx="1240" cy="31" r="7"/><text class="axis" x="1255" y="36">Dominated</text>',
         f'<text class="axis" x="34" y="{plot_top + plot_height / 2:.1f}" text-anchor="middle" transform="rotate(-90 34 {plot_top + plot_height / 2:.1f})">Throughput (B/cycle)</text>',
@@ -862,162 +878,93 @@ def write_report_figures(destination, baseline_rows, tradeoff_rows):
     return paths
 
 
-def report(out_root):
-    root = pathlib.Path(out_root)
-    rows = collect_rows(root / "baseline")
-    _require_complete(rows)
-    first = rows[0]
-    traffic_model_rows = [
-        ["Multicast", "MHA"],
-        ["All-Gather", "MHA"],
-        ["All-to-All", "MoE"],
-        ["Hierarchical All-to-All", "MoE"],
-        ["Pipeline P2P", "Model Pipeline"],
-    ]
-    performance_rows = [
-        [DISPLAY_NAME[item["mapping"]], item["direction"].title(),
-         f'{item["ideal"]:.1f}', f'{item["accepted"]:.1f}',
-         f'{100.0 * item["accepted"] / item["ideal"]:.1f}']
-        for item in _performance_data(rows)
-    ]
-    channel_rows = _channel_rows(root)
-    channel_text = (_table(["Control case",
-                            "RR mean Completion Time (cycles/transaction)",
-                            "RRD mean Completion Time (cycles/transaction)",
-                            "Completion Time reduction (cycles/transaction)",
-                            "Completion Time reduction (%)"],
-                           channel_rows) if channel_rows else
-                    "[TBD] 本輪尚未重新產生 RR／RRD 結果。")
-    tradeoff_rows = collect_rows(root / "tradeoff")
-    tradeoff_text = _tradeoff_table(rows, tradeoff_rows)
-    configuration_performance_text = _configuration_performance_table(
-        rows, tradeoff_rows)
-    burst_text = _burst_table(collect_burst_rows(root / "burst"))
-    multicast_text = _multicast_table(
-        collect_multicast_rows(root / "multicast_compare"))
-    return "\n".join([
-        "# AI Inference NoC Performance Report: mesh_4x4", "",
-        "## 1. 測試設定與量測方法", "",
-        "- Native AXI data width：512 bits，即 64 B/beat。Reference Burst Length 為 64 beats，每筆 transaction 為 4096 B。",
-        f"- Load control：Outstanding Depth = 32 transactions/initiator。每個 traffic mapping 執行 16 rounds，seed = {first['seed']}。",
-        "- Reference DUT：DAT VCs = 2、Router VC depth = 8 flits/VC、NI RX DAT depth = 8 flits/VC、NI TX DAT depth = 8 entries、Read RoB = 128 beat slots。",
-        "- Write transaction 從 AW admission 佔用一個 slot，收到 B 後釋放。Read transaction 從 AR handshake 佔用一個 slot，收到 RLAST 後釋放。",
-        "- Read memory 與 checker data 在量測前完成 prefill。Read 與 Write 分開量測。", "",
-        "量測流程：", "",
-        "1. 選擇 Traffic Model 與 Read／Write 方向。",
-        "2. 固定 Outstanding Depth 32。每個 initiator 持續送出 transaction，直到用滿可用 slot。",
-        "3. Write 收到 B 或 Read 收到 RLAST 時釋放一個 slot。",
-        "4. 記錄整組 workload 的 Completion Time、Accepted Throughput 與 DAT link utilization。", "",
-        "公式：", "",
-        "```text",
-        "Transaction bytes = Burst Length * 64 B/beat",
-        "Reference transaction bytes = 64 beats * 64 B/beat = 4096 B",
-        "Logical delivered bytes = payload deliveries * Transaction bytes",
-        "Accepted Throughput (B/cycle) = Logical delivered bytes / Completion Time",
-        "Ideal Throughput Bound (B/cycle) = logical delivered bytes / busiest resource serialization cycles",
-        "Throughput Efficiency (%) = Accepted Throughput / Ideal Throughput Bound * 100",
-        "DAT link utilization (%) = transferred DAT flits / measured cycles * 100",
-        "```", "",
-        "## 2. MHA、MoE 與 Pipeline Traffic Models", "",
-        _table(["Traffic", "AI Workload"], traffic_model_rows), "",
-        "All-Gather traffic schedule 尚未實作，因此欄位標為 [TBD]。既有 Gather 是 many-to-one traffic，不納入本報告。", "",
-        "下圖只顯示已有量測資料的 mapping。Multicast 依 destination group 分成 Row-wise、Column-wise、Local 2×2 與 Global。Hierarchical All-to-All 目前只量到 inter-region phase。箭頭表示 payload 方向。Read request 逆向送往資料來源，response 再沿箭頭方向送到 consumer。", "",
-        _traffic_gallery(), "",
-        "## 3. Performance Results", "",
-        "Reference configuration：Reference DUT、Burst Length 64 beats、Outstanding Depth 32。", "",
-        _table([
-            "Traffic Model", "Direction",
-            "Ideal Throughput Bound (B/cycle)",
-            "Accepted Throughput (B/cycle)",
-            "Throughput Efficiency (%)",
-        ], performance_rows), "",
-        "![Ideal and accepted throughput](ideal_vs_accepted_throughput.svg)", "",
-        "表格解讀：", "",
-        "1. `Ideal Throughput Bound` 由該 mapping 最忙的 physical resource 決定。",
-        "2. `Accepted Throughput` 是 Reference configuration 的量測值。",
-        "3. `Throughput Efficiency` 比較同一 Traffic Model 與 Direction 的量測值和理想上限。數值越接近 100% 越好。", "",
-        "## 4. Burst Length Characterization", "",
-        "Burst Length 是 workload parameter，不是 DUT configuration。所有列使用 Reference DUT 與 Outstanding Depth 32。每個 flow 每輪固定傳輸 4096 B。", "",
-        burst_text, "",
-        "## 5. Multicast vs Repeated Unicast", "",
-        "本節使用 Write traffic。兩種模式使用相同 Reference DUT、source、Destination Set、issue order、AXI-ID policy 與 4096 B/flow/round。Outstanding Depth 固定為 32，共執行 16 rounds。", "",
-        "量測流程：", "",
-        "1. 所有 active sources 在同一個 cycle 開始發送。",
-        "2. Multicast 每個 source 每個 round 發出一筆 Write transaction。Router 在路徑分叉處複製 flit。",
-        "3. Repeated Unicast 對每個 destination 發出一筆獨立 Write transaction，最多保留 32 筆 outstanding transactions。",
-        "4. 最後一個 active source 收到所有 B responses 時結束量測。", "",
-        "```text",
-        "Injected Flits = sum of DAT flits at source injection ports",
-        "Completion Time = final B completion cycle - common start cycle",
-        "Speedup = Repeated Unicast Completion Time / Multicast Completion Time",
-        "```", "",
-        "Fanout 包含 source 本身。Local delivery 不經過 mesh link。Injected Flits 不包含 B／CollectB。", "",
-        "每個 node 的 payload：", "",
-        "```text",
-        "Payload per destination per round = 64 beats * 64 B/beat = 4096 B = 4 KiB",
-        "Payload per destination per run = 4096 B * 16 rounds = 65536 B = 64 KiB",
-        "```", "",
-        "Injected Flits 對應方式：", "",
-        "```text",
-        "DAT flits per transaction = 1 header flit + Burst Length",
-        "Multicast Injected Flits = Source Count * Rounds * (1 + Burst Length)",
-        "Repeated Unicast Injected Flits = Source Count * Rounds * (Fanout - 1) * (1 + Burst Length)",
-        "Injection Ratio = Repeated Unicast Injected Flits / Multicast Injected Flits = Fanout - 1",
-        "",
-        "Burst Length = 64 beats, so each Write transaction injects 65 DAT flits",
-        "Row-wise Multicast = 4 * 16 * 65 = 4160 flits",
-        "Row-wise Repeated Unicast = 4 * 16 * 3 * 65 = 12480 flits",
-        "Global Multicast = 1 * 16 * 65 = 1040 flits",
-        "Global Repeated Unicast = 1 * 16 * 15 * 65 = 15600 flits",
-        "```", "",
-        multicast_text, "",
-        "## 6. VC 與 Buffer Trade-off", "",
-        "本表比較 DAT VC count、VC depth、DAT Router buffer capacity 與 NI RX DAT buffer capacity。只使用已有 trade-off 量測的 Global Multicast 和 Hierarchical All-to-All。", "",
-        "```text",
-        "DAT Router Buffer Capacity = DAT VC count × Router VC depth",
-        "```", "",
-        tradeoff_text, "",
-        "![Hierarchical All-to-All buffer trade-off](hierarchical_alltoall_buffer_tradeoff.svg)", "",
-        "圖表解讀：", "",
-        "1. X 軸越往右代表每個 Router input 配置更多 DAT buffer flits。這是 storage cost，不是 synthesis area。",
-        "2. Y 軸越高代表相同 workload 在每個 cycle 完成更多 payload bytes。",
-        "3. Non-dominated configuration 無法在成本不增加的條件下繼續提升所有量測性能。",
-        "4. Dominated configuration 的成本不低，且 Read 與 Write performance 都可由其他設定取代。", "",
-        "Read RoB 固定為 128 beat slots。HWM 到達 128，但沒有對應的 non-zero admission-stall counter。本輪不執行 Read RoB sweep，也不判定 RoB 限制 throughput。", "",
-        "### DUT Configuration Performance", "",
-        "Cell = Measured / Ideal (Efficiency)", "",
-        "Unit: B/cycle", "",
-        configuration_performance_text, "",
-        "## 7. RR vs RRD", "",
-        "此 64-bit common-payload 測試把 node 0 的 Control probe 放在完整的 Pipeline P2P background interval 內。RR 讓 background 與 Control 共用 REQ／RSP。RRD 讓 background 改走相同 directed geometric edge 的 DAT。", "",
-        "Control Completion Time 從第一次 request `VALID` assertion 開始，到對應的 B/R handshake 結束，包含 source admission backpressure。", "",
-        channel_text, "",
-        "Completion Time reduction = RR mean Completion Time - RRD mean Completion Time。正值表示獨立 DAT 降低 Control blocking。此結果不代表 512-bit bandwidth。", "",
-        "## 8. Compute Overlap Coverage", "",
-        "此項比較 NoC Completion Time 與指定的 PE compute budget，不是實測 PE utilization。", "",
-        "```text",
-        "PE compute budget = [TBD] cycles/round",
-        "Compute overlap coverage (%) = min(100, PE compute budget / NoC completion cycles * 100)",
-        "```", "",
-        "PE compute budget 尚未定義，因此不提供數值。", "",
-    ])
+def collect_operations(directories):
+    """Read explicitly selected DMA runs with their accounting and provenance."""
+    import dependent_dma_plan as dma
+    import emit_result_manifest as provenance
+    import gen_tb_top
+
+    rows = []
+    for directory in directories:
+        directory = pathlib.Path(directory).resolve()
+        result = json.loads((directory / "operation.json").read_text())
+        perf = json.loads((directory / "perf.json").read_text())
+        manifest = json.loads((directory / "manifest.json").read_text())
+        log = (directory / "run.log").read_text()
+        knobs = {}
+        for token in shlex.split(manifest["exact_command"]):
+            if "=" not in token:
+                continue
+            key, value = token.split("=", 1)
+            if key in knobs and knobs[key] != value:
+                raise ValueError(f"replay changes {key}: {directory}")
+            knobs[key] = value
+        if knobs.get("DMA") != "1" or knobs.get("DMA_DEPENDENT") != "1":
+            raise ValueError(f"not a dependent DMA measurement: {directory}")
+        config = gen_tb_top.ROOT / "sim/configs" / (knobs["CONFIG"] + ".yml")
+        if (manifest["config_file_sha256"] != provenance._sha256(config)
+                or manifest["generated_parameter_sha256"] != provenance._parameter_sha256(gen_tb_top.ROOT)
+                or manifest["source_patch_sha256"] != provenance._sha256(directory / "source.patch")
+                or manifest["seed"] != int(knobs["SEED"])):
+            raise ValueError(f"measurement provenance mismatch: {directory}")
+        topo = gen_tb_top.load_topology(knobs["CONFIG"])
+        resident = dma.parse_resident_shards(knobs["DMA_RESIDENT_SHARDS"]) if knobs.get("DMA_RESIDENT_SHARDS") else ()
+        plan = dma.build_plan(topo, int(knobs["DMA_LENGTH"], 0), knobs["DMA_RW"],
+                              knobs["DMA_OPERATION"], resident)
+        if plan.contract:
+            from xy_runtime_checker import validate_snapshot
+            validate_snapshot(plan, directory)
+        if dma.pass_marker(plan) not in log.splitlines():
+            raise ValueError(f"missing byte-checked completion: {directory}")
+        dma.validate_result(result, plan)
+        dma.validate_perf_window(result, perf)
+        memory = dma.validate_memory_reads(log, plan, topo)
+        if any(t.phase for t in plan.transfers):
+            from composite_dma_plan import phase_results
+            observed = phase_results(log, plan)
+            if observed != json.loads((directory / "phases.json").read_text()):
+                raise ValueError(f"phase observations disagree: {directory}")
+        links = perf["noc"]["links"]
+        rows.append({**result, **memory, "directory": directory, "topology": knobs["CONFIG"],
+                     "direction": "tile write/read" if plan.operation in ("kv_tile_roundtrip", "prefill_decode") else knobs["DMA_RW"],
+                     "seed": manifest["seed"],
+                     **({"contract": plan.contract, "estimated_time_cycles": None,
+                         "slowdown": None, "estimate_status": "uncalibrated"} if plan.contract else {}),
+                     "object_bytes": int(knobs["DMA_LENGTH"], 0),
+                     "sim_opt": knobs.get("SIM_OPT", "-O0"),
+                     "backpressure": knobs["DMA_BACKPRESSURE"],
+                     "dat_injected_flits": sum(link["flit_count"] for link in links
+                         if re.fullmatch(r"dat_inject_\d+|dat_node\d+\.y_to_node\d+\.router", link["name"])),
+                     "dat_flit_hops": sum(link["flit_count"] for link in links
+                         if re.fullmatch(r"dat_\d+to\d+", link["name"]))})
+    if not rows:
+        raise ValueError("select at least one operation result directory")
+    return rows
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="Export validated DMA measurements as JSON. "
+                    "The authored report is docs/perf_report_restructured.md.")
     parser.add_argument("out_dir", nargs="?", default="sim/verilator/output")
-    parser.add_argument("-o", "--out")
+    parser.add_argument("-o", "--out", type=pathlib.Path,
+                        help="JSON destination (default: OUT_DIR/operation_results.json)")
+    parser.add_argument("--operations", nargs="+", type=pathlib.Path, required=True,
+                        help="Explicit dependent-DMA run directories to validate and export")
     args = parser.parse_args(argv)
-    root = pathlib.Path(args.out_dir)
-    rows = collect_rows(root / "baseline")
-    _require_complete(rows)
-    destination = pathlib.Path(args.out) if args.out else root / "perf_report.md"
-    write_traffic_figures(destination.parent)
-    write_report_figures(
-        destination.parent, rows, collect_rows(root / "tradeoff"))
-    text = report(root)
-    destination.write_text(text, encoding="utf-8", newline="\n")
-    print(f"wrote {destination} ({len(text.splitlines())} lines)")
+    destination = args.out or pathlib.Path(args.out_dir) / "operation_results.json"
+    if destination.suffix.lower() != ".json":
+        parser.error("measurement export requires a .json destination")
+    rows = collect_operations(args.operations)
+    # Keep raw-record locations portable relative to the exported data file.
+    records = [{**row, "directory": os.path.relpath(
+        row["directory"], destination.resolve().parent).replace(os.sep, "/")}
+        for row in rows]
+    payload = {"schema": 1, "records": records}
+    encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False, indent=2) + "\n"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(encoded, encoding="utf-8", newline="\n")
+    print(f"wrote {destination} ({len(records)} validated records)")
 
 
 if __name__ == "__main__":

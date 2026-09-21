@@ -30,6 +30,7 @@
 
 module dma_node_endpoint #(
     parameter int unsigned NODE_ID      = 0,
+    parameter int unsigned NUM_ENDPOINTS = 1,
     parameter int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_ID_WIDTH_DFLT,
     parameter int unsigned NOC_ID_WIDTH = ni_params_pkg::NOC_ID_WIDTH_DFLT,
     // ADDR/DATA/AWUSER widths are what the crossbar, the memories and the id
@@ -61,6 +62,7 @@ module dma_node_endpoint #(
 ) (
     input  logic                       clk_i,
     input  logic                       rst_ni,
+    input  int unsigned                peer_jobs_retired_i [NUM_ENDPOINTS],
     output ni_signals_pkg::axi_req_t   master_axi_req_o,
     output logic [AWUSER_WIDTH-1:0]    master_awuser_o,
     input  ni_signals_pkg::axi_rsp_t   master_axi_rsp_i,
@@ -96,17 +98,21 @@ module dma_node_endpoint #(
     idma_pkg::idma_busy_t      dma_busy;
 
     int unsigned jobs_issued, jobs_retired;
+    logic jobs_done;
 
     idma_job_driver #(
-        .NODE_ID(NODE_ID)
+        .NODE_ID(NODE_ID),
+        .NUM_ENDPOINTS(NUM_ENDPOINTS)
     ) i_job_driver (
         .clk_i, .rst_ni,
         .req_o          ( dma_job_req       ),
         .req_valid_o    ( dma_job_req_valid ),
         .req_ready_i    ( dma_job_req_ready ),
         .rsp_valid_i    ( dma_job_rsp_valid ),
+        .peer_jobs_retired_i,
         .jobs_issued_o  ( jobs_issued       ),
-        .jobs_retired_o ( jobs_retired      )
+        .jobs_retired_o ( jobs_retired      ),
+        .jobs_done_o    ( jobs_done         )
     );
 
     idma_backend_rw_axi #(
@@ -403,6 +409,29 @@ module dma_node_endpoint #(
     ) tile_mem [TILE_TARGETS-1:0] ();
 
     for (genvar t = 0; t < TILE_TARGETS; t++) begin : g_tile_mem
+        // Observe accepted memory-side traffic, including tile-local DMA reads.
+        longint unsigned read_requests_reg = 0;
+        longint unsigned read_requested_bytes_reg = 0;
+        longint unsigned read_response_beats_reg = 0;
+        always_ff @(posedge clk_i) begin
+            if (tile_mem[t].ar_valid && tile_mem[t].ar_ready) begin
+                read_requests_reg <= read_requests_reg + 1;
+                read_requested_bytes_reg <= read_requested_bytes_reg +
+                    ((64'(tile_mem[t].ar_len) + 1) << tile_mem[t].ar_size);
+            end
+            if (tile_mem[t].r_valid && tile_mem[t].r_ready)
+                read_response_beats_reg <= read_response_beats_reg + 1;
+            if (!rst_ni) begin
+                read_requests_reg <= 0;
+                read_requested_bytes_reg <= 0;
+                read_response_beats_reg <= 0;
+            end
+        end
+        final begin
+            $display("[memory_reads] node%0d target%0d: requests=%0d requested_bytes=%0d response_beats=%0d",
+                     NODE_ID, t, read_requests_reg, read_requested_bytes_reg,
+                     read_response_beats_reg);
+        end
         axi_delayer_intf #(
             .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_ADDR_WIDTH(ADDR_WIDTH),
             .AXI_DATA_WIDTH(DATA_WIDTH),  .AXI_USER_WIDTH(AWUSER_WIDTH),

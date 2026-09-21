@@ -78,13 +78,15 @@ help:
 	@echo "  DMA=1 ignores PATTERN: stimulus is gen_dma_jobs.py's per-node job files, and"
 	@echo "  the run ends when every DMA has retired every job and every destination"
 	@echo "  region matches its source. Vars: DMA_JOBS_PER_NODE= DMA_LENGTH= DMA_RW=read|write"
+	@echo "  DMA_DEPENDENT=1 runs TP All-Gather. DMA_LENGTH is bytes/shard, DMA_RW selects the issuer."
+	@echo "  DMA_BACKPRESSURE=1 enables existing random memory and consumer stall profiles."
 	@echo "  (all three feed the job files AND the top's compare) DECERR_FAULT=1 DECERR_FAULT_WR=1"
 	@echo ""
 	@echo "  make sim-injection-sweep                     saturation sweep, long"
 	@echo "  Vars: SWEEP_OFFERED= (DAT flits per node per cycle) SWEEP_PATTERNS= SWEEP_SEEDS="
 	@echo "  PATTERN and SEED are ignored here, use SWEEP_PATTERNS and SWEEP_SEEDS."
 	@echo "  BURST_LEN defaults to 32 in this target (SWEEP_OFFERED assumes AxLEN 32)"
-	@echo "  Render the report and summary chart with: tools/perf_report.py sim/verilator/output"
+	@echo "  Report: docs/perf_report_restructured.md; export validated data: sim/tools/perf_report.py --operations RUN_DIR ..."
 	@echo ""
 	@echo "Build and test gates stay at the repo root: make build / make test / make pytest"
 
@@ -141,13 +143,14 @@ VERILATOR_COMMON_FLAGS := \
 # memory pressure, which reads as a flaky environment rather than a build
 # setting. Splitting keeps every translation unit small enough that no compiler
 # has to hold a function that size.
+SIM_OPT ?= -O0
 VERILATOR_FLAGS := \
     $(VERILATOR_COMMON_FLAGS) \
     --top-module $(TOP) \
     --timing \
     --Mdir $(OBJ_DIR) \
     -CFLAGS "-g" \
-    -CFLAGS "-O0" \
+    -CFLAGS "$(SIM_OPT)" \
     $(if $(filter continuous,$(RUN_CLASS)),-GMST_STALL_RANDOM_OUTPUT=0)
 
 # Optional strict-mode flag injection for release gates.
@@ -193,21 +196,38 @@ VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VL_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(CONFIG)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" ]; then \
-	    echo "$(CONFIG)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(CONFIG)_$(RUN_CLASS)$(DMA)_$(SIM_OPT)$(if $(filter 1,$(DMA)),$(if $(and $(filter 1,$(DMA_DEPENDENT)),$(filter xy_%,$(DMA_OPERATION))),_xy_runtime_rw$(DMA_RW)_bp$(DMA_BACKPRESSURE),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)_dep$(DMA_DEPENDENT)_bp$(DMA_BACKPRESSURE)_op$(DMA_OPERATION)$(_DMA_RESIDENT_TAG)))" ]; then \
+	    echo "$(CONFIG)_$(RUN_CLASS)$(DMA)_$(SIM_OPT)$(if $(filter 1,$(DMA)),$(if $(and $(filter 1,$(DMA_DEPENDENT)),$(filter xy_%,$(DMA_OPERATION))),_xy_runtime_rw$(DMA_RW)_bp$(DMA_BACKPRESSURE),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)_dep$(DMA_DEPENDENT)_bp$(DMA_BACKPRESSURE)_op$(DMA_OPERATION)$(_DMA_RESIDENT_TAG)))" > $@; \
 	fi
 
 # DMA_JOBS_PER_NODE / DMA_LENGTH / _DMA_JOB_ARGS come from build_config.mk, so
 # the top's compare and the job files it compares cannot be built from different
 # geometries.
 GEN_DMA_JOBS := $(SIM_ROOT)/tools/gen_dma_jobs.py
+DMA_DEPENDENT ?= 0
+DMA_BACKPRESSURE ?= 0
+DMA_OPERATION ?= all_gather
+DMA_RESIDENT_SHARDS ?=
+_DMA_RESIDENT_ARG = $(if $(DMA_RESIDENT_SHARDS),--resident-shards $(DMA_RESIDENT_SHARDS))
+_DMA_RESIDENT_TAG = $(if $(DMA_RESIDENT_SHARDS),_resident$(DMA_RESIDENT_SHARDS))
+_DMA_OPERATION_TAG = $(if $(filter all_gather,$(DMA_OPERATION)),ag,$(DMA_OPERATION))
+ifneq ($(filter 1,$(DMA_DEPENDENT) $(DMA_BACKPRESSURE)),)
+ifneq ($(DMA),1)
+$(error DMA_DEPENDENT and DMA_BACKPRESSURE require DMA=1)
+endif
+ifneq ($(filter-out 0,$(INJECTION_MODE)),)
+$(error Dependent or backpressured DMA uses INJECTION_MODE=0)
+endif
+endif
+GEN_DEPENDENT_DMA := $(SIM_ROOT)/tools/dependent_dma_plan.py
+_DMA_DEPENDENT_ARG = $(if $(filter 1,$(DMA_DEPENDENT)),--dependent --dma-operation $(DMA_OPERATION)) $(if $(filter 1,$(DMA_BACKPRESSURE)),--dma-backpressure) $(_DMA_RESIDENT_ARG)
 
 # DMA only: on the directed path TB_TOP_SV is sim/tb/tb_noc_mesh.sv, a SOURCE
 # file, and a rule with this recipe would overwrite it with generator output the
 # first time the stamp or the generator was newer.
 ifeq ($(DMA),1)
-$(TB_TOP_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP) $(NI_PARAMS_SV)
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(CONFIG) --dma $(_DMA_JOB_ARGS) --out $(TB_TOP_SV)
+$(TB_TOP_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(GEN_DEPENDENT_DMA) $(SIM_ROOT)/tools/composite_dma_plan.py $(SIM_ROOT)/tools/xy_collective_plan.py $(SIM_ROOT)/tools/xy_runtime_checker.py $(TOPO_STAMP) $(NI_PARAMS_SV)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(CONFIG) --dma $(_DMA_JOB_ARGS) $(_DMA_DEPENDENT_ARG) --out $(TB_TOP_SV)
 endif
 
 # topology_pkg.sv (build_config.mk's TOPOLOGY_PKG_SV): the address-map package
@@ -239,7 +259,7 @@ BUILD_JOBS ?= 4
 # Two-phase build: Verilator generates C++ in $(VL_BUILD)/obj_dir, then make
 # compiles it.
 # PYTHON3 override: verilator_includer needs a real Python3 interpreter.
-$(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(NOC_FABRIC_SV) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
+$(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(SIM_ROOT)/tb/axi_perf_trace.svh $(NOC_FABRIC_SV) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(OBJ_DIR)
 	$(VERILATOR) $(VERILATOR_FLAGS) -f $(FILELIST_F) $(C_SRC)
 	$(if $(ELABORATE_ONLY),echo "ELABORATE_ONLY: elaborated - C++ build skipped",$(MAKE) -j $(BUILD_JOBS) -C $(OBJ_DIR) -f V$(TOP).mk PYTHON3="$(PYTHON3)")
@@ -343,7 +363,7 @@ STIM_SIZE       ?= $(if $(filter config,$(SPACE)),3,5)
 _CONTINUOUS    := $(filter 1,$(INJECTION_MODE))
 _CHECKED       := $(filter 2,$(INJECTION_MODE))
 _WINDOWED      := $(filter 4,$(INJECTION_MODE))
-_AI_PATTERN    := $(filter broadcast gather alltoall neighbor_exchange pipeline many_to_many,$(PATTERN))
+_AI_PATTERN    := $(filter broadcast gather alltoall neighbor_exchange pipeline many_to_many tp_ring_step pp_shards expert_dispatch expert_return kv_handoff,$(PATTERN))
 _NUM_READS     := $(if $(_AI_PATTERN),$(if $(filter read,$(TRAFFIC_DIRECTION)),$(INJECTION_COUNT),0),$(INJECTION_COUNT))
 _NUM_WRITES    := $(if $(_AI_PATTERN),$(if $(filter write,$(TRAFFIC_DIRECTION)),$(INJECTION_COUNT),0),$(INJECTION_COUNT))
 # Pattern tag: multicast runs are per-shape, so the shape joins the stim dir /
@@ -370,13 +390,13 @@ STIM_BASE      ?= test_patterns
 # leaving it beside the new one. A run reads what is there and regenerates
 # nothing. Set STIM_BASE to hold two batches side by side.
 ifeq ($(DMA),1)
-STIM_ROOT      ?= $(STIM_BASE)/$(CONFIG)/dma_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
+STIM_ROOT      ?= $(STIM_BASE)/$(CONFIG)/dma_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)$(if $(filter 1,$(DMA_DEPENDENT)),_$(_DMA_OPERATION_TAG))$(_DMA_RESIDENT_TAG)
 else
 STIM_ROOT      ?= $(STIM_BASE)/$(CONFIG)/$(_PATTERN_TAG)
 endif
 _TOPO_TAG      := $(CONFIG)
 ifeq ($(DMA),1)
-SIM_TAG        ?= dma_$(_TOPO_TAG)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
+SIM_TAG        ?= dma_$(_TOPO_TAG)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)$(if $(filter 1,$(DMA_DEPENDENT)),_$(_DMA_OPERATION_TAG))$(_DMA_RESIDENT_TAG)$(if $(filter 1,$(DMA_BACKPRESSURE)),_bp)
 else
 SIM_TAG        ?= $(if $(filter channel_compare,$(PATTERN)),channel_compare_$(CHANNEL_MODE)ch_$(CHANNEL_CASE),$(if $(_WINDOWED),windowed_$(_TOPO_TAG)_$(_PATTERN_TAG)_od$(SOURCE_OUTSTANDING_DEPTH)_s$(SEED),$(if $(_CONTINUOUS),continuous_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),$(if $(_CHECKED),checked_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),directed_$(_TOPO_TAG)_$(_PATTERN_TAG)_s$(SEED)))))
 endif
@@ -395,7 +415,12 @@ _AI_ARGS       := $(if $(AI_ROUNDS),--rounds $(AI_ROUNDS)) $(if $(_AI_PATTERN),-
 _AI_META_ARGS  := $(if $(_AI_PATTERN),--traffic-meta $(STIM_ROOT)/traffic_meta.json --traffic-mapping $(_TRAFFIC_MAPPING))
 _REPRO_KNOBS   := CONFIG=$(CONFIG) PATTERN=$(PATTERN) SEED=$(SEED) INJECTION_MODE=$(INJECTION_MODE) INJECTION_COUNT=$(INJECTION_COUNT) SOURCE_OUTSTANDING_DEPTH=$(SOURCE_OUTSTANDING_DEPTH) MAX_TXNS_PER_ID=$(MAX_TXNS_PER_ID) TRAFFIC_DIRECTION=$(TRAFFIC_DIRECTION) AI_ROUNDS=$(AI_ROUNDS) AI_TXNS_PER_FLOW=$(AI_TXNS_PER_FLOW) STIM_SIZE=$(STIM_SIZE) BURST_LEN=$(BURST_LEN) MCAST_SHAPE=$(MCAST_SHAPE) MULTICAST_MODE=$(MULTICAST_MODE) GATHER_SHAPE=$(GATHER_SHAPE) ROOT_NODE=$(ROOT_NODE) CHANNEL_MODE=$(CHANNEL_MODE) CHANNEL_CASE=$(CHANNEL_CASE)
 REPRO_COMMAND  ?= make -C sim/verilator gen $(_REPRO_KNOBS) && make -C sim/verilator sim $(_REPRO_KNOBS)
-_EMIT_MANIFEST_CMD = $(PYTHON3) $(EMIT_MANIFEST) --out $(RUN_DIR)/manifest.json --repo-root $(PROJ_ROOT) --config sim/configs/$(CONFIG).yml --simulator $(VERILATOR) --seed $(SEED) --command '$(REPRO_COMMAND)' --source-patch $(SOURCE_PATCH)
+_REPRO_KNOBS += BUILD_ROOT=$(BUILD_ROOT) STIM_BASE=$(STIM_BASE) OUTPUT_ROOT=$(OUTPUT_ROOT) DMA=$(DMA) DMA_DEPENDENT=$(DMA_DEPENDENT) DMA_BACKPRESSURE=$(DMA_BACKPRESSURE) DMA_OPERATION=$(DMA_OPERATION) DMA_JOBS_PER_NODE=$(DMA_JOBS_PER_NODE) DMA_LENGTH=$(DMA_LENGTH) DMA_RW=$(DMA_RW)
+_REPRO_KNOBS += SIM_OPT=$(SIM_OPT) VL_BUILD=$(VL_BUILD)
+_REPRO_KNOBS += DMA_RESIDENT_SHARDS=$(DMA_RESIDENT_SHARDS)
+_DMA_SOURCE_PATCH = $(abspath $(RUN_DIR)/source.patch)
+_MANIFEST_SOURCE_PATCH = $(if $(filter 1,$(DMA_DEPENDENT)),$(_DMA_SOURCE_PATCH),$(SOURCE_PATCH))
+_EMIT_MANIFEST_CMD = $(PYTHON3) $(EMIT_MANIFEST) --out $(RUN_DIR)/manifest.json --repo-root $(PROJ_ROOT) --config sim/configs/$(CONFIG).yml --simulator $(VERILATOR) --seed $(SEED) --command '$(REPRO_COMMAND)' --source-patch $(_MANIFEST_SOURCE_PATCH)
 
 ifneq ($(filter gen sim run,$(MAKECMDGOALS)),)
 ifneq ($(strip $(_AI_PATTERN)),)
@@ -420,8 +445,9 @@ gen:
 	    $(if $(filter config,$(SPACE)),--space config) \
 	    --seed $(SEED) $(_HOTSPOT_ARGS) $(_MCAST_ARGS) $(_GATHER_ARGS) $(_AI_ARGS) \
 	    $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)))
-	$(if $(filter 1,$(DMA)),$(PYTHON3) $(GEN_DMA_JOBS) --topology $(CONFIG) \
-	    --out $(STIM_ROOT) $(_DMA_JOB_ARGS))
+	$(if $(filter 1,$(DMA)),$(if $(filter 1,$(DMA_DEPENDENT)),$(PYTHON3) $(GEN_DEPENDENT_DMA) \
+	    --topology $(CONFIG) --out $(STIM_ROOT) --shard-bytes $(DMA_LENGTH) --direction $(DMA_RW) --operation $(DMA_OPERATION) $(_DMA_RESIDENT_ARG),\
+	    $(PYTHON3) $(GEN_DMA_JOBS) --topology $(CONFIG) --out $(STIM_ROOT) $(_DMA_JOB_ARGS)))
 	@echo "stimulus: $(STIM_ROOT)"
 
 ifneq ($(filter channel-compare-gen channel-compare-run,$(MAKECMDGOALS)),)
@@ -479,10 +505,15 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 	# specific override cannot re-key them; the cost is a wasted wrong-flavor build.
 	@[ "$(RUN_CLASS)" = "$(if $(filter 1 4,$(INJECTION_MODE)),continuous,directed)" ] || { echo "ERROR: INJECTION_MODE=$(INJECTION_MODE) runs on RUN_CLASS=$(if $(filter 1 4,$(INJECTION_MODE)),continuous,directed) (got '$(RUN_CLASS)')"; exit 1; }
 	@mkdir -p $(RUN_DIR)
+	$(if $(filter xy_%,$(DMA_OPERATION)),$(PYTHON3) $(SIM_ROOT)/tools/xy_runtime_checker.py --snapshot $(STIM_ROOT) $(RUN_DIR))
+	$(if $(filter 1,$(DMA_DEPENDENT)),$(PYTHON3) $(EMIT_MANIFEST) --repo-root $(PROJ_ROOT) --write-source-patch --out $(_DMA_SOURCE_PATCH))
 	@echo ">>> $@ CONFIG=$(CONFIG) PATTERN=$(PATTERN) SEED=$(SEED)"
 	@echo "running $(SIM_TAG) (mode=$(INJECTION_MODE) rate=$(INJECTION_RATE) count=$(INJECTION_COUNT) pattern=$(PATTERN))"
 	$(TBTOP_EXE) \
 	    "+stim_dir=$(STIM_ROOT)" \
+	    "+dependent_jobs=$(DMA_DEPENDENT)" \
+	    $(if $(filter shared_fetch_multicast,$(DMA_OPERATION)),"+dma_job_users=1") \
+	    $(if $(filter 1,$(DMA_DEPENDENT)),"+operation_out=$(RUN_DIR)/operation.json") \
 	    "+num_reads=$(_NUM_READS)" "+num_writes=$(_NUM_WRITES)" \
 	    "+injection_mode=$(INJECTION_MODE)" "+injection_rate=$(INJECTION_RATE)" \
 	    "+traffic_direction=$(TRAFFIC_DIRECTION)" \
@@ -545,6 +576,16 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
         --max-txns-per-id $(MAX_TXNS_PER_ID) || exit 1; \
 	    $(_EMIT_MANIFEST_CMD) || exit 1; \
 	    echo "CHANNEL COMPARE PASS: $(SIM_TAG) scoreboard clean, marker and data beats verified"; \
+	elif [ "$(DMA)" = "1" ] && [ "$(DMA_DEPENDENT)" = "1" ]; then \
+	    if [ $$rc -ne 0 ]; then \
+	        echo "DEPENDENT DMA FAIL: simulator exited with rc=$$rc"; exit 1; \
+	    fi; \
+	    $(PYTHON3) $(GEN_DEPENDENT_DMA) --validate-result $(RUN_DIR) --topology $(CONFIG) \
+	        --shard-bytes $(DMA_LENGTH) --direction $(DMA_RW) --operation $(DMA_OPERATION) $(_DMA_RESIDENT_ARG) || exit 1; \
+	    $(PYTHON3) $(SIM_ROOT)/tools/axi_transaction_metrics.py $(RUN_DIR) --config $(TOPOLOGY_CONFIG) || exit 1; \
+	    $(PYTHON3) $(SIM_ROOT)/tools/packet_metrics.py $(RUN_DIR) --config $(TOPOLOGY_CONFIG) || exit 1; \
+	    $(_EMIT_MANIFEST_CMD) || exit 1; \
+	    echo "DEPENDENT DMA PASS: $(SIM_TAG) every shard verified"; \
 	elif [ $$rc -ne 0 ] || ! grep -q 'PASS: all' $(RUN_DIR)/run.log; then \
 	    echo "DIRECTED FAIL: run did not reach non-vacuous PASS (rc=$$rc)"; exit 1; \
 	elif [ "$(DMA)" = "1" ]; then \

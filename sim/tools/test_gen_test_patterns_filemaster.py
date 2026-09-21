@@ -10,6 +10,87 @@ import pytest
 import address_map
 import gen_tb_top
 import gen_test_patterns as g
+import control_traffic
+
+
+@pytest.mark.parametrize("mode,count", [("unicast", 45), ("multicast", 23)])
+def test_control_sequence_recipients_and_dependencies(tmp_path, mode, count):
+    control_traffic.generate(tmp_path, mode)
+    plan = json.loads((tmp_path / "control_plan.json").read_text())
+    messages = plan["messages"]
+    assert len(messages) == count
+    for stage in ("command", "release"):
+        deliveries = [n for m in messages if m["stage"] == stage for n in m["targets"]]
+        assert sorted(deliveries) == list(range(1, 16))
+    for m in messages:
+        if m["stage"] == "status":
+            assert m["targets"] == [0] and m["wait_mask"] == 1
+        if m["stage"] == "release":
+            assert m["wait_mask"] == (1 << 15) - 1
+    assert sum(len(m["targets"]) * plan["message_bytes"] for m in messages) == 360
+
+
+def test_control_review_rejects_early_release(tmp_path):
+    control_traffic.generate(tmp_path, "unicast")
+    plan = json.loads((tmp_path / "control_plan.json").read_text())
+    lines, counts = [], {}
+    for message in plan["messages"]:
+        stage, source = message["stage"], message["source"]
+        job = counts.get(source, 0)
+        counts[source] = job + 1
+        ready = {"command": 1, "status": 50, "release": 150}[stage]
+        lines.append(f"[control_ready] stage={stage} source={source} job={job} cycle={ready}")
+        for target in message["targets"]:
+            delivered = {"command": 10 + target, "status": 100 + source, "release": 200 + target}[stage]
+            lines.append(f"[control_receive] stage={stage} source={source} destination={target} cycle={delivered}")
+    lines += [f"[control_done] node={node} writes={count} cycle=250" for node, count in counts.items()]
+    log = "\n".join(lines)
+    (tmp_path / "run.log").write_text(log)
+    (tmp_path / "perf.json").write_text(json.dumps({"noc": {"links": [
+        {"name": "req_inject_0", "flit_count": 90},
+        {"name": "rsp_inject_0", "flit_count": 45}]}}))
+    assert control_traffic.review(tmp_path)["status"] == "PASS"
+    (tmp_path / "run.log").write_text(log.replace(
+        "stage=release source=0 job=15 cycle=150", "stage=release source=0 job=15 cycle=100"))
+    with pytest.raises(ValueError, match="dependency"):
+        control_traffic.review(tmp_path)
+
+
+@pytest.mark.parametrize("pattern,edges", [
+    ("tp_ring_step", {(8, 9), (9, 13), (13, 12), (12, 8)}),
+    ("pp_shards", {(8, 10), (9, 11), (12, 14), (13, 15)}),
+    ("expert_dispatch", {(8, 10), (8, 2), (9, 10), (9, 2)}),
+    ("expert_return", {(10, 8), (2, 8), (10, 9), (2, 9)}),
+    ("kv_handoff", {(8, 0), (9, 1), (12, 4), (13, 5),
+                    (10, 2), (11, 3), (14, 6), (15, 7)}),
+])
+@pytest.mark.parametrize("direction", ["write", "read"])
+def test_mapped_payload_transactions(tmp_path, pattern, edges, direction):
+    g.main(["--pattern", pattern, "--topology", "mesh_4x4", "--out", str(tmp_path),
+            "--rounds", "2", "--transactions-per-flow", "2", "--size", "6",
+            "--len", "0", "--direction", direction])
+    meta = json.loads((tmp_path / "traffic_meta.json").read_text())
+    assert meta["test_layer"] == "L1"
+    assert meta["schedule"] == "independent_transfers"
+    assert meta["source_requests"] == len(edges) * 4
+    assert meta["payload_deliveries"] == len(edges) * 4
+    assert {tuple(edge) for edge in meta["payload_edges"]} == edges
+    nodes, _, _, bases, _, sizes, _ = g._load_topology("mesh_4x4")
+    observed = []
+    for src in range(len(nodes)):
+        path = tmp_path / f"node{src}" / f"{direction}.txt"
+        txns = _parse_write(path) if direction == "write" else _parse_read(path)
+        for txn in txns:
+            dst = next(idx for idx, _x, _y, cid in nodes
+                       if bases[cid] <= txn["addr"] < bases[cid] + sizes["memory"][cid])
+            observed.append((src, dst) if direction == "write" else (dst, src))
+    assert set(observed) == edges
+    assert len(observed) == len(edges) * 4
+
+
+def test_mapped_payload_rejects_unapproved_geometry():
+    with pytest.raises(ValueError, match="4x4"):
+        g.mapped_payload_dsts("pp_shards", 2, 2, 1)
 
 
 def test_axi_widths_follow_constants_ssot():
@@ -1602,6 +1683,27 @@ def test_channel_compare_derives_shared_resource_from_2x2_routes(tmp_path):
     assert meta["control_resource"] == "req_1to3"
     assert meta["rr_background_resource"] == "req_1to3"
     assert meta["rrd_background_resource"] == "dat_1to3"
+
+
+@pytest.mark.parametrize("case", ["control", "control_offload", "control_restore"])
+def test_kv_control_payload_and_access_direction(tmp_path, case):
+    import control_traffic
+
+    plan = control_traffic.generate_kv(tmp_path, case)
+    assert len(plan["messages"]) == 8
+    assert sum(j["bytes"] for j in plan["jobs"]) == (0 if case == "control" else 2 * 1024 * 1024)
+    addresses = [(j["address"], j["address"] + j["bytes"]) for j in plan["jobs"]]
+    assert all(end <= nxt for (_, end), (nxt, _) in zip(sorted(addresses), sorted(addresses)[1:]))
+    for node in control_traffic.KV_TILES:
+        writes = _parse_write(tmp_path / f"node{node}/write.txt")
+        reads = _parse_read(tmp_path / f"node{node}/read.txt")
+        assert writes[0]["size"] == 3 and writes[0]["len"] == 0
+        bulk = reads if plan["read"] else writes[1:]
+        assert len(bulk) == (0 if case == "control" else 128)
+        assert all((t["len"]+1) * (1 << t["size"]) == plan["burst_bytes"] for t in bulk)
+        assert all(t["addr"] % 4096 == 0 for t in bulk)
+    assert _parse_write(tmp_path / "node16/write.txt") == []
+    assert _parse_read(tmp_path / "node16/read.txt") == []
 
 
 def test_channel_compare_requires_case_and_both_sam_ranges(tmp_path):

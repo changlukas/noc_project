@@ -7,6 +7,21 @@ import pytest
 
 import emit_result_csv as e
 
+
+@pytest.mark.parametrize("direction", ["read", "write"])
+def test_mapped_l1_metadata_matches_actual_traffic(tmp_path, direction):
+    import gen_test_patterns as g
+    g.main(["--pattern", "expert_dispatch", "--out", str(tmp_path),
+            "--topology", "mesh_4x4", "--rounds", "1", "--direction", direction])
+    path = tmp_path / "traffic_meta.json"
+    log = f"[TrafficMeta] direction={direction} axi_initiators=2 source_requests=4\n"
+    assert e.load_traffic_meta(path, log, "expert_dispatch", direction)["test_layer"] == "L1"
+    payload = json.loads(path.read_text())
+    payload["payload_edges"].pop()
+    path.write_text(json.dumps(payload))
+    with pytest.raises(SystemExit, match="edges disagree"):
+        e.load_traffic_meta(path, log, "expert_dispatch", direction)
+
 # Read and Write carry different sample counts on purpose: an implementation
 # that averaged the printed means instead of weighting them by N would read
 # 50.0 network and 70.0 open here, not 45.0 and 60.0.

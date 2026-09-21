@@ -457,6 +457,7 @@ TEST(RouterWormhole, WormsOnDifferentVcsInterleavePerOutput) {
     const auto W = static_cast<std::size_t>(RouterPort::WEST);
     const auto S = static_cast<std::size_t>(RouterPort::SOUTH);
     int next_a = 0, next_b = 0;
+    uint64_t grants = 0, waiting_vc_cycles = 0;
     for (int t = 0; t < 24; ++t) {
         if (next_a < 3) {
             r.input(W).push_flit(make_pinned_flit(dst, 0, next_a == 2 ? 1 : 0, 0x10));
@@ -468,10 +469,18 @@ TEST(RouterWormhole, WormsOnDifferentVcsInterleavePerOutput) {
         }
         const std::size_t before = east.received.size();
         r.tick();
+        const auto& activity = r.switch_activity(E);
+        ASSERT_GE(activity.eligible_vcs, activity.grants);
+        ASSERT_LE(activity.grants, 1u);
+        grants += activity.grants;
+        waiting_vc_cycles += activity.eligible_vcs - activity.grants;
         for (std::size_t i = before; i < east.received.size(); ++i)
             r.receive_credit(E, static_cast<uint8_t>(east.received[i].get_header_field("vc_id")));
     }
     ASSERT_EQ(east.received.size(), 6u);
+    EXPECT_EQ(grants, 6u);
+    EXPECT_GT(waiting_vc_cycles, 0u);
+    EXPECT_EQ(r.switch_activity(E).eligible_vcs, 0u);
     int runs = 1;
     for (std::size_t i = 1; i < east.received.size(); ++i) {
         if (east.received[i].get_header_field("src_id") !=
@@ -1372,9 +1381,44 @@ TEST(RouterVa, ZeroCreditVcIsNeverHeld) {
     for (int t = 0; t < 4; ++t) r.tick();
     EXPECT_FALSE(r.va_out_vc(W, 0).has_value());
     EXPECT_FALSE(r.wormhole_locked_input(E, 0).has_value());
+    ASSERT_EQ(r.allocation_waits().size(), 1u);
+    EXPECT_FALSE(r.allocation_waits().front().occupied);
     r.receive_credit(E, 0);
     for (int t = 0; t < 4; ++t) r.tick();
     EXPECT_EQ(east.received.size(), NOC_ROUTER_VC_DEPTH + 1);
+    EXPECT_TRUE(r.allocation_waits().empty());
+}
+
+TEST(RouterDiagnostics, AllocationWaitIdentifiesOccupiedOutputAndFullInput) {
+    Router r(center_cfg());
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    const auto N = static_cast<std::size_t>(RouterPort::NORTH);
+    const auto dst = make_dst(3, 1);
+    r.set_downstream(E, east);
+    r.tick();
+    EXPECT_TRUE(r.allocation_waits().empty());
+    r.input(W).push_flit(make_flit(dst, 0, 0));
+    for (int t = 0; t < kPipelineDepth; ++t) r.tick();
+    for (std::size_t beat = 0; beat < r.vc_depth(); ++beat) {
+        r.input(N).push_flit(make_flit(dst, 0, 1));
+        r.tick();
+    }
+    r.tick();
+    ASSERT_EQ(r.allocation_waits().size(), 1u);
+    const auto& wait = r.allocation_waits().front();
+    EXPECT_EQ(wait.input, N);
+    EXPECT_EQ(wait.output, E);
+    EXPECT_EQ(wait.vc, 0);
+    EXPECT_TRUE(wait.occupied);
+    EXPECT_TRUE(wait.input_full);
+    EXPECT_GT(r.credit(E, 0), 0u);
+    r.input(W).push_flit(make_flit(dst, 0, 1));
+    r.tick();
+    r.tick();
+    EXPECT_TRUE(r.allocation_waits().empty());
+    EXPECT_EQ(r.wormhole_locked_input(E, 0), N);
 }
 
 TEST(RouterDiagnostics, IdleZeroCreditVcIsNotBlocked) {
@@ -1394,6 +1438,8 @@ TEST(RouterDiagnostics, IdleZeroCreditVcIsNotBlocked) {
     ASSERT_EQ(r.credit(E, 0), 0u);
 
     EXPECT_FALSE(r.output_vc_credit_blocked(E, 0));
+    EXPECT_EQ(r.switch_activity(E).eligible_vcs, 0u);
+    EXPECT_EQ(r.switch_activity(E).grants, 0u);
 }
 
 TEST(RouterDiagnostics, UnrelatedZeroCreditVcIsNotBlocked) {

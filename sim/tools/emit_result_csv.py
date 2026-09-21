@@ -83,6 +83,7 @@ BEAT_BYTES = 64
 AI_WRITE_ONLY = frozenset({
     "broadcast", "gather", "alltoall", "neighbor_exchange", "pipeline",
     "many_to_many",
+    "tp_ring_step", "pp_shards", "expert_dispatch", "expert_return", "kv_handoff",
 })
 
 # [Monitor node0.master][Read] Latency: 98.30 +- 4.10, N: 200, BW: 107.02 Bits/cycle, Util: 41.80%
@@ -238,6 +239,27 @@ def load_traffic_meta(path, log_text, pattern, direction=None,
         "bytes_per_flow_round",
     }
     allowed = new_required | geometry
+    mapped_patterns = {"tp_ring_step", "pp_shards", "expert_dispatch",
+                       "expert_return", "kv_handoff"}
+    if pattern in mapped_patterns:
+        allowed |= {"test_layer", "traffic_mapping", "schedule", "payload_edges"}
+        edges = payload.get("payload_edges")
+        if (payload.get("test_layer") != "L1" or
+                payload.get("traffic_mapping") != pattern or
+                payload.get("schedule") != "independent_transfers" or
+                not isinstance(edges, list) or not edges or
+                any(not isinstance(edge, list) or len(edge) != 2 or
+                    any(type(node) is not int or not 0 <= node < 16 for node in edge)
+                    or edge[0] == edge[1] for edge in edges)):
+            sys.exit("emit_result_csv: invalid mapped L1 traffic metadata")
+        producers = {src for src, _dst in edges}
+        consumers = {dst for _src, dst in edges}
+        if (payload.get("payload_deliveries") != len(edges) or
+                payload.get("data_producers") != len(producers) or
+                payload.get("consumers") != len(consumers) or
+                payload.get("axi_initiators") != len(
+                    producers if direction == "write" else consumers)):
+            sys.exit("emit_result_csv: mapped payload edges disagree with counts")
     if pattern == "broadcast":
         allowed |= {"multicast_mode", "destinations_per_source"}
         if multicast_mode is not None and "multicast_mode" not in payload:
@@ -701,6 +723,8 @@ def main():
             "pattern": a.pattern,
             "traffic_mapping": a.traffic_mapping,
             "measurement_mode": "outstanding",
+            "test_layer": traffic_meta.get("test_layer", "L1"),
+            "schedule": traffic_meta.get("schedule", "independent_transfers"),
             "direction": a.traffic_direction,
             "data_producers": str(traffic_meta["data_producers"]),
             "consumers": str(traffic_meta["consumers"]),

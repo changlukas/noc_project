@@ -140,6 +140,13 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::size_t r_rob_depth() const noexcept { return r_rob_depth_; }
     std::size_t max_txns_per_id() const noexcept { return max_txns_per_id_; }
 
+    enum class RequestBlock { None, Ordering, OrderList, ReorderStorage, Downstream };
+    void clear_request_observation() noexcept {
+        aw_block_ = ar_block_ = RequestBlock::None;
+    }
+    RequestBlock aw_block() const noexcept { return aw_block_; }
+    RequestBlock ar_block() const noexcept { return ar_block_; }
+
     // In-flight transaction count, per direction. Test introspection.
     std::size_t write_txns() const noexcept { return write_txns_; }
     std::size_t read_txns() const noexcept { return read_txns_; }
@@ -371,11 +378,14 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::deque<CommittedREntry> committed_r_queue_;
     std::array<uint8_t, ORDERING_TAG_SPACE> committed_b_pending_{};
     std::array<uint8_t, ORDERING_TAG_SPACE> committed_r_pending_{};
+    RequestBlock aw_block_ = RequestBlock::None;
+    RequestBlock ar_block_ = RequestBlock::None;
 };
 
 // ===== inline impl =====
 
 inline bool Rob::push_aw(const axi::AwBeat& b) {
+    aw_block_ = RequestBlock::None;
     // Every per-id array below is NOC_ID_SPACE deep, which is 8 and no longer the
     // full uint8_t range, so an over-range id is a silent out-of-bounds rather than
     // a structural impossibility. Both admission points check it once at entry;
@@ -404,12 +414,16 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
     //     list, so while in flight it is the only entry.
     if (!write_order_by_id_[b.id].empty() &&
         (collective || write_order_by_id_[b.id].front().collective)) {
+        aw_block_ = RequestBlock::Ordering;
         return false;
     }
 
     // ax_gnt_o: the per-id order list is FlooNoC's status FIFO (floo_rob.sv:414).
     // Bypassed pushes allocate no RoB slot, so this list is their only limiter.
-    if (write_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
+    if (write_order_by_id_[b.id].size() >= max_txns_per_id_) {
+        aw_block_ = RequestBlock::OrderList;
+        return false;
+    }
     auto t = sam_.translate(b.addr);
     const uint8_t dst = t.dst_id;
     const bool empty = write_order_by_id_[b.id].empty();
@@ -441,13 +455,17 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
            "nmu::Rob::push_aw: collective AW must take the idle-ID bypass, never a RoB slot");
     std::size_t base = 0;
     if (needs_rob) {
-        if (write_free_space() < 1) return false;
+        if (write_free_space() < 1) {
+            aw_block_ = RequestBlock::ReorderStorage;
+            return false;
+        }
         base = b_rob_depth_ - write_free_space();
     }
     if (!next_pkt_.push_aw_with_meta(
             b, {t.dst_id, t.local_addr, static_cast<uint8_t>(needs_rob ? 1 : 0),
                 static_cast<uint8_t>(needs_rob ? base : 0), t.cls, collective_op, collective_mask,
                 t.port})) {
+        aw_block_ = RequestBlock::Downstream;
         return false;  // downstream backpressure: no state mutation
     }
     prev_dest_write_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
@@ -486,13 +504,17 @@ inline bool Rob::push_w(const axi::WBeat& b) {
 }
 
 inline bool Rob::push_ar(const axi::ArBeat& b) {
+    ar_block_ = RequestBlock::None;
     // See push_aw: the per-id arrays are NOC_ID_SPACE deep, not 256.
     if (b.id >= NOC_ID_SPACE) {
         assert(false && "nmu::Rob::push_ar: AXI id outside NOC_ID_SPACE");
         std::abort();  // belt-and-braces for NDEBUG
     }
     if (mode_r_ == RobMode::Enabled) {
-        if (read_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
+        if (read_order_by_id_[b.id].size() >= max_txns_per_id_) {
+            ar_block_ = RequestBlock::OrderList;
+            return false;
+        }
         const std::size_t n = static_cast<std::size_t>(b.len) + 1u;
         auto t = sam_.translate(b.addr);
         const uint8_t dst = t.dst_id;
@@ -532,7 +554,10 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
                        "(len+1 > ROB_R_DEPTH) -- permanent stimulus error, not backpressure");
                 std::abort();  // belt-and-braces for NDEBUG
             }
-            if (read_free_space() < n) return false;
+            if (read_free_space() < n) {
+                ar_block_ = RequestBlock::ReorderStorage;
+                return false;
+            }
             base = r_rob_depth_ - read_free_space();
         }
         // Hoisted into a named local so dst_port -- which sits behind the two
@@ -542,6 +567,7 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
                           static_cast<uint8_t>(needs_rob ? base : 0), t.cls};
         meta.dst_port = t.port;
         if (!next_pkt_.push_ar_with_meta(b, meta)) {
+            ar_block_ = RequestBlock::Downstream;
             return false;  // downstream backpressure: no state mutation
         }
         prev_dest_read_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
@@ -589,11 +615,14 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
     if (!idle && (read_outstanding_[b.id] >= max_txns_per_id_ ||
                   t.dst_id != read_disabled_dst_[b.id] ||
                   t.port != read_disabled_port_[b.id] || t.cls != read_disabled_cls_[b.id])) {
+        ar_block_ = read_outstanding_[b.id] >= max_txns_per_id_
+                        ? RequestBlock::OrderList : RequestBlock::Ordering;
         return false;
     }
     AwHeaderMeta meta{t.dst_id, t.local_addr, 0, 0, t.cls};
     meta.dst_port = t.port;
     if (!next_pkt_.push_ar_with_meta(b, meta)) {
+        ar_block_ = RequestBlock::Downstream;
         return false;
     }
     if (uses_narrow_payload_(t.cls)) {

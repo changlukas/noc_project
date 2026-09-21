@@ -349,6 +349,7 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
       rsp_extra_r_shift_(cfg_.ni_rsp_extra_depth) {}
 
 inline void Nmu::tick() {
+    rob_.clear_request_observation();
     wormhole_arbiter_.tick();
     vc_allocator_.tick();
     dat_wormhole_arbiter_.tick();

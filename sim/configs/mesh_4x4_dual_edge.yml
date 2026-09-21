@@ -1,0 +1,65 @@
+name: mesh_4x4_dual_edge
+description: "Approved dual-edge placement with existing synthetic memory apertures"
+network_type: axi
+routing:
+  route_algo: XY
+  use_id_table: true
+  collective:
+    en_narrow_multicast: true
+    en_wide_multicast: true
+endpoints:
+  - name: tile
+    array: [4, 4]
+    mgr_port_protocol: [axi]
+    sbr_port_protocol: [axi]
+    addr_range:
+      - base: 0x0
+        size: 0x2000000
+        stride: 0x100000000
+        space: memory
+        en_collective: true
+      - base: 0x2000000
+        size: 0x1000
+        stride: 0x100000000
+        space: config
+        en_collective: true
+  - name: memory_service
+    num: 4
+    mgr_port_protocol: [axi]
+    sbr_port_protocol: [axi]
+    addr_range:
+      # Same test aperture as mesh_4x4_periph4, not a physical memory capacity.
+      - base: 0x1000000000
+        size: 0x100000
+        stride: 0x100000
+        space: peripheral
+routers:
+  - name: router
+    array: [4, 4]
+    degree: 5
+connections:
+  - src: tile
+    dst: router
+    src_range: [[0, 3], [0, 3]]
+    dst_range: [[0, 3], [0, 3]]
+    dst_dir: 4
+  - src: memory_service
+    dst: router
+    src_idx: [0]
+    dst_idx: [1]
+    dst_dir: 2
+  - src: memory_service
+    dst: router
+    src_idx: [1]
+    dst_idx: [2]
+    dst_dir: 2
+  - src: memory_service
+    dst: router
+    src_idx: [2]
+    dst_idx: [13]
+    dst_dir: 0
+  - src: memory_service
+    dst: router
+    src_idx: [3]
+    dst_idx: [14]
+    dst_dir: 0

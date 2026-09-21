@@ -79,6 +79,23 @@ TEST(PerfCollector, EndMustFollowStart) {
     EXPECT_TRUE(pc.active());
 }
 
+TEST(PerfCollector, AllocationWaitSubsetsAreWindowedAndCleared) {
+    PerfCollector pc;
+    pc.sample_router_dat_allocation("outside", "SOUTH", 0, "WEST", true, true);
+    pc.begin(1);
+    pc.sample_router_dat_allocation("r", "SOUTH", 0, "WEST", true, true);
+    pc.sample_router_dat_allocation("r", "SOUTH", 0, "WEST", false, true);
+    pc.sample_router_dat_allocation("r", "SOUTH", 0, "WEST", true, false);
+    pc.end(4);
+    pc.sample_router_dat_allocation("outside", "SOUTH", 0, "WEST", true, true);
+    EXPECT_EQ(pc.to_json().find("outside"), std::string::npos);
+    EXPECT_NE(pc.to_json().find("\"waiting_cycles\":3,\"occupied_cycles\":2,"
+                               "\"input_full_cycles\":2,\"occupied_input_full_cycles\":1"),
+              std::string::npos);
+    pc.begin(5);
+    EXPECT_NE(pc.to_json().find("\"router_dat_allocations\":[]"), std::string::npos);
+}
+
 TEST(PerfCollector, RouterOccupancyTracksMax) {
     const std::string j = make_populated().to_json();
     EXPECT_NE(j.find("\"in_fifo_occ_max\":2"), std::string::npos);
@@ -88,7 +105,8 @@ TEST(PerfCollector, RouterOccupancyTracksMax) {
 TEST(PerfCollector, RouterDatDiagnosticsArePerPortAndVc) {
     const std::string j = make_populated().to_json();
     EXPECT_NE(j.find("\"router_dat_input_vcs\":[{\"router\":\"router_0\",\"port\":\"EAST\","
-                     "\"vc\":1,\"hwm_flits\":6,\"capacity_flits\":8}"),
+                     "\"vc\":1,\"hwm_flits\":6,\"capacity_flits\":8,"
+                     "\"occupancy_sum_flits\":10,\"full_cycles\":0,\"samples\":2}"),
               std::string::npos);
     EXPECT_NE(j.find("\"router_dat_output_vcs\":[{\"router\":\"router_0\",\"port\":\"NORTH\","
                      "\"vc\":1,\"credit_block_cycles\":1}"),
@@ -98,6 +116,47 @@ TEST(PerfCollector, RouterDatDiagnosticsArePerPortAndVc) {
 TEST(PerfCollector, LinkCountersEmitted) {
     const std::string j = make_populated().to_json();
     EXPECT_NE(j.find("\"name\":\"req_0to1\",\"flit_count\":4,\"stall_cyc\":1"), std::string::npos);
+}
+
+TEST(PerfCollector, SwitchWaitingExcludesIdleAndGrantedVcs) {
+    PerfCollector pc;
+    pc.begin(0);
+    pc.sample_router_dat_switch("r", "EAST", 0, 0);
+    pc.sample_router_dat_switch("r", "EAST", 2, 1);
+    pc.sample_router_dat_switch("r", "EAST", 1, 1);
+    pc.end(3);
+    pc.sample_router_dat_switch("r", "EAST", 2, 1);
+    EXPECT_NE(pc.to_json().find("\"eligible_vc_cycles\":3,\"grant_cycles\":2,"
+                               "\"arbitration_wait_vc_cycles\":1,\"samples\":3"),
+              std::string::npos);
+}
+
+TEST(PerfCollector, NmuRequestReasonsAreWindowed) {
+    PerfCollector pc;
+    pc.begin(0);
+    pc.sample_nmu_request("n", "AR", true, false, false, false);
+    pc.sample_nmu_request("n", "AR", false, false, false, false);
+    pc.end(2);
+    pc.sample_nmu_request("n", "AR", true, false, false, false);
+    EXPECT_NE(pc.to_json().find("\"ordering_wait_cycles\":1,\"order_list_full_cycles\":0,"
+                               "\"reorder_storage_full_cycles\":0,\"downstream_wait_cycles\":0,"
+                               "\"samples\":2"), std::string::npos);
+}
+
+TEST(PerfCollector, OccupancySamplesIncludeIdleAndFullCycles) {
+    PerfCollector pc;
+    pc.begin(0);
+    pc.sample_router_dat_input_vc("r", "LOCAL", 0, 0, 8);
+    pc.sample_router_dat_input_vc("r", "LOCAL", 0, 8, 8);
+    pc.sample_router_dat_input_vc("r", "LOCAL", 0, 4, 8);
+    EXPECT_THROW(pc.sample_router_dat_input_vc("r", "LOCAL", 0, 9, 8),
+                 std::invalid_argument);
+    EXPECT_THROW(pc.sample_router_dat_input_vc("r", "LOCAL", 0, 4, 16),
+                 std::invalid_argument);
+    pc.end(3);
+    pc.sample_router_dat_input_vc("r", "LOCAL", 0, 8, 8);
+    EXPECT_NE(pc.to_json().find("\"occupancy_sum_flits\":12,\"full_cycles\":1,\"samples\":3"),
+              std::string::npos);
 }
 
 }  // namespace

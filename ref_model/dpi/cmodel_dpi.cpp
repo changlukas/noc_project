@@ -824,7 +824,15 @@ void sample_one_router(const std::string& node, RouterT& r, const char* plane, u
 
 void sample_one_dat_router(const std::string& node, ::ni::cmodel::router::Router& r) {
     using ::ni::cmodel::router::ROUTER_PORT_COUNT;
+    for (const auto& wait : r.allocation_waits()) {
+        g_perf.sample_router_dat_allocation(node, kPerfPortName[wait.input], wait.vc,
+                                            kPerfPortName[wait.output],
+                                            wait.occupied, wait.input_full);
+    }
     for (std::size_t port = 0; port < ROUTER_PORT_COUNT; ++port) {
+        const auto& activity = r.switch_activity(port);
+        g_perf.sample_router_dat_switch(node, kPerfPortName[port],
+                                       activity.eligible_vcs, activity.grants);
         for (uint8_t vc = 0; vc < r.num_vc(); ++vc) {
             g_perf.sample_router_dat_input_vc(node, kPerfPortName[port], vc,
                                               r.input_fifo_size(port, vc), r.vc_depth());
@@ -844,6 +852,17 @@ extern "C" void cmodel_perf_sample_tick() {
     using namespace ::ni::cmodel::wrap;
     if (!g_perf.active()) return;
     for (HandleBlock* h : g_handle_registry) {
+        if (h->type == WrapType::Nmu) {
+            using Block = ::ni::cmodel::nmu::Rob::RequestBlock;
+            const auto& rob = static_cast<NmuWrap*>(h->adapter.get())->rob_observation();
+            auto sample = [&](const char* channel, Block reason) {
+                g_perf.sample_nmu_request(h->name, channel, reason == Block::Ordering,
+                                         reason == Block::OrderList, reason == Block::ReorderStorage,
+                                         reason == Block::Downstream);
+            };
+            sample("AW", rob.aw_block());
+            sample("AR", rob.ar_block());
+        }
         if (h->type != WrapType::Router) continue;
         auto* r = static_cast<RouterWrap*>(h->adapter.get());
         sample_one_router(h->name, r->req_router(), "req", 1);

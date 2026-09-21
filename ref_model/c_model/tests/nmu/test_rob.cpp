@@ -166,6 +166,9 @@ TEST(NmuRob, Disabled_DifferentOrderingDomainStallsUntilRlast) {
     RobTestbench r;
     ASSERT_TRUE(r.rob.push_ar(make_ar(0x05, 0x100)));
     EXPECT_FALSE(r.rob.push_ar(make_ar(0x05, 0x100000000ull + 0x200)));
+    EXPECT_EQ(r.rob.ar_block(), Rob::RequestBlock::Ordering);
+    r.rob.clear_request_observation();
+    EXPECT_EQ(r.rob.ar_block(), Rob::RequestBlock::None);
     // Inject R(last=true)
     ASSERT_TRUE(r.noc.rsp_out().push_flit(make_r_flit(0x05, /*rlast=*/true)));
     r.depkt.tick();
@@ -510,6 +513,7 @@ TEST_P(RobDepthParam, Enabled_AllocationNeverExceedsDepth) {
     }
     EXPECT_EQ(rob.write_free_space(), 0u);
     EXPECT_FALSE(rob.push_aw(make_aw(0x04, 0x200)));
+    EXPECT_EQ(rob.aw_block(), Rob::RequestBlock::ReorderStorage);
 }
 
 INSTANTIATE_TEST_SUITE_P(Depths, RobDepthParam,
@@ -591,6 +595,7 @@ TEST(NmuRob, Enabled_PushAr_DownstreamBackpressure_AtomicRollback) {
     axi::ArBeat ar3 = make_ar(0x07, 0x300);
     ar3.len = 1;  // 2 beats
     EXPECT_FALSE(rob.push_ar(ar3));
+    EXPECT_EQ(rob.ar_block(), Rob::RequestBlock::Downstream);
     // Drain, then ar3 retry must succeed (proving state was atomic — slots 8-9 still available)
     noc.req_in().pop_flit();
     EXPECT_TRUE(rob.push_ar(ar3));
@@ -633,8 +638,10 @@ TEST(NmuRob, Enabled_MaxTxnsPerIdGate_RefusesWithFreeSlotsAvailable) {
     ASSERT_TRUE(rob.push_aw(make_aw(0x01, 0x100000000ull + 0x140)));  // dst 1: allocates, sticky
     ASSERT_TRUE(rob.push_aw(make_aw(0x01, 0x180)));                   // dst 0: allocates (sticky)
     EXPECT_FALSE(rob.push_aw(make_aw(0x01, 0x400))) << "the per-id cap is what refuses here";
+    EXPECT_EQ(rob.aw_block(), Rob::RequestBlock::OrderList);
     EXPECT_EQ(rob.write_free_space(), free_before - 2) << "one bypass plus two allocated slots";
     EXPECT_TRUE(rob.push_aw(make_aw(0x02, 0x500))) << "the gate is per-id, not global";
+    EXPECT_EQ(rob.aw_block(), Rob::RequestBlock::None);
 }
 
 TEST(NmuRob, Enabled_MaxTxnsPerIdGate_AppliesToReadsIndependently) {

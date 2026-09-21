@@ -81,10 +81,18 @@ def test_mode3_control_records_valid_to_ready_wait_for_read_and_write():
     ar = endpoint.split("task automatic run_ar_outstanding();", 1)[1].split(
         "endtask", 1)[0]
 
-    assert aw.index("admitted_cycle = cycle_cnt + 1;") < aw.index(
-        "file_master.drv.send_aw") < aw.index("srcq_w_sum += cycle_cnt - admitted_cycle;")
-    assert ar.index("admitted_cycle = cycle_cnt + 1;") < ar.index(
-        "file_master.drv.send_ar") < ar.index("srcq_r_sum += cycle_cnt - admitted_cycle;")
+    monitor = endpoint.split("// Windowed sources have no open-loop slots.", 1)[1].split(
+        "always_ff", 1)[0]
+    assert "always @(posedge clk_i)" in monitor
+    assert "get_injection_mode() == 3 || get_injection_mode() == 4" in monitor
+    assert "if (master_dv.aw_valid) begin" in monitor
+    assert "if (master_dv.aw_ready) srcq_w_n++;" in monitor
+    assert "else srcq_w_sum++;" in monitor
+    assert "(get_injection_mode() == 4 || compare_started) && master_dv.ar_valid" in monitor
+    assert "if (master_dv.ar_ready) srcq_r_n++;" in monitor
+    assert "else srcq_r_sum++;" in monitor
+    assert "srcq_w_sum += cycle_cnt - admitted_cycle;" not in aw
+    assert "srcq_r_sum += cycle_cnt - admitted_cycle;" not in ar
     assert aw.index("stimulus_start_cycle_o = admitted_cycle;") < aw.index(
         "file_master.drv.send_aw")
     assert ar.index("stimulus_start_cycle_o = admitted_cycle;") < ar.index(

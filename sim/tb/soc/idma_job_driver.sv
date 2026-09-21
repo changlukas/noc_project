@@ -17,7 +17,8 @@
 `define IDMA_JOB_DRIVER_SV
 
 module idma_job_driver #(
-    parameter int unsigned NODE_ID = 0
+    parameter int unsigned NODE_ID = 0,
+    parameter int unsigned NUM_ENDPOINTS = 1
 ) (
     input  logic                       clk_i,
     input  logic                       rst_ni,
@@ -27,8 +28,10 @@ module idma_job_driver #(
     // The endpoint holds rsp_ready high, so every rsp_valid_i cycle retires one
     // job.
     input  logic                       rsp_valid_i,
+    input  int unsigned                peer_jobs_retired_i [NUM_ENDPOINTS],
     output int unsigned                jobs_issued_o,
-    output int unsigned                jobs_retired_o
+    output int unsigned                jobs_retired_o,
+    output logic                       jobs_done_o
 );
 
     // beo.*_max_llen is a 3-bit LOG length, so the file states 0..7; 8 is
@@ -47,6 +50,7 @@ module idma_job_driver #(
 
     int unsigned issued  = 0;   // the file-reading process below owns this
     int unsigned retired = 0;
+    bit file_done = 0;
 
     always_ff @(posedge clk_i) begin
         if (!rst_ni) retired <= 0;
@@ -55,6 +59,7 @@ module idma_job_driver #(
         // procedurally-assigned output-port variable to the instantiating scope.
         jobs_issued_o  <= issued;
         jobs_retired_o <= retired;
+        jobs_done_o <= file_done;
     end
 
     // One decimal field. $fscanf leaves its target UNMODIFIED on a failed match,
@@ -125,11 +130,23 @@ module idma_job_driver #(
 
     initial begin
         int fd;
+        int dependency_fd;
+        int dependent_jobs;
+        int user_fd = 0;
+        int dma_job_users = 0;
+        longint unsigned job_user;
+        string user_path;
         int code;
+        int unsigned dependency_node, dependency_count;
+        int dependency_length;
+        string dependency_path, extra_token;
         idma_types_pkg::idma_req_t r;
         int unsigned length, src_protocol, dst_protocol, max_src_len, max_dst_len;
         int unsigned aw_decoupled, rw_decoupled, num_errors, axi_id;
         longint unsigned src_addr, dst_addr;
+
+        dependency_fd = 0;
+        dependent_jobs = 0;
 
         // Non-blocking throughout: one assignment style per variable.
         req_o       <= '0;
@@ -139,6 +156,24 @@ module idma_job_driver #(
         jobs_path = $sformatf("%s/node%0d/jobs.txt", stim_dir, NODE_ID);
         fd = $fopen(jobs_path, "r");
         if (fd == 0) $fatal(1, "[dma_jobs] node%0d: cannot open %s", NODE_ID, jobs_path);
+        void'($value$plusargs("dependent_jobs=%d", dependent_jobs));
+        if (dependent_jobs != 0 && dependent_jobs != 1)
+            $fatal(1, "[dma_jobs] dependent_jobs must be 0 or 1");
+        if (dependent_jobs) begin
+            dependency_path = $sformatf("%s/node%0d/dependencies.txt", stim_dir, NODE_ID);
+            dependency_fd = $fopen(dependency_path, "r");
+            if (dependency_fd == 0)
+                $fatal(1, "[dma_jobs] node%0d: cannot open %s", NODE_ID, dependency_path);
+        end
+        void'($value$plusargs("dma_job_users=%d", dma_job_users));
+        if (dma_job_users != 0 && dma_job_users != 1)
+            $fatal(1, "[dma_jobs] dma_job_users must be 0 or 1");
+        if (dma_job_users) begin
+            user_path = $sformatf("%s/node%0d/users.txt", stim_dir, NODE_ID);
+            user_fd = $fopen(user_path, "r");
+            if (user_fd == 0)
+                $fatal(1, "[dma_jobs] node%0d: cannot open %s", NODE_ID, user_path);
+        end
 
         @(posedge rst_ni);
 
@@ -168,7 +203,14 @@ module idma_job_driver #(
             r.length   = check_len(length, "length");
             r.src_addr = idma_types_pkg::addr_t'(src_addr);
             r.dst_addr = idma_types_pkg::addr_t'(dst_addr);
-            r.user     = '0;   // AWUSER carries the collective encoding; a DMA emits none
+            r.user     = '0;
+            if (dma_job_users) begin
+                if ($fscanf(user_fd, "%d", job_user) != 1)
+                    $fatal(1, "[dma_jobs] node%0d: malformed USER record", NODE_ID);
+                if ((job_user >> idma_types_pkg::USER_WIDTH) != 0)
+                    $fatal(1, "[dma_jobs] node%0d: USER record exceeds interface width", NODE_ID);
+                r.user = idma_types_pkg::user_t'(job_user);
+            end
             r.opt.src_protocol = idma_pkg::protocol_e'(src_protocol);
             r.opt.dst_protocol = idma_pkg::protocol_e'(dst_protocol);
             r.opt.axi_id       = idma_types_pkg::id_t'(axi_id);
@@ -187,16 +229,45 @@ module idma_job_driver #(
             // One request per job: every job is the last of its own transfer.
             r.opt.last = 1'b1;
 
-            @(posedge clk_i);
+            if (dependent_jobs) begin
+                if ($fscanf(dependency_fd, "%d", dependency_length) != 1 ||
+                    dependency_length < 0 || dependency_length > NUM_ENDPOINTS)
+                    $fatal(1, "[dma_jobs] node%0d job%0d: malformed dependency", NODE_ID, issued);
+                repeat (dependency_length) begin
+                    if ($fscanf(dependency_fd, "%d %d", dependency_node, dependency_count) != 2)
+                        $fatal(1, "[dma_jobs] node%0d job%0d: malformed dependency", NODE_ID, issued);
+                    if (dependency_node >= NUM_ENDPOINTS)
+                        $fatal(1, "[dma_jobs] node%0d: dependency node%0d is out of range",
+                               NODE_ID, dependency_node);
+                    if (dependency_node == NODE_ID && dependency_count > issued)
+                        $fatal(1, "[dma_jobs] node%0d: dependency waits for an unissued local job", NODE_ID);
+                    while (peer_jobs_retired_i[dependency_node] < dependency_count)
+                        @(posedge clk_i);
+                end
+            end
+
+            @(negedge clk_i);
             req_o       <= r;
             req_valid_o <= 1'b1;
             @(posedge clk_i);
             while (!req_ready_i) @(posedge clk_i);
-            req_valid_o <= 1'b0;
             issued = issued + 1;
+            @(negedge clk_i);
+            req_valid_o <= 1'b0;
         end
         $fclose(fd);
+        if (dma_job_users) begin
+            if ($fscanf(user_fd, "%s", extra_token) == 1)
+                $fatal(1, "[dma_jobs] node%0d: excess USER records", NODE_ID);
+            $fclose(user_fd);
+        end
+        if (dependent_jobs) begin
+            if ($fscanf(dependency_fd, "%s", extra_token) == 1)
+                $fatal(1, "[dma_jobs] node%0d: excess dependency records", NODE_ID);
+            $fclose(dependency_fd);
+        end
         $display("[dma_jobs] node%0d: %0d jobs issued from %s", NODE_ID, issued, jobs_path);
+        file_done = 1;
     end
 
 endmodule

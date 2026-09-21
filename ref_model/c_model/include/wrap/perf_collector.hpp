@@ -25,6 +25,9 @@ class PerfCollector {
         routers_.clear();
         router_dat_input_vcs_.clear();
         router_dat_output_vcs_.clear();
+        router_dat_switches_.clear();
+        router_dat_allocations_.clear();
+        nmu_requests_.clear();
         links_.clear();
         active_ = true;
     }
@@ -53,15 +56,55 @@ class PerfCollector {
     void sample_router_dat_input_vc(const std::string& router, const std::string& port,
                                     uint64_t vc, uint64_t occupancy, uint64_t capacity) {
         if (!active_) return;
+        if (capacity == 0 || occupancy > capacity)
+            throw std::invalid_argument("invalid DAT input VC occupancy/capacity");
         DatInputVc& q = router_dat_input_vcs_[{router, port, vc}];
+        if (q.samples && q.capacity_flits != capacity)
+            throw std::invalid_argument("DAT input VC capacity changed inside window");
         if (occupancy > q.hwm_flits) q.hwm_flits = occupancy;
         q.capacity_flits = capacity;
+        q.occupancy_sum_flits += occupancy;
+        q.full_cycles += occupancy == capacity;
+        ++q.samples;
     }
 
     void sample_router_dat_output_vc(const std::string& router, const std::string& port,
                                      uint64_t vc, bool credit_blocked) {
         if (!active_) return;
         router_dat_output_vcs_[{router, port, vc}].credit_block_cycles += credit_blocked;
+    }
+
+    void sample_router_dat_switch(const std::string& router, const std::string& port,
+                                  uint64_t eligible_vcs, uint64_t grants) {
+        if (!active_) return;
+        if (grants > 1 || grants > eligible_vcs)
+            throw std::invalid_argument("invalid DAT switch activity");
+        auto& activity = router_dat_switches_[{router, port}];
+        activity.eligible_vc_cycles += eligible_vcs;
+        activity.grant_cycles += grants;
+        ++activity.samples;
+    }
+
+    void sample_router_dat_allocation(const std::string& router, const std::string& input,
+                                      uint64_t vc, const std::string& output,
+                                      bool occupied, bool input_full) {
+        if (!active_) return;
+        auto& wait = router_dat_allocations_[{router, input, vc, output}];
+        ++wait.cycles;
+        wait.occupied += occupied;
+        wait.full += input_full;
+        wait.occupied_full += occupied && input_full;
+    }
+
+    void sample_nmu_request(const std::string& node, const std::string& channel,
+                            bool ordering, bool order_list, bool storage, bool downstream) {
+        if (!active_) return;
+        auto& request = nmu_requests_[{node, channel}];
+        request.ordering += ordering;
+        request.order_list += order_list;
+        request.storage += storage;
+        request.downstream += downstream;
+        ++request.samples;
     }
 
     std::string to_json() const {
@@ -94,9 +137,23 @@ class PerfCollector {
     struct DatInputVc {
         uint64_t hwm_flits = 0;
         uint64_t capacity_flits = 0;
+        uint64_t occupancy_sum_flits = 0;
+        uint64_t full_cycles = 0;
+        uint64_t samples = 0;
     };
     struct DatOutputVc {
         uint64_t credit_block_cycles = 0;
+    };
+    struct DatSwitch {
+        uint64_t eligible_vc_cycles = 0;
+        uint64_t grant_cycles = 0;
+        uint64_t samples = 0;
+    };
+    struct NmuRequest {
+        uint64_t ordering = 0, order_list = 0, storage = 0, downstream = 0, samples = 0;
+    };
+    struct AllocationWait {
+        uint64_t cycles = 0, occupied = 0, full = 0, occupied_full = 0;
     };
     using DatVcKey = std::tuple<std::string, std::string, uint64_t>;
 
@@ -117,7 +174,23 @@ class PerfCollector {
             const auto& [router, port, vc] = key;
             os << "{\"router\":\"" << router << "\",\"port\":\"" << port << "\",\"vc\":" << vc
                << ",\"hwm_flits\":" << q.hwm_flits
-               << ",\"capacity_flits\":" << q.capacity_flits << '}';
+               << ",\"capacity_flits\":" << q.capacity_flits
+               << ",\"occupancy_sum_flits\":" << q.occupancy_sum_flits
+               << ",\"full_cycles\":" << q.full_cycles
+               << ",\"samples\":" << q.samples << '}';
+        }
+        os << "],\"router_dat_allocations\":[";
+        first = true;
+        for (const auto& [key, wait] : router_dat_allocations_) {
+            if (!first) os << ',';
+            first = false;
+            const auto& [router, input, vc, output] = key;
+            os << "{\"router\":\"" << router << "\",\"input\":\"" << input
+               << "\",\"vc\":" << vc << ",\"output\":\"" << output
+               << "\",\"waiting_cycles\":" << wait.cycles
+               << ",\"occupied_cycles\":" << wait.occupied
+               << ",\"input_full_cycles\":" << wait.full
+               << ",\"occupied_input_full_cycles\":" << wait.occupied_full << '}';
         }
         os << "],\"router_dat_output_vcs\":[";
         first = true;
@@ -127,6 +200,30 @@ class PerfCollector {
             const auto& [router, port, vc] = key;
             os << "{\"router\":\"" << router << "\",\"port\":\"" << port << "\",\"vc\":" << vc
                << ",\"credit_block_cycles\":" << q.credit_block_cycles << '}';
+        }
+        os << "],\"router_dat_switches\":[";
+        first = true;
+        for (const auto& [key, activity] : router_dat_switches_) {
+            if (!first) os << ',';
+            first = false;
+            os << "{\"router\":\"" << key.first << "\",\"port\":\"" << key.second
+               << "\",\"eligible_vc_cycles\":" << activity.eligible_vc_cycles
+               << ",\"grant_cycles\":" << activity.grant_cycles
+               << ",\"arbitration_wait_vc_cycles\":"
+               << activity.eligible_vc_cycles - activity.grant_cycles
+               << ",\"samples\":" << activity.samples << '}';
+        }
+        os << "],\"nmu_requests\":[";
+        first = true;
+        for (const auto& [key, request] : nmu_requests_) {
+            if (!first) os << ',';
+            first = false;
+            os << "{\"node\":\"" << key.first << "\",\"channel\":\"" << key.second
+               << "\",\"ordering_wait_cycles\":" << request.ordering
+               << ",\"order_list_full_cycles\":" << request.order_list
+               << ",\"reorder_storage_full_cycles\":" << request.storage
+               << ",\"downstream_wait_cycles\":" << request.downstream
+               << ",\"samples\":" << request.samples << '}';
         }
         os << "],\"links\":[";
         first = true;
@@ -145,6 +242,10 @@ class PerfCollector {
     std::map<std::string, Router> routers_;
     std::map<DatVcKey, DatInputVc> router_dat_input_vcs_;
     std::map<DatVcKey, DatOutputVc> router_dat_output_vcs_;
+    std::map<std::pair<std::string, std::string>, DatSwitch> router_dat_switches_;
+    std::map<std::tuple<std::string, std::string, uint64_t, std::string>, AllocationWait>
+        router_dat_allocations_;
+    std::map<std::pair<std::string, std::string>, NmuRequest> nmu_requests_;
     std::map<std::string, Link> links_;
 };
 

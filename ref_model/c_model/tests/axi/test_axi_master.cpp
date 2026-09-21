@@ -772,7 +772,7 @@ namespace {
 // Write an arbitrary hex byte string to a tmp file. Variable-size companion
 // to write_32byte_tmp_data (which is hardcoded to 32 bytes).
 std::string write_hex_tmp_data(const std::string& tag, const std::string& hex_bytes) {
-    auto path = std::string(::testing::TempDir()) + "/" + tag + ".dat";
+    auto path = ni::cmodel::testing::unique_temp_path(tag) + ".dat";
     std::ofstream f(path);
     f << hex_bytes << '\n';
     return path;

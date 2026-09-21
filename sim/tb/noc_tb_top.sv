@@ -437,6 +437,104 @@ module noc_tb_top #(
     string        perf_scn      = "";
     int unsigned  perf_cycle    = 0;
     logic         perf_measure_en = 1'b0;
+
+    // Optional passive observations use the existing offline packet reader.
+    `include "axi_perf_trace.svh"
+    integer packet_trace_fd = 0;
+    integer link_trace_fd = 0;
+    string packet_trace_path;
+    localparam int unsigned TRACE_FLIT_W =
+        (DAT_FLIT_WIDTH > REQ_FLIT_WIDTH ? DAT_FLIT_WIDTH : REQ_FLIT_WIDTH) > RSP_FLIT_WIDTH ?
+        (DAT_FLIT_WIDTH > REQ_FLIT_WIDTH ? DAT_FLIT_WIDTH : REQ_FLIT_WIDTH) : RSP_FLIT_WIDTH;
+
+    task automatic trace_packet(input string event_name, input int endpoint,
+                                input string plane, input logic [TRACE_FLIT_W-1:0] flit);
+        automatic logic [TRACE_FLIT_W-1:0] normalized = flit;
+        normalized[ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB] = '0;
+        $fdisplay(packet_trace_fd, "%0d,%s,%0d,%s,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0h",
+            live_cyc, event_name, endpoint, plane,
+            flit[ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB],
+            flit[ni_flit_pkg::FLIT_TAIL_MSB:ni_flit_pkg::FLIT_TAIL_LSB],
+            flit[ni_flit_pkg::SRC_ID_MSB:ni_flit_pkg::SRC_ID_LSB],
+            flit[ni_flit_pkg::DST_ID_MSB:ni_flit_pkg::DST_ID_LSB],
+            flit[ni_flit_pkg::DST_PORT_ID_MSB:ni_flit_pkg::DST_PORT_ID_LSB],
+            flit[ni_flit_pkg::COLLECTIVE_OP_MSB:ni_flit_pkg::COLLECTIVE_OP_LSB],
+            flit[ni_flit_pkg::COLLECTIVE_MASK_MSB:ni_flit_pkg::COLLECTIVE_MASK_LSB],
+            perf_measure_en, normalized);
+    endtask
+
+    initial begin
+        if ($test$plusargs("packet_trace")) begin
+            if (!$value$plusargs("perf_out=%s", packet_trace_path)) packet_trace_path = "perf.json";
+            packet_trace_fd = $fopen({packet_trace_path, ".packets.csv"}, "w");
+            if (!packet_trace_fd) $fatal(1, "Cannot open packet trace");
+            $fdisplay(packet_trace_fd, "cycle,event,node,plane,vc,tail,src,dst,dst_port,collective,mask,in_window,flit");
+            link_trace_fd = $fopen({packet_trace_path, ".links.csv"}, "w");
+            if (!link_trace_fd) $fatal(1, "Cannot open link trace");
+            $fdisplay(link_trace_fd, "cycle,event,link,in_window");
+        end
+    end
+
+    always @(posedge clk_i) begin
+        if (packet_trace_fd) begin
+            if (!rst_ni) begin
+                $fdisplay(packet_trace_fd, "%0d,RESET,0,REQ,0,0,0,0,0,0,0,0,0", live_cyc);
+            end else begin
+                $fdisplay(link_trace_fd, "%0d,TICK,,%0d", live_cyc, perf_measure_en);
+                for (int node = 0; node < NUM_NODES; node++) begin
+                    for (int port_id = 0; port_id < u_fabric.LINK_PORTS; port_id++) begin
+                        automatic int target = -1;
+                        case (port_id)
+                            u_fabric.RP_EAST: if (node % X_DIM < X_DIM-1) target = node+1;
+                            u_fabric.RP_WEST: if (node % X_DIM > 0) target = node-1;
+                            u_fabric.RP_NORTH: if (node / X_DIM < Y_DIM-1) target = node+X_DIM;
+                            u_fabric.RP_SOUTH: if (node / X_DIM > 0) target = node-X_DIM;
+                            default: target = -1;
+                        endcase
+                        if (target >= 0) begin
+                            if (u_fabric.tx_req_valid[node][port_id] && u_fabric.tx_req_ready[node][port_id])
+                                $fdisplay(link_trace_fd, "%0d,LINK,req_%0dto%0d,%0d", live_cyc, node, target, perf_measure_en);
+                            if (u_fabric.tx_rsp_valid[node][port_id] && u_fabric.tx_rsp_ready[node][port_id])
+                                $fdisplay(link_trace_fd, "%0d,LINK,rsp_%0dto%0d,%0d", live_cyc, node, target, perf_measure_en);
+                            if (u_fabric.tx_dat_valid[node][port_id])
+                                $fdisplay(link_trace_fd, "%0d,LINK,dat_%0dto%0d,%0d", live_cyc, node, target, perf_measure_en);
+                        end
+                    end
+                end
+                for (int ep = 0; ep < NUM_ENDPOINTS; ep++) begin
+                    automatic int host = ep < NUM_NODES ? ep : int'(PERIPH_NODE[ep-NUM_NODES]);
+                    automatic int port_id = u_fabric.RP_LOCAL;
+                    if (ep >= NUM_NODES) begin
+                        if (PERIPH_PORT[ep-NUM_NODES] == 1)
+                            port_id = host % X_DIM == 0 ? u_fabric.RP_WEST : u_fabric.RP_EAST;
+                        else
+                            port_id = host / X_DIM == 0 ? u_fabric.RP_SOUTH : u_fabric.RP_NORTH;
+                    end
+                    if (u_fabric.rx_req_valid[host][port_id] && u_fabric.rx_req_ready[host][port_id])
+                        trace_packet("IN", ep, "REQ", TRACE_FLIT_W'(u_fabric.rx_req_flit[host][port_id]));
+                    if (u_fabric.tx_req_valid[host][port_id] && u_fabric.tx_req_ready[host][port_id])
+                        trace_packet("OUT", ep, "REQ", TRACE_FLIT_W'(u_fabric.tx_req_flit[host][port_id]));
+                    if (u_fabric.rx_rsp_valid[host][port_id] && u_fabric.rx_rsp_ready[host][port_id])
+                        trace_packet("IN", ep, "RSP", TRACE_FLIT_W'(u_fabric.rx_rsp_flit[host][port_id]));
+                    if (u_fabric.tx_rsp_valid[host][port_id] && u_fabric.tx_rsp_ready[host][port_id])
+                        trace_packet("OUT", ep, "RSP", TRACE_FLIT_W'(u_fabric.tx_rsp_flit[host][port_id]));
+                    if (u_fabric.rx_dat_valid[host][port_id])
+                        trace_packet("IN", ep, "DAT", TRACE_FLIT_W'(u_fabric.rx_dat_flit[host][port_id]));
+                    if (u_fabric.tx_dat_valid[host][port_id])
+                        trace_packet("OUT", ep, "DAT", TRACE_FLIT_W'(u_fabric.tx_dat_flit[host][port_id]));
+                end
+            end
+        end
+    end
+
+    final begin
+        if (packet_trace_fd) begin
+            $fdisplay(packet_trace_fd, "%0d,END,0,REQ,0,0,0,0,0,0,0,0,0", live_cyc);
+            $fclose(packet_trace_fd);
+            $fdisplay(link_trace_fd, "%0d,END,,0", live_cyc);
+            $fclose(link_trace_fd);
+        end
+    end
     logic         mode4_ended = 1'b0;
     logic         mode3_started = 1'b0;
     logic         mode3_ended = 1'b0;
@@ -447,6 +545,8 @@ module noc_tb_top #(
         void'($value$plusargs("perf_scenario=%s", perf_scn));
     end
     always @(posedge clk_i) begin
+        // Sample after model ticks and NBA outputs at this clock edge.
+        #1ps;
         cmodel_perf_sample_tick();
         perf_cycle = perf_cycle + 1;
     end

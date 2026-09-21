@@ -612,7 +612,14 @@ def _dpi_error_poll():
 def emit_tb_top(topo: dict, dma: bool = False,
                 jobs_per_node: int = _DMA_JOBS_PER_NODE,
                 job_bytes: int = _DMA_JOB_BYTES,
-                rw: str = _DMA_RW) -> str:
+                rw: str = _DMA_RW, dependent: bool = False,
+                dma_backpressure: bool = False, dma_operation: str = "all_gather",
+                resident_shards: tuple[int, ...] = ()) -> str:
+    if resident_shards and not (dma and dependent):
+        raise ValueError("resident shards require dependent DMA")
+    if dma and dependent:
+        import dependent_dma_plan
+        plan = dependent_dma_plan.build_plan(topo, job_bytes, rw, dma_operation, resident_shards)
     rob_enabled = bool(read_rob_enabled())
     name = topo["name"]
     nodes, x_dim, y_dim = _nodes(topo)
@@ -634,13 +641,16 @@ def emit_tb_top(topo: dict, dma: bool = False,
     # Per node, not shared: each endpoint decodes on its OWN windows, so anything
     # its initiator addresses elsewhere misses both rules and falls through to the
     # default master port, which is the NMU.
-    stall_in, stall_out, delay_in, delay_out = _MEM_LATENCY_PROFILES[_MEM_LATENCY]
+    memory_profile = "random" if dma and dma_backpressure else _MEM_LATENCY
+    stall_in, stall_out, delay_in, delay_out = _MEM_LATENCY_PROFILES[memory_profile]
     # Per handshake, whichever of the two mechanisms is armed on that direction.
     mem_cyc_per_beat = max(
         _STALL_RANDOM_MAX_CYCLES if stall_in else delay_in,
         _STALL_RANDOM_MAX_CYCLES if stall_out else delay_out,
     )
     mst_backpressure = _MST_BACKPRESSURE_DMA if dma else _MST_BACKPRESSURE
+    if dma and dma_backpressure:
+        mst_backpressure = "random"
     mst_stall_out, mst_delay_out = _MST_BACKPRESSURE_PROFILES[mst_backpressure]
     # A third per-beat stall source on the response path, so it lands in the
     # watchdog budget beside the memory's. Zero under "ideal".
@@ -742,7 +752,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w(f"    localparam logic [ADDR_WIDTH-1:0] NOC_EGRESS_BASE = "
       f"ADDR_WIDTH'(64'h{noc_egress_base:X});")
     w(f"    localparam longint unsigned REGION_BYTES = 64'h{_DEFAULT_REGION_BYTES:X};")
-    w(f'    // Tile-memory latency profile "{_MEM_LATENCY}" (gen_tb_top.py')
+    w(f'    // Tile-memory latency profile "{memory_profile}" (gen_tb_top.py')
     w("    // _MEM_LATENCY_PROFILES). Every endpoint's two memories sit behind an")
     w("    // axi_delayer carrying these settings; input covers AW/W/AR, output B/R.")
     w(f"    localparam bit          MEM_STALL_RANDOM_INPUT  = 1'b{stall_in};")
@@ -929,7 +939,8 @@ def emit_tb_top(topo: dict, dma: bool = False,
     # cmodel_init (no-arg) + per-node router/nmu/nsu create.
     w("    initial begin")
     w("        cmodel_init();")
-    w("        cmodel_perf_begin(0);")
+    if not (dma and dependent):
+        w("        cmodel_perf_begin(0);")
     w('        void\'($value$plusargs("sam_config=%s", sam_config_path));')
     w('        void\'($value$plusargs("max_unique_ids=%d", max_unique_ids));')
     w('        void\'($value$plusargs("max_outstanding=%d", max_outstanding));')
@@ -969,7 +980,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w(f"    ni_signals_pkg::axi_rsp_t  master_axi_rsp [{n_ep}];  // NMU -> tb master")
     w(f"    ni_signals_pkg::axi_req_t  slave_axi_req  [{n_ep}];  // NSU -> tb slave")
     w(f"    ni_signals_pkg::axi_rsp_t  slave_axi_rsp  [{n_ep}];  // tb slave -> NSU")
-    w("    logic perf_measure_en = 1'b1;")
+    w(f"    logic perf_measure_en = 1'b{0 if dma and dependent else 1};")
     w("")
 
     # Fabric instance: ctx + AXI arrays passed whole.
@@ -1051,9 +1062,12 @@ def emit_tb_top(topo: dict, dma: bool = False,
         w("    // through g_endpoint cannot be.")
         w(f"    int unsigned jobs_issued  [{n_ep}];")
         w(f"    int unsigned jobs_retired [{n_ep}];")
+        w(f"    logic jobs_done [{n_ep}];")
     w(f"    for (genvar i = 0; i < {n_ep}; i++) begin : g_endpoint")
     w(f"        {'dma_node_endpoint' if dma else 'user_node_endpoint'} #(")
     w("            .NODE_ID(i),")
+    if dma:
+        w(f"            .NUM_ENDPOINTS({n_ep}),")
     w("            .AXI_ID_WIDTH(AXI_ID_WIDTH), .NOC_ID_WIDTH(NOC_ID_WIDTH),")
     w("            .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
     w("            .TILE_TARGETS(TILE_TARGETS), .TILE_BASE_ADDR(TILE_BASE_ADDR[i]),")
@@ -1070,6 +1084,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w("            .master_axi_rsp_i(master_axi_rsp[i]),")
     w("            .slave_axi_req_i(slave_axi_req[i]),   .slave_axi_rsp_o(slave_axi_rsp[i]),")
     if dma:
+        w("            .peer_jobs_retired_i(jobs_retired),")
         w("            .end_of_sim_o(end_of_sim[i]), .txn_cnt_o(txn_cnt[i])")
     else:
         w("            .end_of_sim_o(end_of_sim[i]), .txn_cnt_o(txn_cnt[i]),")
@@ -1083,8 +1098,57 @@ def emit_tb_top(topo: dict, dma: bool = False,
     if dma:
         w("        assign jobs_issued[i]  = u_endpoint.jobs_issued;")
         w("        assign jobs_retired[i] = u_endpoint.jobs_retired;")
+        w("        assign jobs_done[i] = u_endpoint.jobs_done;")
     w("    end : g_endpoint")
     w("")
+
+    if dma and dependent:
+        w('    `include "axi_perf_trace.svh"')
+        w("")
+
+        w("    integer packet_trace_fd;")
+        w("    string packet_trace_path;")
+        w("    initial begin")
+        w('        if (!$value$plusargs("perf_out=%s", packet_trace_path)) packet_trace_path = "perf.json";')
+        w('        packet_trace_fd = $fopen({packet_trace_path, ".packets.csv"}, "w");')
+        w('        if (!packet_trace_fd) $fatal(1, "Cannot open packet trace");')
+        w('        $fdisplay(packet_trace_fd, "cycle,event,node,plane,vc,tail,src,dst,dst_port,collective,mask,in_window,flit");')
+        w("    end")
+        w("    always @(posedge clk_i) begin")
+        w("        if (!rst_ni) begin")
+        w('            $fdisplay(packet_trace_fd, "%0d,RESET,0,REQ,0,0,0,0,0,0,0,0,0", live_cyc);')
+        w("        end else begin")
+        for ep, x, y, cid, port in endpoints:
+            if ep < n:
+                host, physical_port = ep, "u_fabric.RP_LOCAL"
+            else:
+                per = peripherals[ep - n]
+                host = per["router_idx"]
+                physical_port = f"u_fabric.RP_{per['dir']}"
+            for plane in ("req", "rsp", "dat"):
+                for event, direction in (("IN", "rx"), ("OUT", "tx")):
+                    base = f"u_fabric.{direction}_{plane}"
+                    index = f"[{host}][{physical_port}]"
+                    flit = f"{base}_flit{index}"
+                    accepted = f"{base}_valid{index}"
+                    if plane != "dat":
+                        accepted += f" && {base}_ready{index}"
+                    fields = ["VC_ID", "FLIT_TAIL", "SRC_ID", "DST_ID", "DST_PORT_ID",
+                              "COLLECTIVE_OP", "COLLECTIVE_MASK"]
+                    values = [f"{flit}[ni_flit_pkg::{field}_MSB:ni_flit_pkg::{field}_LSB]"
+                              for field in fields]
+                    normalized = (f"{{{flit}[{plane.upper()}_FLIT_WIDTH-1:ni_flit_pkg::VC_ID_MSB+1], "
+                                  f"{{ni_flit_pkg::VC_ID_WIDTH{{1'b0}}}}, "
+                                  f"{flit}[ni_flit_pkg::VC_ID_LSB-1:0]}}")
+                    w(f"            if ({accepted})")
+                    w(f'                $fdisplay(packet_trace_fd, "%0d,{event},{ep},{plane.upper()},%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0h", live_cyc, {", ".join(values)}, perf_measure_en, {normalized});')
+        w("        end")
+        w("    end")
+        w("    final begin")
+        w('        $fdisplay(packet_trace_fd, "%0d,END,0,REQ,0,0,0,0,0,0,0,0,0", live_cyc);')
+        w("        $fclose(packet_trace_fd);")
+        w("    end")
+        w("")
 
     # Perf instrumentation.
     w("    // -------------------------------------------------------------------------")
@@ -1094,6 +1158,25 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w('    import "DPI-C" context function void cmodel_perf_set_run(input string scenario,')
     w('                                                             input longint total_cyc);')
     w('    import "DPI-C" context function void cmodel_perf_dump(input string path);')
+    if dma and dependent:
+        w('    import "DPI-C" context function void cmodel_perf_end(input longint end_cyc);')
+        w("    bit operation_window_started = 0, operation_window_ended = 0;")
+        trigger = "|operation_job_valid" if plan.transfers else "rst_ni && !clk_i"
+        w(f"    wire operation_request_pending = {trigger};")
+        w("    always @(posedge operation_request_pending) begin")
+        w("        if (rst_ni && !operation_window_started) begin")
+        w("            cmodel_perf_begin(longint'(live_cyc));")
+        w("            perf_measure_en = 1;")
+        w("            operation_window_started = 1;")
+        w("        end")
+        w("    end")
+        w("    always @(negedge clk_i) begin")
+        w("        if (operation_done_reg && !operation_window_ended) begin")
+        w("            perf_measure_en = 0;")
+        w("            cmodel_perf_end(longint'(operation_end_reg + 1));")
+        w("            operation_window_ended = 1;")
+        w("        end")
+        w("    end")
     w("")
     w('    string        perf_out_path = "perf.json";')
     w('    string        perf_scn      = "";')
@@ -1103,6 +1186,8 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w('        void\'($value$plusargs("perf_scenario=%s", perf_scn));')
     w("    end")
     w("    always @(posedge clk_i) begin")
+    w("        // One simulation precision step after model ticks and NBA outputs.")
+    w("        #1ps;")
     w("        cmodel_perf_sample_tick();")
     w("        perf_cycle = perf_cycle + 1;")
     w("    end")
@@ -1130,7 +1215,13 @@ def emit_tb_top(topo: dict, dma: bool = False,
     # top's own version replaces it: end_of_sim is tied 0 there, and "every job
     # retired, every region intact" is what done means for a DMA.
     if dma:
-        lines.extend(_dma_check(topo, n_ep, jobs_per_node, job_bytes, rw))
+        if dependent:
+            memory_targets = [next(index for index, window in enumerate(per_node[node])
+                                   if window["space"] in ("memory", "peripheral"))
+                              for node in range(n_ep)]
+            lines.extend(dependent_dma_plan.checker_sv(plan, n_ep, memory_targets))
+        else:
+            lines.extend(_dma_check(topo, n_ep, jobs_per_node, job_bytes, rw))
         lines.extend(_dpi_error_poll())
         return "\n".join(lines) + "\n"
     w("    // -------------------------------------------------------------------------")
@@ -1451,6 +1542,7 @@ def emit_topology_pkg(topo: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def main() -> int:
+    from dependent_dma_plan import OPERATIONS, parse_resident_shards
     ap = argparse.ArgumentParser(description="Generate tb_top_<topology>.sv.")
     ap.add_argument("--topology", default="mesh_4x4",
                     help="Configuration name (matches sim/configs/<name>.yml)")
@@ -1461,6 +1553,13 @@ def main() -> int:
                          "sim/tb/soc/tb_top_dma_<topology>.sv as the default output. It "
                          "instantiates the same noc_fabric with the same overrides -- the "
                          "endpoint's port list toward it does not move.")
+    ap.add_argument("--dependent", action="store_true",
+                    help="--dma only: TP All-Gather with dependent DMA jobs")
+    ap.add_argument("--dma-backpressure", action="store_true",
+                    help="--dma only: existing random memory and consumer stall profiles")
+    ap.add_argument("--dma-operation", choices=OPERATIONS, default="all_gather")
+    ap.add_argument("--resident-shards", type=parse_resident_shards, default=(),
+                    help="weight_load only: comma-separated shard IDs already at their tile owners")
     ap.add_argument("--jobs-per-node", type=int, default=_DMA_JOBS_PER_NODE,
                     help="--dma only: jobs each node's file holds. Must match the "
                          "gen_dma_jobs.py run that wrote them -- the top preloads and "
@@ -1506,18 +1605,22 @@ def main() -> int:
     # it. Not a zero-size window: addr_decode_dync reads a zero end_addr as the
     # END-OF-ADDRESS-SPACE WILDCARD, which is why the pad is a real
     # _PAD_BYTES range instead.
-    if a.dma and _peripherals(topo):
+    if a.dma and not a.dependent and _peripherals(topo):
         raise SystemExit(
             f"gen_tb_top: --dma does not support configuration {a.topology}, which attaches an "
             f"endpoint to a boundary port -- gen_dma_jobs.job_table emits jobs for the router "
             f"array only, so a peripheral endpoint has no jobs.txt and its idma_job_driver "
             f"$fatals on the missing file (docs/known-limitations.md). Use a configuration "
             f"whose endpoints are all on EJECT, or the directed top (no --dma)")
-    tb_text = emit_tb_top(topo, a.dma, a.jobs_per_node, a.length, a.rw)
+    if (a.dependent or a.dma_backpressure) and not a.dma:
+        raise SystemExit("--dependent and --dma-backpressure require --dma")
+    tb_text = emit_tb_top(topo, a.dma, a.jobs_per_node, a.length, a.rw,
+                          a.dependent, a.dma_backpressure, a.dma_operation, a.resident_shards)
     default_out = ROOT / "sim" / "tb" / "soc" / f"tb_top_dma_{a.topology}.sv" if a.dma \
         else ROOT / "sim" / "tb" / "test" / f"tb_top_{a.topology}.sv"
     out_path = Path(a.out) if a.out is not None else default_out
-    out_path.write_text(tb_text, encoding="utf-8")
+    if not out_path.exists() or out_path.read_text(encoding="utf-8") != tb_text:
+        out_path.write_text(tb_text, encoding="utf-8")
     return 0
 
 

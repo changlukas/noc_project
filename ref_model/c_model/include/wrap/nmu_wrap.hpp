@@ -161,6 +161,8 @@ class NmuWrap {
         ticked_ = false;
     }
 
+    const ::ni::cmodel::nmu::Rob& rob_observation() const { return nmu_->rob(); }
+
     void set_inputs(const NmuInputs& in) { in_ = in; }
 
     void set_channel_mode(::ni::cmodel::ni::ChannelMode mode) {

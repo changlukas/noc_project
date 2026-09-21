@@ -106,7 +106,9 @@ X_WIDTH = 4
 Y_WIDTH = 4          # mirrors ni_flit_constants.h width::Y_WIDTH
 DST_ID_WIDTH = 8     # header::DST_ID_WIDTH = X_WIDTH + Y_WIDTH; max nodes = 2**8 = 256
 _FILE_KEYS = ("data_file", "dump_file", "strb_file")
-_AI_PATTERNS = {"broadcast", "gather", "alltoall", "neighbor_exchange", "pipeline"}
+_MAPPED_PATTERNS = {"tp_ring_step", "pp_shards", "expert_dispatch",
+                    "expert_return", "kv_handoff"}
+_AI_PATTERNS = {"broadcast", "gather", "alltoall", "neighbor_exchange", "pipeline"} | _MAPPED_PATTERNS
 
 # Per-transaction slot stride for the unique-offset allocator.  Must be at least
 # as large as the max transaction data payload (one cache-line = 64 B = 0x40).
@@ -587,6 +589,39 @@ def neighbor_exchange_dsts(src_node, x_dim, y_dim, rounds):
     return neighbors * rounds
 
 
+def mapped_payload_dsts(pattern, x_dim, y_dim, rounds):
+    """L1 payload edges for the approved 4x4 ownership, not L2 execution.
+
+    Coordinates have bottom-left origin. Each group orders ranks as lower
+    left, lower right, upper left, upper right. Read requests reverse these
+    edges in the common emitter so returned payload retains this direction.
+    """
+    if (x_dim, y_dim) != (4, 4):
+        raise ValueError("mapped AI patterns require the approved 4x4 placement")
+    if pattern not in _MAPPED_PATTERNS or rounds <= 0:
+        raise ValueError("invalid mapped pattern or nonpositive rounds")
+    groups = {name: tuple((y + dy) * x_dim + x + dx
+                         for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)))
+              for name, (x, y) in {"A": (0, 2), "B": (2, 2),
+                                    "C": (2, 0), "D": (0, 0)}.items()}
+    a, b, c, d = (groups[name] for name in ("A", "B", "C", "D"))
+    if pattern == "tp_ring_step":
+        ring = (a[0], a[1], a[3], a[2])
+        edges = list(zip(ring, ring[1:] + ring[:1]))
+    elif pattern == "pp_shards":
+        edges = list(zip(a, b))
+    elif pattern in ("expert_dispatch", "expert_return"):
+        edges = [(owner, expert) for owner in a[:2] for expert in (b[0], c[0])]
+        if pattern == "expert_return":
+            edges = [(dst, src) for src, dst in edges]
+    else:
+        edges = list(zip(a, d)) + list(zip(b, c))
+    destinations = {node: [] for node in range(x_dim * y_dim)}
+    for src, dst in edges:
+        destinations[src].append(dst)
+    return {src: targets * rounds for src, targets in destinations.items()}
+
+
 def pipeline_order(x_dim, y_dim):
     """Row-snake order used by the forward inference pipeline."""
     return [_linear(x, y, x_dim)
@@ -990,7 +1025,7 @@ def emit_repeated_unicast_broadcast_pattern(
 def write_traffic_meta(out_root, source_dsts=None, broadcast_groups=None, rounds=1,
                        direction="write", request_dsts=None,
                        transactions_per_flow=1, burst_beats=1, bytes_per_beat=1,
-                       multicast_mode=None):
+                       multicast_mode=None, pattern=None):
     """Write dataflow and AXI-request counts for one AI traffic stimulus."""
     destinations_per_source = None
     if broadcast_groups is not None:
@@ -1026,6 +1061,12 @@ def write_traffic_meta(out_root, source_dsts=None, broadcast_groups=None, rounds
         "source_requests": source_requests,
         "payload_deliveries": payload_deliveries,
     }
+    if pattern in _MAPPED_PATTERNS:
+        payload["test_layer"] = "L1"
+        payload["traffic_mapping"] = pattern
+        payload["schedule"] = "independent_transfers"
+        payload["payload_edges"] = [[src, dst] for src, dsts in source_dsts.items()
+                                    for dst in dsts]
     if multicast_mode is not None:
         if len(destinations_per_source) != 1:
             raise ValueError("Broadcast groups must have one destinations-per-source value")
@@ -1319,7 +1360,7 @@ def main(argv=None):
                                                              "hotspot", "multicast", "many_to_many",
                                                              "broadcast", "gather", "alltoall",
                                                              "neighbor_exchange", "pipeline",
-                                                             "channel_compare"],
+                                                             "channel_compare"] + sorted(_MAPPED_PATTERNS),
                     help="Traffic pattern")
     ap.add_argument("--channel-case", choices=("write", "read"), default=None,
                     help="Directed channel_compare operation")
@@ -1417,7 +1458,9 @@ def main(argv=None):
         if a.space != "memory":
             ap.error(f"{a.pattern} supports memory-space AI traffic only")
         try:
-            if a.pattern == "gather":
+            if a.pattern in _MAPPED_PATTERNS:
+                ai_dsts = mapped_payload_dsts(a.pattern, x_dim, y_dim, emitted_rounds)
+            elif a.pattern == "gather":
                 ai_dsts = {idx: gather_dsts(idx, x_dim, y_dim, emitted_rounds,
                                             a.gather_shape, a.root_node)
                            for idx in range(n_nodes)}
@@ -1622,7 +1665,7 @@ def main(argv=None):
                            rounds=rounds, direction=ai_direction,
                            transactions_per_flow=a.transactions_per_flow,
                            burst_beats=a.burst_len + 1,
-                           bytes_per_beat=1 << a.size)
+                           bytes_per_beat=1 << a.size, pattern=a.pattern)
 
 
 if __name__ == "__main__":

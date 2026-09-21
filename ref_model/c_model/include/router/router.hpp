@@ -143,6 +143,20 @@ inline uint8_t preferred_vc(RouterPort out, RouterPort next_hop, uint8_t num_vc)
 
 class Router {
   public:
+    struct SwitchActivity {
+        uint64_t eligible_vcs = 0;
+        uint64_t grants = 0;
+    };
+    const SwitchActivity& switch_activity(std::size_t out) const {
+        return switch_activity_.at(out);
+    }
+    struct AllocationWait {
+        std::size_t input, output;
+        uint8_t vc;
+        bool occupied, input_full;
+    };
+    const std::vector<AllocationWait>& allocation_waits() const { return allocation_waits_; }
+
     explicit Router(const RouterConfig& cfg) : cfg_(cfg) {
         if (!(cfg_.num_vc >= 1 && cfg_.num_vc <= (1u << ::ni::header::VC_ID_WIDTH))) {
             assert(false && "Router: num_vc out of range (1 .. 2^VC_ID_WIDTH)");
@@ -410,9 +424,11 @@ class Router {
     // deviation from the textbook split (VA free-only, SA credit): DAT traffic
     // is mostly single-flit R, and a head sitting on a zero-credit VC would
     // block every other packet that prefers it for the whole starvation window.
-    std::optional<uint8_t> vc_assignment(std::size_t out, const Flit& f) const {
+    std::optional<uint8_t> vc_assignment(std::size_t out, const Flit& f,
+                                         bool require_credit = true) const {
         const auto eligible = [&](uint8_t v) {
-            return !wormhole_[out][v].locked_input.has_value() && credit_[out][v] > 0;
+            return !wormhole_[out][v].locked_input.has_value() &&
+                   (!require_credit || credit_[out][v] > 0);
         };
         // fixed_vc=1 bypass (D8): the NI-pinned VC is kept verbatim, still
         // gated on being free and credited, never overflowed to another VC.
@@ -566,6 +582,9 @@ class Router {
     std::array<std::size_t, ROUTER_PORT_COUNT> in_vc_rr_{};
     // SA arbitration pointer, per output: advances on every SA grant.
     std::array<std::size_t, ROUTER_PORT_COUNT> vc_rr_{};
+    // Observation of the most recent SA decision, never used by the datapath.
+    std::array<SwitchActivity, ROUTER_PORT_COUNT> switch_activity_{};
+    std::vector<AllocationWait> allocation_waits_;
     std::array<std::deque<Flit>, ROUTER_PORT_COUNT> output_fifo_{};
     std::array<RouterLink*, ROUTER_PORT_COUNT> downstream_{};
     std::array<RouterCreditSink*, ROUTER_PORT_COUNT> upstream_credit_{};
@@ -588,6 +607,8 @@ inline void Router::accept_flit(std::size_t port, const Flit& f) {
 }
 
 inline void Router::tick() {
+    switch_activity_.fill(SwitchActivity{});
+    allocation_waits_.clear();
     // Registered credit pulses generated last tick go out first.
     for (const auto& [port, vc] : credit_pulse_pending_) {
         if (upstream_credit_[port]) upstream_credit_[port]->receive_credit(vc);
@@ -611,6 +632,18 @@ inline void Router::tick() {
     // itself: the scan falls through to the next VC.
     for (std::size_t out = 0; out < ROUTER_PORT_COUNT; ++out) {
         if (output_fifo_[out].size() >= cfg_.output_fifo_depth) continue;
+        auto& activity = switch_activity_[out];
+        for (uint8_t vc = 0; vc < cfg_.num_vc; ++vc) {
+            const auto& owner = wormhole_[out][vc];
+            if (!owner.locked_input.has_value() || credit_[out][vc] == 0) continue;
+            const auto in = *owner.locked_input;
+            const auto iv = *owner.locked_input_vc;
+            const auto& queue = input_fifo_[in][iv];
+            if (queue.empty()) continue;
+            if (queue.front().get_header_field("collective_op") != ::ni::COLLECTIVE_OP_UNICAST &&
+                (fork_done_[in][iv] & port_bit(static_cast<RouterPort>(out))) != 0) continue;
+            ++activity.eligible_vcs;
+        }
         std::optional<std::size_t> candidate;
         uint8_t in_vc = 0;
         uint8_t out_vc = 0;
@@ -684,6 +717,7 @@ inline void Router::tick() {
             out_vc = v;
         }
         if (!candidate.has_value()) continue;
+        activity.grants = 1;
 
         // Grant: single atomic event per branch (F5 OUR RULE: output-FIFO
         // admission + credit consume ARE the handshake). Credit is consumed
@@ -758,13 +792,15 @@ inline void Router::tick() {
     // grant -> VC free -> VA allocate combinational chain).
     for (std::size_t out = 0; out < ROUTER_PORT_COUNT; ++out) {
         bool va_granted = false;
+        const auto first_vc = in_vc_rr_[out];
+        const auto first_input = rr_[out];
         // Input-VC round-robin major, input round-robin minor. Both pointers
         // advance on a grant only, so a failed VA never costs a candidate its
         // turn (D7, work-conserving).
-        for (std::size_t kiv = 0; kiv < cfg_.num_vc && !va_granted; ++kiv) {
-            const auto ivc = static_cast<uint8_t>((in_vc_rr_[out] + kiv) % cfg_.num_vc);
-            for (std::size_t j = 0; j < ROUTER_PORT_COUNT && !va_granted; ++j) {
-                const std::size_t in = (rr_[out] + j) % ROUTER_PORT_COUNT;
+        for (std::size_t kiv = 0; kiv < cfg_.num_vc; ++kiv) {
+            const auto ivc = static_cast<uint8_t>((first_vc + kiv) % cfg_.num_vc);
+            for (std::size_t j = 0; j < ROUTER_PORT_COUNT; ++j) {
+                const std::size_t in = (first_input + j) % ROUTER_PORT_COUNT;
                 auto& st = ivc_[in][ivc];
                 if (st.out_vc[out].has_value()) continue;  // this branch already holds one
                 const auto& q = input_fifo_[in][ivc];
@@ -789,7 +825,14 @@ inline void Router::tick() {
                 // it parked for the locked branches' F9 assert in SA.
                 if (st.active && !(collective && st.head_parked)) continue;
                 const auto assigned = vc_assignment(out, q.front());
-                if (!assigned.has_value()) continue;  // no eligible VC: retry next tick
+                if (va_granted || !assigned.has_value()) {
+                    // Observe remaining heads without changing the first-grant rule.
+                    // Ignore credit only to identify the occupied-VC subset.
+                    allocation_waits_.push_back({in, out, ivc,
+                        !vc_assignment(out, q.front(), false).has_value(),
+                        q.size() == cfg_.vc_depth});
+                    continue;
+                }
                 st.out_vc[out] = *assigned;
                 st.active = true;
                 st.head_parked = true;
