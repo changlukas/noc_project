@@ -11,8 +11,10 @@ CASE ?= ctrl_write_single
 VCS ?= vcs
 VERILATOR ?= verilator
 NWAVE ?= nWave
-VERDI_HOME ?= /usr/cad/synopsys/verdi/cur
-PLI_DIR ?= $(VERDI_HOME)/share/PLI/VCS/LINUX64
+VERDI_HOME ?= /cadtools/synopsys/verdi/M-2017.03-SP1
+PLI_DIR ?= $(VERDI_HOME)/share/PLI/VCS/linux64
+# Keep the caller environment intact; extend only child-process library lookup.
+export LD_LIBRARY_PATH := $(PLI_DIR)$(if $(LD_LIBRARY_PATH),:$(LD_LIBRARY_PATH))
 VCS_EXTRA ?=
 VERILATOR_EXTRA ?=
 SIM_EXTRA ?=
