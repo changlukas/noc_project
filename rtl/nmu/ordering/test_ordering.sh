@@ -12,21 +12,26 @@ task_sources=(
   "$task_root/rtl/nmu/ordering/nmu_ordering.sv"
 )
 task_verilator=(verilator --timing --assert -Wall -Wno-fatal -Wno-DECLFILENAME
-  -Wno-TIMESCALEMOD -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-WIDTHTRUNC
-  -Wno-WIDTHEXPAND -Wno-PROCASSINIT)
+  -Wno-TIMESCALEMOD -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-PINCONNECTEMPTY
+  -Werror-WIDTHTRUNC -Werror-WIDTHEXPAND -Werror-LATCH)
 "${task_verilator[@]}" --lint-only --top-module tb_nmu_ordering \
   "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_nmu_ordering.sv"
 "${task_verilator[@]}" --lint-only --top-module tb_nmu_ordering_robless \
   "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_nmu_ordering_robless.sv"
 if [[ "${1:-test}" == test ]]; then
-  "${task_verilator[@]}" --binary --top-module tb_nmu_ordering \
+  "${task_verilator[@]}" --binary -j 1 --top-module tb_nmu_ordering \
     --Mdir "$task_tmp/obj_dir" -o nmu_ordering_tb \
     "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_nmu_ordering.sv"
   "$task_tmp/obj_dir/nmu_ordering_tb"
-  "${task_verilator[@]}" --binary --top-module tb_nmu_ordering_robless \
+  "${task_verilator[@]}" --binary -j 1 --top-module tb_nmu_ordering_robless \
     --Mdir "$task_tmp/obj_dir_robless" -o nmu_ordering_robless_tb \
     "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_nmu_ordering_robless.sv"
   "$task_tmp/obj_dir_robless/nmu_ordering_robless_tb"
+
+  "${task_verilator[@]}" --binary -j 1 --top-module tb_nmu_ordering_stall \
+    --Mdir "$task_tmp/obj_dir_stall" -o nmu_ordering_stall_tb \
+    "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_nmu_ordering_stall.sv"
+  "$task_tmp/obj_dir_stall/nmu_ordering_stall_tb"
 
   task_tag_w=$(sed -nE 's/.*ORDERING_TAG_WIDTH[[:space:]]*=[[:space:]]*([0-9]+);/\1/p' \
     "$task_root/specgen/generated/sv/ni_flit_pkg.sv")
@@ -45,7 +50,7 @@ if [[ "${1:-test}" == test ]]; then
   for task_case in 0 1 2; do
     task_log="$task_tmp/guard_$task_case.log"
     task_guard_obj="$task_tmp/obj_dir_guard_$task_case"
-    "${task_verilator[@]}" --binary --top-module nmu_ordering \
+    "${task_verilator[@]}" --binary -j 1 --top-module nmu_ordering \
       --Mdir "$task_guard_obj" -o nmu_ordering_guard_tb \
       ${task_guard_values[$task_case]} "${task_sources[@]}"
     if "$task_guard_obj/nmu_ordering_guard_tb" >"$task_log" 2>&1; then

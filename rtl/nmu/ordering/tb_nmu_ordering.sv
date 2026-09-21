@@ -96,7 +96,7 @@ module tb_nmu_ordering;
         @(negedge clk_i);
         s_r_i = '0;
         s_r_i.axi.rid = ID_W'(id);
-        s_r_i.axi.rdata = data;
+        s_r_i.axi.rdata = ni_params_pkg::AXI_DATA_WIDTH_DFLT'(data);
         s_r_i.axi.rlast = last;
         s_r_i.meta.ordering_req = ordered;
         s_r_i.meta.ordering_tag = TAG_W'(tag);

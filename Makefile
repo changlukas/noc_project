@@ -18,8 +18,8 @@ CMODEL_BUILD     = $(BUILD_ROOT)/cmodel
 SIM_VERILATOR := sim/verilator
 SIM_VCS       := sim/vcs
 
-.PHONY: help build build-cmodel build-yamlcpp build-verilator test rtl-sam-lint rtl-sam-test rtl-id-remap-test rtl-nmu-paths-test rtl-nmu-ordering-test \
-        pytest check docker-build docker-shell docker-test docker-pytest docker-sim-setup docker-sim-smoke docker-sim-tier2 \
+.PHONY: help build build-cmodel build-yamlcpp build-verilator test rtl-sam-lint rtl-sam-test rtl-id-remap-test rtl-nmu-paths-test rtl-nmu-ordering-test rtl-nmu-packetize-test \
+        pytest check check-rtl docker-build docker-shell docker-test docker-pytest docker-sim-setup docker-sim-smoke docker-sim-tier2 \
         clean clean-cmodel clean-verilator clean-vcs clean-generated
 
 help:
@@ -42,7 +42,9 @@ help:
 	@echo "  make rtl-id-remap-test test AXI-to-fixed-NoC-ID remap boundary"
 	@echo "  make rtl-nmu-paths-test independently elaborate NMU request/response path boundaries"
 	@echo "  make rtl-nmu-ordering-test test NMU request ordering and B/R retirement"
+	@echo "  make rtl-nmu-packetize-test test request packetization, stalls and credits"
 	@echo "  make pytest           specgen + sim/tools suites, golden drift gate"
+	@echo "  make check-rtl        run focused RTL gates without rebuilding c_model"
 	@echo "  make check            run c_model, Python, and focused RTL gates"
 	@echo ""
 	@echo "Docker:"
@@ -161,6 +163,9 @@ rtl-nmu-paths-test:
 rtl-nmu-ordering-test:
 	@bash rtl/nmu/ordering/test_ordering.sh test
 
+rtl-nmu-packetize-test:
+	bash rtl/nmu/request_packetize/test_request_packetize.sh
+
 rtl-nmu-lint:
 	@bash rtl/nmu/request_fifo/test_request_fifo.sh lint
 
@@ -189,7 +194,9 @@ pytest:
 # compared when both have run. A change to a helper they share (address_map.py's
 # dst_id(), say) moves both sides of the Python-side cross-format check
 # together, leaves pytest green, and shows up in ctest alone.
-check: test pytest rtl-id-remap-test rtl-nmu-paths-test
+check-rtl: rtl-id-remap-test rtl-nmu-paths-test rtl-nmu-ordering-test rtl-nmu-packetize-test
+
+check: test pytest check-rtl
 
 # --- docker ---
 

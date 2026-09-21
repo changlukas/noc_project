@@ -13,12 +13,12 @@ sources:
   - common/ni_sam.sv
   - common/stream_register.sv
   - common/axi_async_fifo.sv
-  - sam/nmu_sam.sv
-  - request_path/nmu_request_path.sv
-  - response_fifo/nmu_response_fifo.sv
-  - ordering/nmu_reorder_storage.sv
-  - ordering/nmu_ordering.sv
-  - request_packetize/nmu_request_packetize.sv
-  - response_path/nmu_response_path.sv
-  - top/nmu.sv
-  - request_fifo/nmu_request_fifo.sv
+  - nmu/sam/nmu_sam.sv
+  - nmu/request_path/nmu_request_path.sv
+  - nmu/response_fifo/nmu_response_fifo.sv
+  - nmu/ordering/nmu_reorder_storage.sv
+  - nmu/ordering/nmu_ordering.sv
+  - nmu/request_packetize/nmu_request_packetize.sv
+  - nmu/response_path/nmu_response_path.sv
+  - nmu/top/nmu.sv
+  - nmu/request_fifo/nmu_request_fifo.sv

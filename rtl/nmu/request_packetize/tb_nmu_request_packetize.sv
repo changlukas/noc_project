@@ -55,7 +55,7 @@ module tb_nmu_request_packetize;
         s_aw.axi.awaddr = addr;
         s_aw.axi.awsize = is_data ? 3'd6 : 3'd3;
         s_aw.axi.awburst = 2'b01;
-        s_aw.axi.awuser = 8'h5a;
+        s_aw.axi.awuser = ni_params_pkg::AXI_AWUSER_WIDTH_DFLT'(8'h5a);
         s_aw.meta.route.domain = '{dst_id: dst, dst_port_id: 2'h1, is_data: is_data};
         s_aw.user = 8'h5a;
         s_aw_valid = 1'b1;
@@ -103,9 +103,9 @@ module tb_nmu_request_packetize;
         assert (m_req_valid && m_dat_valid)
             else $fatal(1, "REQ and DAT AW were not independently available");
         assert (m_req.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB] ==
-                ni_flit_pkg::AXI_CH_NarrowAw);
+                ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_NarrowAw));
         assert (m_dat.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB] ==
-                ni_flit_pkg::AXI_CH_DataAw);
+                ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataAw));
         assert (m_req.header[ni_flit_pkg::SRC_ID_MSB:ni_flit_pkg::SRC_ID_LSB] == 8'h12);
         assert (m_dat.header[ni_flit_pkg::DST_ID_MSB:ni_flit_pkg::DST_ID_LSB] == 8'h32);
         @(posedge clk);
@@ -113,9 +113,9 @@ module tb_nmu_request_packetize;
         assert (m_req_valid && m_dat_valid)
             else $fatal(1, "REQ and DAT W did not transfer in parallel");
         assert (m_req.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB] ==
-                ni_flit_pkg::AXI_CH_NarrowW);
+                ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_NarrowW));
         assert (m_dat.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB] ==
-                ni_flit_pkg::AXI_CH_DataW);
+                ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataW));
         assert (m_req.payload[ni_flit_pkg::NARROW_W_WDATA_MSB:
                               ni_flit_pkg::NARROW_W_WDATA_LSB] ==
                 64'h0123_4567_89ab_cdef)
@@ -136,7 +136,7 @@ module tb_nmu_request_packetize;
         #1;
         assert (m_req_valid);
         assert (m_req.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB] ==
-                ni_flit_pkg::AXI_CH_DataAr);
+                ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataAr));
         assert (m_req.header[ni_flit_pkg::FLIT_TAIL_LSB]);
         @(posedge clk);
 
@@ -161,7 +161,7 @@ module tb_nmu_request_packetize;
         #1;
         assert (m_dat_valid);
         assert (m_dat.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB] ==
-                ni_flit_pkg::AXI_CH_DataW);
+                ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataW));
         @(posedge clk);
 
         $display("PASS: NMU request packetization and independent REQ/DAT scheduling");
