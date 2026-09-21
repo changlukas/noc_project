@@ -37,7 +37,6 @@ task_sources=(
     "$task_common_cells/src/cc_cdc_fifo_gray.sv"
     "$task_root/rtl/common/axi_async_fifo.sv"
     "$task_root/rtl/nmu/response_fifo/nmu_response_fifo.sv"
-    "$task_root/rtl/nmu/response_path/nmu_response_path.sv"
 )
 task_verilator=(verilator --timing --assert -Wall -Wno-fatal -Wno-DECLFILENAME
     -Wno-TIMESCALEMOD -Wno-UNUSEDPARAM -Wno-UNUSEDSIGNAL -Wno-SYNCASYNCNET
@@ -60,3 +59,6 @@ if [[ "${1:-test}" == test ]]; then
     fi
     grep -Fq "AXI_FIFO_DEPTH must be a power of two and at least 2" "$task_log"
 fi
+
+# Elaborate the expanded response path with its request-side ordering connections.
+bash "$task_root/rtl/nmu/top/test_nmu.sh" lint

@@ -15,12 +15,60 @@ module tb_nmu_request_path;
     logic m_aw_valid_o, m_aw_ready_i = 1, m_w_valid_o, m_w_ready_i = 1;
     logic m_ar_valid_o, m_ar_ready_i = 1;
 
+    axi_if #(.ID_W(3), .ADDR_W(48), .DATA_W(512), .AWUSER_W(58)) axi();
+    assign axi.awid = s_aw_i.awid;
+    assign axi.awaddr = s_aw_i.awaddr;
+    assign axi.awlen = s_aw_i.awlen;
+    assign axi.awsize = s_aw_i.awsize;
+    assign axi.awburst = s_aw_i.awburst;
+    assign axi.awlock = s_aw_i.awlock;
+    assign axi.awcache = s_aw_i.awcache;
+    assign axi.awprot = s_aw_i.awprot;
+    assign axi.awqos = s_aw_i.awqos;
+    assign axi.awregion = s_aw_i.awregion;
+    assign axi.awuser = s_aw_i.awuser;
+    assign axi.awvalid = s_aw_valid_i;
+    assign s_aw_ready_o = axi.awready;
+    assign axi.wdata = s_w_i.wdata;
+    assign axi.wstrb = s_w_i.wstrb;
+    assign axi.wlast = s_w_i.wlast;
+    assign axi.wvalid = s_w_valid_i;
+    assign s_w_ready_o = axi.wready;
+    assign axi.arid = s_ar_i.arid;
+    assign axi.araddr = s_ar_i.araddr;
+    assign axi.arlen = s_ar_i.arlen;
+    assign axi.arsize = s_ar_i.arsize;
+    assign axi.arburst = s_ar_i.arburst;
+    assign axi.arlock = s_ar_i.arlock;
+    assign axi.arcache = s_ar_i.arcache;
+    assign axi.arprot = s_ar_i.arprot;
+    assign axi.arqos = s_ar_i.arqos;
+    assign axi.arregion = s_ar_i.arregion;
+    assign axi.arvalid = s_ar_valid_i;
+    assign s_ar_ready_o = axi.arready;
+    assign axi.bready = 1'b1;
+    assign axi.rready = 1'b1;
+
     nmu_request_path #(
+        .AXI_ID_WIDTH(3),
         .AXI_FIFO_DEPTH (4),
         .SAM_NUM_RULES (SAM_NUM_RULES), .addr_t (sam_addr_t),
         .sam_mask_sel_t (sam_mask_sel_t), .sam_idx_t (sam_idx_t),
         .sam_rule_t (sam_rule_t), .SAM (SAM)
-    ) dut (.*);
+    ) dut (
+        .axi_clk_i, .axi_rst_ni, .noc_clk_i, .noc_rst_ni,
+        .axi_wr_i(axi), .axi_rd_i(axi),
+        .m_aw_o, .m_aw_valid_o, .m_aw_ready_i,
+        .m_w_o, .m_w_valid_o, .m_w_ready_i,
+        .m_ar_o, .m_ar_valid_o, .m_ar_ready_i,
+        .s_ordered_aw_i('0), .s_ordered_aw_valid_i(1'b0), .s_ordered_aw_ready_o(),
+        .s_ordered_w_i('0), .s_ordered_w_valid_i(1'b0), .s_ordered_w_ready_o(),
+        .s_ordered_ar_i('0), .s_ordered_ar_valid_i(1'b0), .s_ordered_ar_ready_o(),
+        .s_b_i('0), .s_b_valid_i(1'b0), .s_b_ready_o(),
+        .s_r_i('0), .s_r_valid_i(1'b0), .s_r_ready_o(),
+        .tx_req_valid_o(), .tx_req_flit_o(), .tx_req_ready_i(1'b1),
+        .tx_dat_valid_o(), .tx_dat_flit_o(), .tx_dat_crdvalid_i('0)
+    );
 
     always #3ns axi_clk_i = !axi_clk_i;
     always #5ns noc_clk_i = !noc_clk_i;

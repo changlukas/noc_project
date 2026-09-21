@@ -11,6 +11,7 @@ CASE ?= ctrl_write_single
 VCS ?= vcs
 VERILATOR ?= verilator
 NWAVE ?= nWave
+WAVE_RC ?= $(script_dir)/nWaveLog/signals.rc
 VERDI_HOME ?= /cadtools/synopsys/verdi/M-2017.03-SP1
 PLI_DIR ?= $(VERDI_HOME)/share/PLI/VCS/linux64
 # Keep the caller environment intact; extend only child-process library lookup.
@@ -48,7 +49,7 @@ VCS_FLAGS += +define+DUMP_WAVE -P $(PLI_DIR)/novas.tab $(PLI_DIR)/pli.a
 VERILATOR_FLAGS += +define+DUMP_WAVE --trace-fst
 endif
 
-.PHONY: help sanity_check compile run sim regress block_regress legacy_regress run_wave nWave view fault report
+.PHONY: help sanity_check compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report
 help:
 	@printf '%s\n' \
 	 'make run CASE=ctrl_write_single     Compile and run (VCS default)' \
@@ -56,7 +57,8 @@ help:
 	 'make regress                       Compile once, all standalone cases and fault check' \
 	 'make legacy_regress                Retained topology traffic and mixed tests' \
 	 'make run_wave CASE=same_id_cross_dst_reorder' \
-	 'make nWave CASE=same_id_cross_dst_reorder' \
+	 'make nWave CASE=same_id_cross_dst_reorder  (load signal groups)' \
+	 'make run_wave_view CASE=ctrl_write_single (run then open nWave)' \
 	 'make regress SIMULATOR=verilator    Same sources, cases and configuration' \
 	 'Shared overrides: ID_WIDTH, NOC_HALF_PERIOD, BUFFER_DEPTH, READ_ROB_ENABLED' \
 	 'Patterns are generated for a specific ID_WIDTH; synchronize matching inputs before changing it.'
@@ -128,12 +130,16 @@ fault: sanity_check
 run_wave:
 	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" run WAVE=1 PATTERN=$(PATTERN) CASE=$(CASE)
 
+run_wave_view: run_wave nWave
+
 nWave:
 	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" view WAVE=1 SIMULATOR=vcs PATTERN=$(PATTERN) CASE=$(CASE)
 
 view:
 	@test -f "$(wave_file)" || { echo 'Run make run_wave first' >&2; exit 1; }
-	@$(NWAVE) "$(wave_file)" &
+	@test -f "$(WAVE_RC)" || { echo 'Waveform RC template missing: $(WAVE_RC)' >&2; exit 1; }
+	@sed 's|@FSDB@|$(wave_file)|g' "$(WAVE_RC)" > "$(run_dir)/$(case_label).rc"
+	@cd "$(script_dir)" && $(NWAVE) -ssf "$(wave_file)" -sswr "$(run_dir)/$(case_label).rc" &
 
 report:
 	@test -d "$(report_dir)" || { echo 'No report directory yet' >&2; exit 1; }

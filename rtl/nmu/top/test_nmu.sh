@@ -50,7 +50,6 @@ task_sources=(
     "$task_root/rtl/common/stream_register.sv"
     "$task_root/rtl/nmu/request_fifo/nmu_request_fifo.sv"
     "$task_root/rtl/nmu/sam/nmu_sam.sv"
-    "$task_root/rtl/nmu/request_path/nmu_request_path.sv"
     "$task_root/sim/dv/common_cells-1.37.0/src/cf_math_pkg.sv"
     "$task_root/sim/dv/common_cells-1.37.0/src/lzc.sv"
     "$task_root/sim/dv/axi-0.39.7/src/axi_pkg.sv"
@@ -63,8 +62,9 @@ task_sources=(
     "$task_root/rtl/nmu/response_depacketize/nmu_response_depacketize.sv"
     "$task_root/rtl/nmu/response_fifo/nmu_response_fifo.sv"
     "$task_root/rtl/nmu/response_path/nmu_response_path.sv"
+    "$task_root/rtl/nmu/request_path/nmu_request_path.sv"
     "$task_root/rtl/nmu/top/nmu.sv"
-    "$task_root/rtl/nmu/top/tb_nmu_elaborate.sv"
+    "${NMU_PATH_TB:-$task_root/rtl/nmu/top/tb_nmu_elaborate.sv}"
 )
 
 task_verilator=(verilator --timing --assert -Wall -Wno-fatal
@@ -73,7 +73,7 @@ task_verilator=(verilator --timing --assert -Wall -Wno-fatal
     -Wno-TIMESCALEMOD -Wno-UNUSEDPARAM -Wno-UNUSEDSIGNAL -Wno-SYNCASYNCNET
     -Wno-PINCONNECTEMPTY -I"$task_common_cells/include"
     -I"$task_root/sim/dv/axi-0.39.7/include" -I"$task_root/sim/dv/common_cells-1.37.0/include"
-    --top-module tb_nmu_elaborate)
+    --top-module "${NMU_PATH_TOP:-tb_nmu_elaborate}")
 if [[ "${1:-test}" == standalone || "${1:-test}" == prepare ]]; then
     task_sources+=(
         "$task_root/sim/dv/common_verification-0.2.5/src/rand_id_queue.sv"
@@ -130,5 +130,5 @@ fi
 "${task_verilator[@]}" --lint-only "${task_sources[@]}"
 if [[ "${1:-test}" == test ]]; then
     "${task_verilator[@]}" --binary -j 1 --Mdir "$task_tmp/obj" "${task_sources[@]}"
-    "$task_tmp/obj/Vtb_nmu_elaborate"
+    "$task_tmp/obj/V${NMU_PATH_TOP:-tb_nmu_elaborate}"
 fi

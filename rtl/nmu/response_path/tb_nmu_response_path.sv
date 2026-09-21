@@ -1,5 +1,6 @@
 `timescale 1ns / 1ps
 
+// Focused CDC/reset check; full response path is covered by standalone.
 module tb_nmu_response_path;
     logic noc_clk_i = 0, axi_clk_i = 0;
     logic noc_rst_ni = 0, axi_rst_ni = 0;
@@ -8,7 +9,15 @@ module tb_nmu_response_path;
     logic s_b_valid_i, s_b_ready_o, s_r_valid_i, s_r_ready_o;
     logic m_b_valid_o, m_b_ready_i, m_r_valid_o, m_r_ready_i;
 
-    nmu_response_path #(.AXI_FIFO_DEPTH (4)) dut (.*);
+    nmu_response_fifo #(
+        .AXI_FIFO_DEPTH(4), .B_T(ni_signals_pkg::axi_b_t), .R_T(ni_signals_pkg::axi_r_t)
+    ) dut (
+        .noc_clk_i, .noc_rst_ni, .axi_clk_i, .axi_rst_ni,
+        .s_b_data_i(s_b_i), .s_b_valid_i, .s_b_ready_o,
+        .s_r_data_i(s_r_i), .s_r_valid_i, .s_r_ready_o,
+        .m_b_data_o(m_b_o), .m_b_valid_o, .m_b_ready_i,
+        .m_r_data_o(m_r_o), .m_r_valid_o, .m_r_ready_i
+    );
 
     always #5ns noc_clk_i = !noc_clk_i;
     always #3ns axi_clk_i = !axi_clk_i;

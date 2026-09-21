@@ -166,12 +166,12 @@ module tb_nmu_standalone #(
         end
         if (rst_n && !warmup) begin
 
-            if (dut.i_ordering.b_free_count == 0) b_full_cycles++;
-            if (READ_ROB_ENABLED && dut.i_ordering.r_free_count == 0) r_full_cycles++;
+            if (dut.i_response_path.i_ordering.b_free_count == 0) b_full_cycles++;
+            if (READ_ROB_ENABLED && dut.i_response_path.i_ordering.r_free_count == 0) r_full_cycles++;
             if (dat_valid) $fatal(1, "control-plane test unexpectedly used DAT");
-            if (dut.i_ordering.s_b_valid_i && dut.i_ordering.s_b_ready_o && !dut.i_ordering.b_direct)
+            if (dut.i_response_path.i_ordering.s_b_valid_i && dut.i_response_path.i_ordering.s_b_ready_o && !dut.i_response_path.i_ordering.b_direct)
                 b_buffered = b_buffered + 1;
-            if (dut.i_ordering.s_r_valid_i && dut.i_ordering.s_r_ready_o && !dut.i_ordering.r_direct)
+            if (dut.i_response_path.i_ordering.s_r_valid_i && dut.i_response_path.i_ordering.s_r_ready_o && !dut.i_response_path.i_ordering.r_direct)
                 r_buffered = r_buffered + 1;
             if (req_valid && req_ready) begin
                 channel = int'(req.header[AXI_CH_LSB +: AXI_CH_WIDTH]);
@@ -448,7 +448,7 @@ module tb_nmu_standalone #(
         end
         repeat (40) @(negedge noc_clk);
         if (READ_ROB_ENABLED &&
-            (dut.i_ordering.b_complete == '0 || dut.i_ordering.r_complete == '0))
+            (dut.i_response_path.i_ordering.b_complete == '0 || dut.i_response_path.i_ordering.r_complete == '0))
             $fatal(1, "reset did not cover occupied B/R reorder storage");
         if (warm_requests == 0) $fatal(1, "reset warmup did not reach NMU egress");
         @(negedge axi_clk); rst_n = 0; master.reset();
