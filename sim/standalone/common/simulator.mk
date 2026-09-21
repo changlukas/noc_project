@@ -29,7 +29,7 @@ endif
 case_label := $(if $(CASE),$(CASE),$(PATTERN))
 wave_file ?= $(wave_dir)/$(case_label).$(wave_ext)
 
-VCS_FLAGS := -full64 -sverilog -override_timescale=1ns/1ps -debug_access+all \
+VCS_FLAGS := -full64 -sverilog -assert svaext -override_timescale=1ns/1ps -debug_access+all \
     +lint=TFIPC-L +lint=PCWM -Mdir=$(run_dir)/csrc -f $(filelist) -top $(top) \
     -pvalue+$(top).ID_WIDTH=$(ID_WIDTH) \
     -pvalue+$(top).NOC_HALF_PERIOD=$(NOC_HALF_PERIOD) \
