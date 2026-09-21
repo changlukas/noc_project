@@ -6,6 +6,20 @@ module tb_nmu_standalone #(
     parameter bit READ_ROB_ENABLED = 1
 );
     import ni_flit_pkg::*;
+`ifdef DUMP_WAVE
+    initial begin : dump_wave
+        string wave_file;
+`ifdef VERILATOR
+        if (!$value$plusargs("wave_file=%s", wave_file)) wave_file = "nmu.fst";
+        $dumpfile(wave_file);
+        $dumpvars(0, tb_nmu_standalone);
+`else
+        if (!$value$plusargs("wave_file=%s", wave_file)) wave_file = "nmu.fsdb";
+        $fsdbDumpfile(wave_file);
+        $fsdbDumpvars(0, tb_nmu_standalone, "+all");
+`endif
+    end
+`endif
     logic axi_clk = 0, noc_clk = 0, rst_n = 0;
     bit warmup = 1;
     int warm_requests = 0;

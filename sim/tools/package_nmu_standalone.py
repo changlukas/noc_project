@@ -4,6 +4,7 @@ import argparse
 import hashlib
 from pathlib import Path
 import shutil
+import subprocess
 import tarfile
 import tempfile
 
@@ -58,30 +59,35 @@ def package(run_dir, output):
             if name != "directed":
                 source /= "node0"
             shutil.copytree(source, root / "cases" / name)
+        copy_path(repo / "rtl/nmu/top/nmu_lint.vlt")
+        (root / "script").mkdir()
+        shutil.copy2(repo / "sim/vcs/nmu/Makefile", root / "script/Makefile")
+        shutil.copy2(repo / "sim/vcs/nmu/config.mk", root / "script/config.mk")
         (root / "run_vcs.sh").write_text(r'''#!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
-mkdir -p build logs
-vcs -full64 -sverilog -timescale=1ns/1ps -top tb_nmu_standalone \
-    -f files.f -Mdir=build/csrc -o build/simv -l logs/compile.log
-for pattern in neighbor uniform_random hotspot directed; do
-    args=()
-    if [[ $pattern == directed ]]; then args+=(+require_reorder); fi
-    ./build/simv +stim_dir="cases/$pattern" "${args[@]}" -l "logs/$pattern.log"
-    grep -q 'PASS NMU standalone' "logs/$pattern.log"
-done
-if ./build/simv +stim_dir=cases/directed +corrupt_rsp -l logs/corrupt.log; then
-    echo 'ERROR: corrupt response unexpectedly passed' >&2
-    exit 1
-fi
-grep -q 'R data/lane/order/last mismatch' logs/corrupt.log
-tar -czf nmu-vcs-results.tar.gz logs
-echo 'PASS: logs packaged in nmu-vcs-results.tar.gz'
+make -C script regress "$@"
 ''')
+        (root / "run_verilator.sh").write_text(r'''#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+make -C script regress SIMULATOR=verilator "$@"
+''')
+        revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+        (root / "VERSION.txt").write_text(
+            "Issue: 118\nCheckout HEAD: " + revision + "\n"
+            "Compare SHA256SUMS for exact packaged source/config/pattern bytes.\n")
         (root / "README.txt").write_text(
             "Issue #118 NMU control-plane standalone snapshot.\n"
-            "Run: bash run_vcs.sh\n"
-            "Requires an initialized VCS environment and Bash. No Git, Python or network needed.\n"
+            "Run all (VCS default): bash run_vcs.sh\n"
+            "Same suite locally: make -C script regress SIMULATOR=verilator\n"
+            "Shared configuration: script/config.mk\n"
+            "Run one: make -C script run PATTERN=neighbor\n"
+            "FSDB: make -C script run_wave PATTERN=directed\n"
+            "Reuse binary: make -C script sim PATTERN=hotspot\n"
+            "Open waveform: make -C script nWave PATTERN=directed\n"
+            "Package logs: make -C script report\n"
+            "Requires an initialized VCS environment, GNU Make and Bash. No Git, Python or network needed.\n"
             "Default: external ID width 8, AXI clock 10ns, NoC clock 14ns, B/R depth 128.\n"
             "No NSU, memory model or C++ DPI. DAT RX is not implemented in this stage.\n"
             "This package has not been validated with VCS until workstation results are returned.\n")

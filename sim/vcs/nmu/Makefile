@@ -1,0 +1,128 @@
+# One source/config/pattern snapshot; only simulator and waveform backends differ.
+.DEFAULT_GOAL := run
+SHELL := /bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
+.NOTPARALLEL:
+script_dir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+package_dir := $(abspath $(script_dir)/..)
+include $(script_dir)/config.mk
+SIMULATOR ?= vcs
+VCS ?= vcs
+VERILATOR ?= verilator
+NWAVE ?= nWave
+VERDI_HOME ?= /usr/cad/synopsys/verdi/cur
+PLI_DIR ?= $(VERDI_HOME)/share/PLI/VCS/LINUX64
+VCS_EXTRA ?=
+VERILATOR_EXTRA ?=
+SIM_EXTRA ?=
+top := tb_nmu_standalone
+run_dir ?= $(package_dir)/build/$(SIMULATOR)_i$(ID_WIDTH)_n$(NOC_HALF_PERIOD)_b$(BUFFER_DEPTH)_r$(READ_ROB_ENABLED)_wave$(WAVE)
+run_dir := $(abspath $(run_dir))
+report_dir := $(run_dir)/report
+wave_dir := $(run_dir)/waves
+filelist := $(package_dir)/files.f
+wave_ext := fsdb
+ifeq ($(SIMULATOR),verilator)
+wave_ext := fst
+endif
+wave_file ?= $(wave_dir)/$(PATTERN).$(wave_ext)
+
+VCS_FLAGS := -full64 -sverilog -override_timescale=1ns/1ps -debug_access+all \
+    +lint=TFIPC-L +lint=PCWM -Mdir=$(run_dir)/csrc -f $(filelist) -top $(top) \
+    -pvalue+$(top).ID_WIDTH=$(ID_WIDTH) \
+    -pvalue+$(top).NOC_HALF_PERIOD=$(NOC_HALF_PERIOD) \
+    -pvalue+$(top).BUFFER_DEPTH=$(BUFFER_DEPTH) \
+    -pvalue+$(top).READ_ROB_ENABLED=$(READ_ROB_ENABLED) -o $(run_dir)/simv
+VERILATOR_FLAGS := --binary --timing --assert -j 1 -Wno-fatal \
+    -Werror-WIDTHEXPAND -Werror-WIDTHTRUNC -Werror-LATCH \
+    $(package_dir)/repo/rtl/nmu/top/nmu_lint.vlt \
+    --top-module $(top) -f $(filelist) --Mdir $(run_dir)/csrc -o $(run_dir)/simv \
+    -GID_WIDTH=$(ID_WIDTH) -GNOC_HALF_PERIOD=$(NOC_HALF_PERIOD) \
+    -GBUFFER_DEPTH=$(BUFFER_DEPTH) -GREAD_ROB_ENABLED=$(READ_ROB_ENABLED)
+ifeq ($(WAVE),1)
+VCS_FLAGS += +define+DUMP_WAVE -P $(PLI_DIR)/novas.tab $(PLI_DIR)/pli.a
+VERILATOR_FLAGS += +define+DUMP_WAVE --trace-fst
+endif
+
+.PHONY: help sanity_check compile run sim regress run_wave nWave view fault report
+help:
+	@printf '%s\n' \
+	 'make run PATTERN=neighbor          Compile and run with VCS (default)' \
+	 'make sim PATTERN=hotspot           Reuse the existing executable' \
+	 'make regress                      Compile once, run all patterns and fault check' \
+	 'make run_wave PATTERN=directed     Compile waveform variant and run' \
+	 'make nWave PATTERN=directed        Open VCS FSDB' \
+	 'make report                       Package logs/config/checksums' \
+	 'make regress SIMULATOR=verilator   Same sources, tests and config with Verilator' \
+	 'Shared overrides: ID_WIDTH, NOC_HALF_PERIOD, BUFFER_DEPTH, READ_ROB_ENABLED' \
+	 'Tool overrides: VCS, VERILATOR, VERDI_HOME, PLI_DIR, NWAVE; run_dir retains separate runs'
+
+sanity_check:
+	@test -f "$(filelist)" || { echo 'Use the generated offline bundle (files.f missing)' >&2; exit 1; }
+	@case "$(SIMULATOR)" in vcs|verilator) ;; *) echo 'SIMULATOR must be vcs or verilator' >&2; exit 1;; esac
+	@case "$(PATTERN)" in neighbor|uniform_random|hotspot|directed) ;; *) echo 'Invalid PATTERN' >&2; exit 1;; esac
+	@case "$(WAVE)" in 0|1) ;; *) echo 'WAVE must be 0 or 1' >&2; exit 1;; esac
+	@mkdir -p "$(report_dir)" "$(wave_dir)"
+
+compile: sanity_check
+	@printf '%s\n' 'SIMULATOR=$(SIMULATOR)' 'WAVE=$(WAVE)' 'ID_WIDTH=$(ID_WIDTH)' \
+	 'NOC_HALF_PERIOD=$(NOC_HALF_PERIOD)' 'BUFFER_DEPTH=$(BUFFER_DEPTH)' \
+	 'READ_ROB_ENABLED=$(READ_ROB_ENABLED)' 'VCS_FLAGS=$(VCS_FLAGS)' \
+	 'VERILATOR_FLAGS=$(VERILATOR_FLAGS)' 'VCS_EXTRA=$(VCS_EXTRA)' \
+	 'VERILATOR_EXTRA=$(VERILATOR_EXTRA)' > "$(report_dir)/build-config.txt"
+	@cp "$(package_dir)/SHA256SUMS" "$(report_dir)/source-SHA256SUMS"
+ifeq ($(SIMULATOR),vcs)
+	@command -v "$(VCS)" >/dev/null || { echo 'Initialize the workstation VCS environment first' >&2; exit 1; }
+ifeq ($(WAVE),1)
+	@test -r "$(PLI_DIR)/novas.tab" -a -r "$(PLI_DIR)/pli.a" || { echo 'Set VERDI_HOME or PLI_DIR to the installed Verdi PLI directory' >&2; exit 1; }
+endif
+	cd "$(package_dir)" && $(VCS) $(VCS_FLAGS) $(VCS_EXTRA) -l "$(report_dir)/compile.log"
+else
+	cd "$(package_dir)" && $(VERILATOR) $(VERILATOR_FLAGS) $(VERILATOR_EXTRA) 2>&1 | tee "$(report_dir)/compile.log"
+endif
+
+run: compile sim
+
+sim: sanity_check
+	@test -x "$(run_dir)/simv" || { echo 'Run make compile or make run first' >&2; exit 1; }
+	@args=(); if [[ "$(PATTERN)" == directed ]]; then \
+	  args+=(+require_reorder); \
+	  if [[ $(BUFFER_DEPTH) == 8 && $(READ_ROB_ENABLED) == 1 ]]; then args+=(+require_pressure); fi; \
+	fi; cd "$(package_dir)"; "$(run_dir)/simv" \
+	  +stim_dir="$(package_dir)/cases/$(PATTERN)" +run_dir="$(run_dir)" \
+	  +wave_file="$(wave_file)" "$${args[@]}" $(SIM_EXTRA) \
+	  2>&1 | tee "$(report_dir)/$(PATTERN).log"
+	@grep -q 'PASS NMU standalone' "$(report_dir)/$(PATTERN).log"
+	@echo 'PASS: $(PATTERN)'
+
+regress: compile
+	@for pattern in $(patterns); do \
+	  $(MAKE) --no-print-directory -f "$(script_dir)/Makefile" sim PATTERN=$$pattern run_dir="$(run_dir)"; \
+	done
+	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" fault run_dir="$(run_dir)"
+	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" report run_dir="$(run_dir)"
+
+fault: sanity_check
+	@test -x "$(run_dir)/simv"
+	@cd "$(package_dir)"; if "$(run_dir)/simv" \
+	  +stim_dir="$(package_dir)/cases/directed" +corrupt_rsp \
+	  +wave_file="$(wave_dir)/corrupt.$(wave_ext)" 2>&1 | tee "$(report_dir)/corrupt.log"; then \
+	  echo 'ERROR: corrupt response unexpectedly passed' >&2; exit 1; \
+	fi
+	@grep -q 'R data/lane/order/last mismatch' "$(report_dir)/corrupt.log"
+	@echo 'PASS: expected corruption was detected'
+
+run_wave:
+	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" run WAVE=1 PATTERN=$(PATTERN)
+
+nWave:
+	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" view WAVE=1 SIMULATOR=vcs PATTERN=$(PATTERN)
+
+view:
+	@test -f "$(wave_file)" || { echo 'Run make run_wave first' >&2; exit 1; }
+	@$(NWAVE) "$(wave_file)" &
+
+report:
+	@test -d "$(report_dir)" || { echo 'No report directory yet' >&2; exit 1; }
+	tar -czf "$(package_dir)/nmu-$(SIMULATOR)-results.tar.gz" -C "$(run_dir)" report
+	@echo 'Reports: $(package_dir)/nmu-$(SIMULATOR)-results.tar.gz'
