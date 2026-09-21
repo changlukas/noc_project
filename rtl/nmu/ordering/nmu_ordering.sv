@@ -73,6 +73,19 @@ module nmu_ordering #(
     typedef ni_child_types_pkg::nmu_rob_order_entry_t order_entry_t;
     typedef ni_child_types_pkg::nmu_ordering_domain_t domain_t;
 
+    localparam int unsigned BYTE_OFFSET_W = $clog2(ni_params_pkg::AXI_DATA_WIDTH_DFLT/8);
+    typedef struct packed {
+        logic [BYTE_OFFSET_W-1:0] addr;
+        logic [7:0] len;
+        logic [2:0] size;
+        logic [1:0] burst;
+        logic is_data;
+    } read_lane_context_t;
+    read_lane_context_t read_lane_context_reg [NUM_IDS][NMU_MAX_TXNS_PER_ID];
+    read_lane_context_t retire_context;
+    ni_signals_pkg::axi_r_t retire_r;
+    int unsigned retire_byte_addr, retire_step, retire_span, retire_lane;
+
     order_entry_t write_order_reg [NUM_IDS][NMU_MAX_TXNS_PER_ID];
     order_entry_t read_order_reg [NUM_IDS][NMU_MAX_TXNS_PER_ID];
     logic [CL_ORDER-1:0] write_head_reg [NUM_IDS], write_head_next [NUM_IDS];
@@ -234,7 +247,26 @@ module nmu_ordering #(
     assign m_r_valid_o = !rst_i && (r_select_valid || r_direct);
     assign r_peek_addr = TAG_W'(int'(read_head[r_select_id].base) + int'(r_retire_offset_reg[r_select_id]));
     assign r_release_addr = TAG_W'(int'(read_head[r_retire_id].base) + int'(r_retire_offset_reg[r_retire_id]));
-    assign m_r_o = r_select_valid ? r_peek_data : s_r_i.axi;
+    // NarrowR payload contains one 64-bit lane; position it using the issuing AR.
+    // Context is selected only at retirement, after any out-of-order buffering.
+    always_comb begin
+        retire_r = r_select_valid ? r_peek_data : s_r_i.axi;
+        retire_context = read_lane_context_reg[r_retire_id][read_head_reg[r_retire_id]];
+        retire_step = 1 << retire_context.size;
+        retire_span = (int'(retire_context.len) + 1) * retire_step;
+        retire_byte_addr = int'(retire_context.addr);
+        if (retire_context.burst != 0 && r_retire_offset_reg[r_retire_id] != 0) begin
+            retire_byte_addr = (int'(retire_context.addr) & ~(retire_step-1)) +
+                int'(r_retire_offset_reg[r_retire_id]) * retire_step;
+            if (retire_context.burst == 2)
+                retire_byte_addr = (int'(retire_context.addr) & ~(retire_span-1)) |
+                    (retire_byte_addr & (retire_span-1));
+        end
+        retire_lane = (retire_byte_addr % (ni_params_pkg::AXI_DATA_WIDTH_DFLT/8)) / 8;
+        m_r_o = retire_r;
+        if (!retire_context.is_data)
+            m_r_o.rdata = ni_params_pkg::AXI_DATA_WIDTH_DFLT'(retire_r.rdata[63:0]) << (retire_lane*64);
+    end
     assign s_r_ready_o = !rst_i && (r_direct ? m_r_ready_i :
         (READ_ROB_ENABLED && s_r_i.meta.ordering_req && r_fill_ready));
     assign r_retire_id = r_select_valid ? r_select_id : s_r_i.axi.rid;
@@ -427,6 +459,11 @@ module nmu_ordering #(
                 };
             end
             if (ar_accept) begin
+                read_lane_context_reg[s_ar_i.axi.arid][read_tail_reg[s_ar_i.axi.arid]] <= '{
+                    addr: BYTE_OFFSET_W'(s_ar_i.axi.araddr), len: s_ar_i.axi.arlen,
+                    size: s_ar_i.axi.arsize, burst: s_ar_i.axi.arburst,
+                    is_data: s_ar_i.route.domain.is_data
+                };
                 read_order_reg[s_ar_i.axi.arid][read_tail_reg[s_ar_i.axi.arid]] <= '{
                     base: ar_tag, beat_count: ar_beat_count,
                     ordering_req: ar_reorder, collective: 1'b0

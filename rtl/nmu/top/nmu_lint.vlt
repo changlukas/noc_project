@@ -1,0 +1,5 @@
+`verilator_config
+// Imported dependencies retain their upstream width diagnostics. Project RTL
+// and the standalone checker keep width truncation/expansion fatal.
+lint_off -rule WIDTHEXPAND -file "*/sim/dv/*"
+lint_off -rule WIDTHTRUNC -file "*/sim/dv/*"

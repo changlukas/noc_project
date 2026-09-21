@@ -282,3 +282,8 @@ clean-verilator:
 
 clean-vcs:
 	$(MAKE) -C $(SIM_VCS) clean
+
+# Standalone production NMU control-plane verification; no C++ model or DPI.
+.PHONY: rtl-nmu-standalone-test
+rtl-nmu-standalone-test:
+	bash rtl/nmu/top/test_nmu.sh standalone

@@ -2,12 +2,20 @@
 package:
   name: noc_rtl
 
+include_dirs:
+  - ../sim/dv/axi-0.39.7/include
+  - ../sim/dv/common_cells-1.37.0/include
+
 dependencies:
   common_cells:
     git: https://github.com/pulp-platform/common_cells.git
     rev: 63b7c50d43e462b59506f69d341ff1e40202866d
 
 sources:
+  - ../sim/dv/common_cells-1.37.0/src/cf_math_pkg.sv
+  - ../sim/dv/common_cells-1.37.0/src/lzc.sv
+  - ../sim/dv/axi-0.39.7/src/axi_pkg.sv
+  - ../sim/dv/axi-0.39.7/src/axi_id_remap.sv
   - common/axi_if.sv
   - common/ni_child_types_pkg.sv
   - common/ni_sam.sv
@@ -19,6 +27,7 @@ sources:
   - nmu/ordering/nmu_reorder_storage.sv
   - nmu/ordering/nmu_ordering.sv
   - nmu/request_packetize/nmu_request_packetize.sv
+  - nmu/response_depacketize/nmu_response_depacketize.sv
   - nmu/response_path/nmu_response_path.sv
   - nmu/top/nmu.sv
   - nmu/request_fifo/nmu_request_fifo.sv
