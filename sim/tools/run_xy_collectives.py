@@ -99,7 +99,7 @@ def main():
     base=["make","-C","sim/verilator","CONFIG=mesh_4x4_dual_edge_large","DMA=1","DMA_DEPENDENT=1",
           "DMA_RW=write","SEED=1","BUILD_JOBS=1","SIM_OPT=-O2",
           "BUILD_ROOT=/home/agent/noc_sim_build","VL_BUILD=/home/agent/noc_sim_build/verilator",
-          "STIM_BASE=test_patterns/xy_collectives",f"OUTPUT_ROOT={output}"]
+          "STIM_BASE=../test_patterns/xy_collectives",f"OUTPUT_ROOT={output}"]
     model=None
     for case in selected:
         if case["category"]=="measurement" and model is None:

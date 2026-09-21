@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "ctrl_write_single",
+      "operation": "write",
+      "count": 1
+    },
+    {
+      "name": "ctrl_read_single",
+      "operation": "read",
+      "count": 1
+    },
+    {
+      "name": "ctrl_write_burst",
+      "operation": "write",
+      "count": 12,
+      "burst_sweep": true,
+      "max_outstanding": 1
+    },
+    {
+      "name": "ctrl_read_burst",
+      "operation": "read",
+      "count": 12,
+      "burst_sweep": true,
+      "max_outstanding": 1
+    },
+    {
+      "name": "same_id_in_order",
+      "count": 8,
+      "max_outstanding": 1
+    },
+    {
+      "name": "same_id_outstanding",
+      "count": 16,
+      "response_delay": 12,
+      "startup_delay": 80,
+      "min_outstanding": 2
+    },
+    {
+      "name": "multi_id_outstanding",
+      "count": 16,
+      "ids": "multiple",
+      "response_delay": 12,
+      "startup_delay": 80,
+      "min_outstanding": 2,
+      "min_unique": 2
+    },
+    {
+      "name": "cross_id_out_of_order",
+      "count": 16,
+      "ids": "multiple",
+      "response_order": 2,
+      "response_delay": 12,
+      "startup_delay": 80,
+      "min_outstanding": 2,
+      "min_unique": 2,
+      "require_ooo": 1
+    },
+    {
+      "name": "same_id_cross_dst_reorder",
+      "count": 16,
+      "destinations": "alternate",
+      "response_order": 1,
+      "response_delay": 12,
+      "startup_delay": 80,
+      "min_outstanding": 2,
+      "require_buffered": 1
+    },
+    {
+      "name": "outstanding_full_recover",
+      "legacy_mixed": true,
+      "response_order": 1,
+      "response_delay": 12,
+      "startup_delay": 160,
+      "min_outstanding": 2,
+      "require_capacity": 1
+    },
+    {
+      "name": "backpressure",
+      "count": 16,
+      "burst_sweep": true,
+      "stall_enable": 1,
+      "response_delay": 12,
+      "min_outstanding": 2,
+      "require_stall": 1
+    },
+    {
+      "name": "reset_inflight",
+      "count": 8,
+      "destinations": "alternate",
+      "reset_warmup": 1
+    }
+  ]
+}

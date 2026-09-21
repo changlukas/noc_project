@@ -74,12 +74,12 @@ task_verilator=(verilator --timing --assert -Wall -Wno-fatal
     -Wno-PINCONNECTEMPTY -I"$task_common_cells/include"
     -I"$task_root/sim/dv/axi-0.39.7/include" -I"$task_root/sim/dv/common_cells-1.37.0/include"
     --top-module tb_nmu_elaborate)
-if [[ "${1:-test}" == standalone ]]; then
+if [[ "${1:-test}" == standalone || "${1:-test}" == prepare ]]; then
     task_sources+=(
         "$task_root/sim/dv/common_verification-0.2.5/src/rand_id_queue.sv"
         "$task_root/sim/dv/axi-0.39.7/src/axi_intf.sv"
         "$task_root/sim/dv/axi-0.39.7/src/axi_test.sv"
-        "$task_root/sim/tb/nmu/tb_nmu_standalone.sv"
+        "$task_root/sim/standalone/nmu/tb_nmu_standalone.sv"
     )
     task_output=${NMU_TEST_OUTPUT:-$task_tmp/standalone}
     mkdir -p "$task_output"
@@ -89,19 +89,31 @@ if [[ "${1:-test}" == standalone ]]; then
         "+incdir+$task_root/sim/dv/axi-0.39.7/include" \
         "+incdir+$task_root/sim/dv/common_cells-1.37.0/include" \
         "${task_sources[@]}" > "$task_output/files.f"
+    if [[ ${1:-test} != prepare ]]; then
     "${task_verilator[@]}" --top-module tb_nmu_standalone --binary -j 1 \
         -GID_WIDTH="${NMU_ID_WIDTH:-8}" -GNOC_HALF_PERIOD="${NMU_NOC_HALF_PERIOD:-7}" \
         -GBUFFER_DEPTH="${NMU_BUFFER_DEPTH:-128}" -GREAD_ROB_ENABLED="${NMU_READ_ROB:-1}" \
         --Mdir "$task_output/obj" "${task_sources[@]}"
+    fi
     for task_pattern in neighbor uniform_random hotspot; do
         python3 "$task_root/sim/tools/gen_test_patterns.py" --pattern "$task_pattern" \
             --topology mesh_2x2 --space config --size 3 --len 3 --transactions-per-node 16 \
             --ids-per-initiator 1 --hotspot 1 --seed 17 --out "$task_output/$task_pattern"
-        "$task_output/obj/Vtb_nmu_standalone" +stim_dir="$task_output/$task_pattern/node0"
+        if [[ ${1:-test} != prepare ]]; then
+            "$task_output/obj/Vtb_nmu_standalone" +stim_dir="$task_output/$task_pattern/node0"
+        fi
     done
     python3 "$task_root/sim/tools/gen_nmu_standalone_patterns.py" \
         --out "$task_output/directed" --topology "$task_root/sim/configs/mesh_2x2.yml" \
         --id-width "${NMU_ID_WIDTH:-8}"
+    task_block_patterns="$task_root/sim/test_patterns/standalone/generated/i${NMU_ID_WIDTH:-8}"
+    python3 "$task_root/sim/tools/gen_standalone_patterns.py" --out "$task_block_patterns" \
+        --id-width "${NMU_ID_WIDTH:-8}"
+    if [[ ${1:-test} == prepare ]]; then
+        python3 "$task_root/sim/tools/package_nmu_standalone.py" --run-dir "$task_output" \
+            --block-patterns "$task_block_patterns" --output-dir "$task_output/stage"
+        exit
+    fi
     task_directed_args=(+require_reorder)
     if [[ ${NMU_BUFFER_DEPTH:-128} == 8 && ${NMU_READ_ROB:-1} == 1 ]]; then
         task_directed_args+=(+require_pressure)

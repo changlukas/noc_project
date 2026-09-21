@@ -7,6 +7,7 @@ script_dir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 package_dir := $(abspath $(script_dir)/..)
 include $(script_dir)/config.mk
 SIMULATOR ?= vcs
+CASE ?= ctrl_write_single
 VCS ?= vcs
 VERILATOR ?= verilator
 NWAVE ?= nWave
@@ -25,7 +26,8 @@ wave_ext := fsdb
 ifeq ($(SIMULATOR),verilator)
 wave_ext := fst
 endif
-wave_file ?= $(wave_dir)/$(PATTERN).$(wave_ext)
+case_label := $(if $(CASE),$(CASE),$(PATTERN))
+wave_file ?= $(wave_dir)/$(case_label).$(wave_ext)
 
 VCS_FLAGS := -full64 -sverilog -override_timescale=1ns/1ps -debug_access+all \
     +lint=TFIPC-L +lint=PCWM -Mdir=$(run_dir)/csrc -f $(filelist) -top $(top) \
@@ -44,20 +46,21 @@ VCS_FLAGS += +define+DUMP_WAVE -P $(PLI_DIR)/novas.tab $(PLI_DIR)/pli.a
 VERILATOR_FLAGS += +define+DUMP_WAVE --trace-fst
 endif
 
-.PHONY: help sanity_check compile run sim regress run_wave nWave view fault report
+.PHONY: help sanity_check compile run sim regress block_regress legacy_regress run_wave nWave view fault report
 help:
 	@printf '%s\n' \
-	 'make run PATTERN=neighbor          Compile and run with VCS (default)' \
-	 'make sim PATTERN=hotspot           Reuse the existing executable' \
-	 'make regress                      Compile once, run all patterns and fault check' \
-	 'make run_wave PATTERN=directed     Compile waveform variant and run' \
-	 'make nWave PATTERN=directed        Open VCS FSDB' \
-	 'make report                       Package logs/config/checksums' \
-	 'make regress SIMULATOR=verilator   Same sources, tests and config with Verilator' \
+	 'make run CASE=ctrl_write_single     Compile and run (VCS default)' \
+	 'make sim CASE=ctrl_read_burst       Reuse existing executable' \
+	 'make regress                       Compile once, all standalone cases and fault check' \
+	 'make legacy_regress                Retained topology traffic and mixed tests' \
+	 'make run_wave CASE=same_id_cross_dst_reorder' \
+	 'make nWave CASE=same_id_cross_dst_reorder' \
+	 'make regress SIMULATOR=verilator    Same sources, cases and configuration' \
 	 'Shared overrides: ID_WIDTH, NOC_HALF_PERIOD, BUFFER_DEPTH, READ_ROB_ENABLED' \
-	 'Tool overrides: VCS, VERILATOR, VERDI_HOME, PLI_DIR, NWAVE; run_dir retains separate runs'
+	 'Patterns are generated for a specific ID_WIDTH; synchronize matching inputs before changing it.'
 
 sanity_check:
+	@if [[ -n "$(CASE)" ]]; then grep -Fxq "$(CASE)" "$(package_dir)/cases/standalone/cases.list" || { echo "Unknown CASE" >&2; exit 1; }; fi
 	@test -f "$(filelist)" || { echo 'Use the synchronized simulation directory (files.f missing)' >&2; exit 1; }
 	@case "$(SIMULATOR)" in vcs|verilator) ;; *) echo 'SIMULATOR must be vcs or verilator' >&2; exit 1;; esac
 	@case "$(PATTERN)" in neighbor|uniform_random|hotspot|directed) ;; *) echo 'Invalid PATTERN' >&2; exit 1;; esac
@@ -85,19 +88,27 @@ run: compile sim
 
 sim: sanity_check
 	@test -x "$(run_dir)/simv" || { echo 'Run make compile or make run first' >&2; exit 1; }
-	@args=(); if [[ "$(PATTERN)" == directed ]]; then \
+	@args=(); stim="$(package_dir)/cases/$(PATTERN)"; if [[ -n "$(CASE)" ]]; then \
+	  stim="$(package_dir)/cases/standalone/$(CASE)"; mapfile -t args < "$$stim/schedule.txt"; \
+	elif [[ "$(PATTERN)" == directed ]]; then \
 	  args+=(+require_reorder); \
 	  if [[ $(BUFFER_DEPTH) == 8 && $(READ_ROB_ENABLED) == 1 ]]; then args+=(+require_pressure); fi; \
 	fi; cd "$(package_dir)"; "$(run_dir)/simv" \
-	  +stim_dir="$(package_dir)/cases/$(PATTERN)" +run_dir="$(run_dir)" \
+	  +stim_dir="$$stim" +run_dir="$(run_dir)" \
 	  +wave_file="$(wave_file)" "$${args[@]}" $(SIM_EXTRA) \
-	  2>&1 | tee "$(report_dir)/$(PATTERN).log"
-	@grep -q 'PASS NMU standalone' "$(report_dir)/$(PATTERN).log"
-	@echo 'PASS: $(PATTERN)'
+	  2>&1 | tee "$(report_dir)/$(case_label).log"
+	@grep -q 'PASS NMU standalone' "$(report_dir)/$(case_label).log"
+	@echo 'PASS: $(case_label)'
 
-regress: compile
+block_regress regress: compile
+	@while read -r name; do \
+	  $(MAKE) --no-print-directory -f "$(script_dir)/Makefile" sim CASE=$$name run_dir="$(run_dir)"; \
+	done < "$(package_dir)/cases/standalone/cases.list"
+	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" fault run_dir="$(run_dir)"
+
+legacy_regress: compile
 	@for pattern in $(patterns); do \
-	  $(MAKE) --no-print-directory -f "$(script_dir)/Makefile" sim PATTERN=$$pattern run_dir="$(run_dir)"; \
+	  $(MAKE) --no-print-directory -f "$(script_dir)/Makefile" sim CASE= PATTERN=$$pattern run_dir="$(run_dir)"; \
 	done
 	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" fault run_dir="$(run_dir)"
 	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" report run_dir="$(run_dir)"
@@ -113,10 +124,10 @@ fault: sanity_check
 	@echo 'PASS: expected corruption was detected'
 
 run_wave:
-	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" run WAVE=1 PATTERN=$(PATTERN)
+	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" run WAVE=1 PATTERN=$(PATTERN) CASE=$(CASE)
 
 nWave:
-	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" view WAVE=1 SIMULATOR=vcs PATTERN=$(PATTERN)
+	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" view WAVE=1 SIMULATOR=vcs PATTERN=$(PATTERN) CASE=$(CASE)
 
 view:
 	@test -f "$(wave_file)" || { echo 'Run make run_wave first' >&2; exit 1; }

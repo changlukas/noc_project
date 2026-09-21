@@ -22,6 +22,16 @@ module tb_nmu_standalone #(
 `endif
     logic axi_clk = 0, noc_clk = 0, rst_n = 0;
     bit warmup = 1;
+    bit block_case = 0;
+    string case_name = "legacy";
+    int response_order = 1, response_delay = 12, startup_delay = 0;
+    int max_outstanding = 0, stall_enable = 1, reset_warmup = 1;
+    int min_outstanding = 0, min_unique = 0;
+    int require_ooo = 0, require_buffered = 0, require_capacity = 0, require_stall = 0;
+    int peak_w = 0, peak_r = 0, peak_unique_w = 0, peak_unique_r = 0;
+    int blocked_aw = 0, blocked_ar = 0, reordered_b = 0, reordered_r = 0;
+    int accepted_aw = 0, accepted_ar = 0;
+
     int warm_requests = 0;
     req_flit_t warm_aw_packets[$], warm_ar_packets[$];
     always #5 axi_clk = ~axi_clk;
@@ -48,8 +58,8 @@ module tb_nmu_standalone #(
     logic req_valid, req_ready, rsp_valid = 0, rsp_ready, dat_valid;
     req_flit_t req;
     rsp_flit_t rsp = '0;
-    wire allow_b = !warmup && axi_cycles % 23 >= 7;
-    wire allow_r = !warmup && axi_cycles % 19 >= 6;
+    wire allow_b = !warmup && (stall_enable == 0 || axi_cycles % 23 >= 7);
+    wire allow_r = !warmup && (stall_enable == 0 || axi_cycles % 19 >= 6);
     assign bus.awid = vip.aw_id;
     assign bus.awaddr = vip.aw_addr;
     assign bus.awlen = vip.aw_len;
@@ -105,7 +115,7 @@ module tb_nmu_standalone #(
     );
     always @(negedge noc_clk) if (rst_n) cycles++;
     always @(posedge axi_clk) if (rst_n) #0.5 axi_cycles++;
-    assign req_ready = rst_n && cycles % 17 >= 5;
+    assign req_ready = rst_n && (stall_enable == 0 || cycles % 17 >= 5);
     function automatic logic [63:0] read_pattern(input int txn, input int beat);
         return 64'hcafe123400000000 | (64'(txn) << 16) | 64'(beat);
     endfunction
@@ -206,14 +216,23 @@ module tb_nmu_standalone #(
         end
     end
     always @(posedge axi_clk) begin : monitor_response
-        int id, txn, lane, popped, unique_w, unique_r;
+        int id, txn, lane, popped, unique_w, unique_r, total_w, total_r;
         logic [511:0] data;
         if (rst_n && !warmup) begin
-            unique_w = 0; unique_r = 0;
+            unique_w = 0; unique_r = 0; total_w = 0; total_r = 0;
             for (int i = 0; i < 256; i++) begin
+                total_w += live_w[i]; total_r += live_r[i];
                 if (live_w[i] != 0) unique_w++;
                 if (live_r[i] != 0) unique_r++;
             end
+            if (total_w > peak_w) peak_w = total_w;
+            if (total_r > peak_r) peak_r = total_r;
+            if (unique_w > peak_unique_w) peak_unique_w = unique_w;
+            if (unique_r > peak_unique_r) peak_unique_r = unique_r;
+            if (bus.awvalid && !bus.awready) blocked_aw++;
+            if (bus.arvalid && !bus.arready) blocked_ar++;
+            if (bus.awvalid && bus.awready) accepted_aw++;
+            if (bus.arvalid && bus.arready) accepted_ar++;
             if (unique_w == 8 && bus.awvalid && !bus.awready && live_w[int'(bus.awid)] == 0)
                 id_exhaustion_w++;
             if (unique_r == 8 && bus.arvalid && !bus.arready && live_r[int'(bus.arid)] == 0)
@@ -257,16 +276,32 @@ module tb_nmu_standalone #(
     // Untagged same-ID responses retain their request order.
     initial begin : response_stimulus
         int index, txn;
+        bit eligible;
         rsp_flit_t value;
         req_flit_t request;
         wait(rst_n && !warmup);
+        repeat (startup_delay) @(negedge noc_clk);
         forever begin
-            repeat (12) @(negedge noc_clk);
+            repeat (response_delay) @(negedge noc_clk);
             if (pending_b.size() != 0) begin
                 index = 0;
-                for (int i = 0; i < pending_b.size(); i++)
-                    if (aw_packets[pending_b[i]].header[ORDERING_REQ_LSB]) index = i;
+                for (int i = 1; i < pending_b.size(); i++) begin
+                    eligible = response_order == 2 ||
+                        (response_order == 1 && aw_packets[pending_b[i]].header[ORDERING_REQ_LSB]);
+                    // Preserve same-ID order within each destination. Cross-ID
+                    // scheduling preserves all same-ID order, regardless of route.
+                    if (block_case) begin
+                        for (int j = 0; j < i; j++) begin
+                            if (expected_aw[pending_b[j]].ax_id == expected_aw[pending_b[i]].ax_id &&
+                                (response_order == 2 ||
+                                 aw_packets[pending_b[j]].header[DST_ID_LSB +: DST_ID_WIDTH] ==
+                                 aw_packets[pending_b[i]].header[DST_ID_LSB +: DST_ID_WIDTH])) eligible = 0;
+                        end
+                    end
+                    if (eligible) index = i;
+                end
                 txn = pending_b[index]; pending_b.delete(index);
+                if (index != 0) reordered_b++;
                 if (index != 0) reordered_sent++;
                 request = aw_packets[txn];
                 value = '0;
@@ -283,9 +318,23 @@ module tb_nmu_standalone #(
             end
             if (pending_r.size() != 0) begin
                 index = 0;
-                for (int i = 0; i < pending_r.size(); i++)
-                    if (ar_packets[pending_r[i]].header[ORDERING_REQ_LSB]) index = i;
+                for (int i = 1; i < pending_r.size(); i++) begin
+                    eligible = response_order == 2 ||
+                        (response_order == 1 && ar_packets[pending_r[i]].header[ORDERING_REQ_LSB]);
+                    // Preserve same-ID order within each destination. Cross-ID
+                    // scheduling preserves all same-ID order, regardless of route.
+                    if (block_case) begin
+                        for (int j = 0; j < i; j++) begin
+                            if (expected_ar[pending_r[j]].ax_id == expected_ar[pending_r[i]].ax_id &&
+                                (response_order == 2 ||
+                                 ar_packets[pending_r[j]].header[DST_ID_LSB +: DST_ID_WIDTH] ==
+                                 ar_packets[pending_r[i]].header[DST_ID_LSB +: DST_ID_WIDTH])) eligible = 0;
+                        end
+                    end
+                    if (eligible) index = i;
+                end
                 txn = pending_r[index]; pending_r.delete(index);
+                if (index != 0) reordered_r++;
                 if (index != 0) reordered_sent++;
                 request = ar_packets[txn];
                 for (int beat = 0; beat <= int'(expected_ar[txn].ax_len); beat++) begin
@@ -296,7 +345,7 @@ module tb_nmu_standalone #(
                 value.header[DST_PORT_ID_LSB +: DST_PORT_ID_WIDTH] = request.header[SRC_PORT_ID_LSB +: SRC_PORT_ID_WIDTH];
                 value.header[SRC_PORT_ID_LSB +: SRC_PORT_ID_WIDTH] = request.header[DST_PORT_ID_LSB +: DST_PORT_ID_WIDTH];
                     value.header[AXI_CH_LSB +: AXI_CH_WIDTH] = AXI_CH_WIDTH'(AXI_CH_NarrowR);
-                    value.header[FLIT_TAIL_LSB] = beat == int'(expected_ar[txn].ax_len);
+                    value.header[FLIT_TAIL_LSB] = 1;
                     value.payload[NARROW_R_RLAST_LSB] = beat == int'(expected_ar[txn].ax_len);
                     value.payload[NARROW_R_RID_LSB +: NARROW_R_RID_WIDTH] = request.payload[AR_ARID_LSB +: AR_ARID_WIDTH];
                     value.payload[NARROW_R_RDATA_LSB +: 64] = read_pattern(txn, beat);
@@ -307,14 +356,75 @@ module tb_nmu_standalone #(
             end
         end
     end
+    // Keep the existing VIP beat drivers and response collectors. Only admission
+    // pacing changes; the checker measures outstanding at accepted AXI boundaries.
+    task automatic run_block_master;
+        fork
+            begin
+                foreach (expected_aw[i]) begin
+                    do @(negedge axi_clk);
+                    while (max_outstanding != 0 && accepted_aw-b_count >= max_outstanding);
+                    master.drv.send_aw(expected_aw[i]);
+                end
+            end
+            master.run_w();
+            begin
+                foreach (expected_ar[i]) begin
+                    do @(negedge axi_clk);
+                    while (max_outstanding != 0 && accepted_ar-r_count >= max_outstanding);
+                    master.drv.send_ar(expected_ar[i]);
+                end
+            end
+            master.wait_b();
+            master.wait_r();
+        join
+    endtask
+
     initial begin : run
         string stim_dir;
+        int pattern_id_width, probe;
         master_t::ax_beat_t warm_aw, warm_ar;
         master_t::w_beat_t warm_w;
         rsp_flit_t warm_rsp;
         master = new(vip);
         if (!$value$plusargs("stim_dir=%s", stim_dir)) $fatal(1, "missing stim_dir");
-        master.load_files({stim_dir,"/read.txt"}, {stim_dir,"/write.txt"});
+        block_case = $test$plusargs("block_case");
+        if (block_case) begin
+            if (!$value$plusargs("case_id_width=%d", pattern_id_width) || pattern_id_width != ID_WIDTH)
+                $fatal(1, "pattern ID width does not match DUT");
+            void'($value$plusargs("case_name=%s", case_name));
+            if (!$value$plusargs("response_order=%d", response_order)) $fatal(1, "missing response_order");
+            if (!$value$plusargs("response_delay=%d", response_delay)) $fatal(1, "missing response_delay");
+            if (!$value$plusargs("startup_delay=%d", startup_delay)) $fatal(1, "missing startup_delay");
+            if (!$value$plusargs("max_outstanding=%d", max_outstanding)) $fatal(1, "missing max_outstanding");
+            if (!$value$plusargs("stall_enable=%d", stall_enable)) $fatal(1, "missing stall_enable");
+            if (!$value$plusargs("reset_warmup=%d", reset_warmup)) $fatal(1, "missing reset_warmup");
+            if (!$value$plusargs("min_outstanding=%d", min_outstanding)) $fatal(1, "missing min_outstanding");
+            if (!$value$plusargs("min_unique=%d", min_unique)) $fatal(1, "missing min_unique");
+            if (!$value$plusargs("require_ooo=%d", require_ooo)) $fatal(1, "missing require_ooo");
+            if (!$value$plusargs("require_buffered=%d", require_buffered)) $fatal(1, "missing require_buffered");
+            if (!$value$plusargs("require_capacity=%d", require_capacity)) $fatal(1, "missing require_capacity");
+            if (!$value$plusargs("require_stall=%d", require_stall)) $fatal(1, "missing require_stall");
+            // The upstream file parser assumes nonempty input. Probe empty
+            // directions before using its existing parse functions.
+            master.read_fd = $fopen({stim_dir,"/read.txt"}, "r");
+            master.write_fd = $fopen({stim_dir,"/write.txt"}, "r");
+            if (master.read_fd == 0 || master.write_fd == 0) $fatal(1, "missing AXI input file");
+            probe = $fgetc(master.read_fd);
+            if (probe != -1) begin
+                probe = $ungetc(probe, master.read_fd);
+                master.parse_read();
+            end
+            probe = $fgetc(master.write_fd);
+            if (probe != -1) begin
+                probe = $ungetc(probe, master.write_fd);
+                master.parse_write();
+            end
+            $fclose(master.read_fd);
+            $fclose(master.write_fd);
+        end else begin
+            master.load_files({stim_dir,"/read.txt"}, {stim_dir,"/write.txt"});
+        end
         expected_aw = master.aw_queue;
         expected_ar = master.ar_queue;
         expected_w = master.w_queue;
@@ -322,6 +432,7 @@ module tb_nmu_standalone #(
         foreach (expected_ar[i]) expected_r_by_id[int'(expected_ar[i].ax_id)].push_back(i);
         repeat (5) @(negedge axi_clk);
         rst_n = 1;
+        if (reset_warmup != 0) begin
         // Populate remap, CDC and order-list state, then flush before the real run.
         fork
             master.drv.send_aw(expected_aw[0]);
@@ -371,7 +482,11 @@ module tb_nmu_standalone #(
         @(negedge axi_clk); rst_n = 0; master.reset();
         repeat (10) @(negedge noc_clk);
         @(negedge axi_clk); rst_n = 1; warmup = 0;
-        master.run();
+        end else begin
+            warmup = 0;
+        end
+        if (block_case) run_block_master();
+        else master.run();
         repeat (20) @(negedge axi_clk);
         if (b_count != expected_aw.size() || r_count != expected_ar.size() ||
             aw_index != expected_aw.size() || ar_index != expected_ar.size() ||
@@ -386,6 +501,27 @@ module tb_nmu_standalone #(
             (id_exhaustion_w == 0 || id_exhaustion_r == 0)) $fatal(1, "ID exhaustion coverage missing");
         if ($test$plusargs("require_pressure") && (b_full_cycles == 0 || r_full_cycles == 0))
             $fatal(1, "buffer pressure coverage missing");
+        if (block_case) begin
+            if ((expected_aw.size() != 0 && (peak_w < min_outstanding || peak_unique_w < min_unique)) ||
+                (expected_ar.size() != 0 && (peak_r < min_outstanding || peak_unique_r < min_unique)))
+                $fatal(1, "outstanding coverage missing");
+            if (max_outstanding != 0 && (peak_w > max_outstanding || peak_r > max_outstanding))
+                $fatal(1, "outstanding limit exceeded");
+            if (require_ooo != 0 && (reordered_b == 0 || reordered_r == 0))
+                $fatal(1, "cross-ID out-of-order coverage missing");
+            if (require_buffered != 0 && (b_buffered == 0 || (READ_ROB_ENABLED && r_buffered == 0)))
+                $fatal(1, "B/R reorder coverage missing");
+            if (require_stall != 0 && stall_cycles == 0) $fatal(1, "response stall coverage missing");
+            if (require_capacity != 0) begin
+                if (blocked_aw == 0 || blocked_ar == 0) $fatal(1, "admission pressure missing");
+                if (ID_WIDTH == 8 && (id_exhaustion_w == 0 || id_exhaustion_r == 0))
+                    $fatal(1, "ID exhaustion/recovery coverage missing");
+                if (BUFFER_DEPTH == 8 && READ_ROB_ENABLED && (b_full_cycles == 0 || r_full_cycles == 0))
+                    $fatal(1, "B/R pool capacity coverage missing");
+            end
+            $display("COVER case=%s peak_W=%0d peak_R=%0d unique_W=%0d unique_R=%0d blocked_AW=%0d blocked_AR=%0d ooo_B=%0d ooo_R=%0d",
+                case_name,peak_w,peak_r,peak_unique_w,peak_unique_r,blocked_aw,blocked_ar,reordered_b,reordered_r);
+        end
         $display("COVER buffer full B=%0d R=%0d", b_full_cycles, r_full_cycles);
         $display("COVER ID exhaustion write=%0d read=%0d", id_exhaustion_w, id_exhaustion_r);
         $display("PASS NMU standalone ID=%0d B=%0d R=%0d buffered_B=%0d buffered_R=%0d reordered=%0d stall=%0d",

@@ -18,7 +18,7 @@ GENERATED_PARAMETER_FILES = (
 SOURCE_PATHS = ("ref_model", "sim", "specgen")
 SOURCE_EXCLUDES = (
     ":(exclude)sim/verilator/output/**",
-    ":(exclude)sim/verilator/test_patterns/**",
+    ":(exclude)sim/test_patterns/**",
     ":(exclude)sim/filelist_*.f",
     ":(exclude)sim/tb/test/tb_top_*.sv",
     ":(exclude)sim/tb/soc/tb_top_dma_*.sv",

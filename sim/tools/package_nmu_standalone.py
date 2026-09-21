@@ -7,9 +7,10 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+from gen_standalone_patterns import generate as generate_standalone
 
 
-def package(run_dir, output, directory=False):
+def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
     run_dir = Path(run_dir).resolve()
     repo = Path(__file__).resolve().parents[2]
     with tempfile.TemporaryDirectory(prefix="nmu-vcs-package-") as temporary:
@@ -59,10 +60,15 @@ def package(run_dir, output, directory=False):
             if name != "directed":
                 source /= "node0"
             shutil.copytree(source, root / "cases" / name)
+        if block_patterns:
+            shutil.copytree(block_patterns, root / "cases/standalone")
+        else:
+            generate_standalone(root / "cases/standalone", repo / "sim/configs/mesh_2x2.yml", id_width)
+        copy_path(repo / "sim/test_patterns/standalone/cases.json")
         copy_path(repo / "rtl/nmu/top/nmu_lint.vlt")
         (root / "script").mkdir()
-        shutil.copy2(repo / "sim/vcs/nmu/Makefile", root / "script/Makefile")
-        shutil.copy2(repo / "sim/vcs/nmu/config.mk", root / "script/config.mk")
+        shutil.copy2(repo / "sim/standalone/common/simulator.mk", root / "script/Makefile")
+        shutil.copy2(repo / "sim/standalone/nmu/config.mk", root / "script/config.mk")
         (root / "run_vcs.sh").write_text(r'''#!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -82,10 +88,10 @@ make -C script regress SIMULATOR=verilator "$@"
             "Run all (VCS default): bash run_vcs.sh\n"
             "Same suite locally: make -C script regress SIMULATOR=verilator\n"
             "Shared configuration: script/config.mk\n"
-            "Run one: make -C script run PATTERN=neighbor\n"
-            "FSDB: make -C script run_wave PATTERN=directed\n"
-            "Reuse binary: make -C script sim PATTERN=hotspot\n"
-            "Open waveform: make -C script nWave PATTERN=directed\n"
+            "Run one: make -C script run CASE=ctrl_write_single\n"
+            "FSDB: make -C script run_wave CASE=same_id_cross_dst_reorder\n"
+            "Reuse binary: make -C script sim CASE=ctrl_read_burst\n"
+            "Open waveform: make -C script nWave CASE=same_id_cross_dst_reorder\n"
             "Package logs: make -C script report\n"
             "Requires an initialized VCS environment, GNU Make and Bash. No Git, Python or network needed.\n"
             "Default: external ID width 8, AXI clock 10ns, NoC clock 14ns, B/R depth 128.\n"
@@ -111,8 +117,10 @@ make -C script regress SIMULATOR=verilator "$@"
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", required=True)
+    parser.add_argument("--block-patterns")
+    parser.add_argument("--id-width", type=int, choices=(1, 3, 8), default=8)
     destination = parser.add_mutually_exclusive_group(required=True)
     destination.add_argument("--output")
     destination.add_argument("--output-dir")
     args = parser.parse_args()
-    package(args.run_dir, args.output_dir or args.output, directory=bool(args.output_dir))
+    package(args.run_dir, args.output_dir or args.output, directory=bool(args.output_dir), block_patterns=args.block_patterns, id_width=args.id_width)

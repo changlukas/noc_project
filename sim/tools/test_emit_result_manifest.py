@@ -114,7 +114,7 @@ def test_source_patch_is_deterministic_and_contains_only_reproduction_sources(tm
     _write(tmp_path / "specgen/source/constants.yaml", "parameters:\n  changed: true\n")
     _write(tmp_path / "docs/report.md", "excluded\n")
     _write(tmp_path / "sim/verilator/output/result.csv", "excluded\n")
-    _write(tmp_path / "sim/verilator/test_patterns/mesh/node0/read.txt", "excluded\n")
+    _write(tmp_path / "sim/test_patterns/mesh/node0/read.txt", "excluded\n")
 
     first_result, source_patch = _write_source_patch(tmp_path)
     assert first_result.returncode == 0, first_result.stderr
@@ -129,7 +129,7 @@ def test_source_patch_is_deterministic_and_contains_only_reproduction_sources(tm
     assert "specgen/source/constants.yaml" in text
     assert "docs/report.md" not in text
     assert "sim/verilator/output/result.csv" not in text
-    assert "sim/verilator/test_patterns" not in text
+    assert "sim/test_patterns" not in text
 
     checkout = tmp_path.parent / f"{tmp_path.name}-clean"
     subprocess.run(["git", "clone", "-q", str(tmp_path), str(checkout)],

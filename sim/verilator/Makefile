@@ -379,7 +379,7 @@ _PATTERN_TAG   := $(_TRAFFIC_MAPPING)$(if $(filter broadcast,$(PATTERN)),_$(MULT
 # (test_patterns/<tag>/ next to output/<tag>/). Only linked artifacts have to
 # live under $(BUILD_ROOT): the Linux linker rejects a yaml-cpp built on a /mnt
 # mount, which is a constraint on object files and binaries, not on text.
-STIM_BASE      ?= test_patterns
+STIM_BASE      ?= $(SIM_ROOT)/test_patterns
 # Stimulus keys on the configuration: gen_test_patterns reads x_dim, y_dim and
 # address_map and never reads num_vc or the RoB mode, so a VC or RoB change
 # reuses the files a previous run generated rather than writing identical ones.
@@ -821,8 +821,4 @@ hello:
 
 clean:
 	rm -rf $(VL_BUILD)/obj_dir_* output
-	# Generated stimulus goes; the tracked example stays. `clean` means "leave what
-	# git tracks", and -fdx is exactly that predicate -- an rm -rf here would delete
-	# the committed example, and leaving the directory alone is what put this
-	# Makefile in violation of the root's clean contract to begin with.
-	@git clean -fdxq $(STIM_BASE) 2>/dev/null || rm -rf $(STIM_BASE)
+	@# Shared test patterns are preserved by simulator clean.
