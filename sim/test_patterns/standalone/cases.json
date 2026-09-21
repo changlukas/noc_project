@@ -15,20 +15,17 @@
       "name": "ctrl_write_burst",
       "operation": "write",
       "count": 12,
-      "burst_sweep": true,
-      "max_outstanding": 1
+      "burst_sweep": true
     },
     {
       "name": "ctrl_read_burst",
       "operation": "read",
       "count": 12,
-      "burst_sweep": true,
-      "max_outstanding": 1
+      "burst_sweep": true
     },
     {
       "name": "same_id_in_order",
-      "count": 8,
-      "max_outstanding": 1
+      "count": 8
     },
     {
       "name": "same_id_outstanding",

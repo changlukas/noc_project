@@ -10,7 +10,7 @@ from gen_nmu_standalone_patterns import generate as generate_mixed
 
 REPO = Path(__file__).resolve().parents[2]
 CATALOG = REPO / "sim/test_patterns/standalone/cases.json"
-SCHEDULE = ("response_order", "response_delay", "startup_delay", "max_outstanding",
+SCHEDULE = ("response_order", "response_delay", "startup_delay",
             "stall_enable", "reset_warmup", "min_outstanding", "min_unique",
             "require_ooo", "require_buffered", "require_capacity", "require_stall")
 
@@ -61,7 +61,7 @@ def generate(out, topology, id_width=8, catalog=CATALOG):
                     reads.extend(fields)
             (target / "write.txt").write_text("\n".join(writes) + ("\n" if writes else ""))
             (target / "read.txt").write_text("\n".join(reads) + ("\n" if reads else ""))
-        defaults = dict(response_delay=1, max_outstanding=0, min_outstanding=1, min_unique=1)
+        defaults = dict(response_delay=1, min_outstanding=1, min_unique=1)
         args = ["+block_case", f"+case_id_width={id_width}", f"+case_name={name}"]
         args += [f"+{key}={case.get(key, defaults.get(key, 0))}" for key in SCHEDULE]
         (target / "schedule.txt").write_text("\n".join(args) + "\n")

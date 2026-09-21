@@ -25,12 +25,11 @@ module tb_nmu_standalone #(
     bit block_case = 0;
     string case_name = "legacy";
     int response_order = 1, response_delay = 12, startup_delay = 0;
-    int max_outstanding = 0, stall_enable = 1, reset_warmup = 1;
+    int stall_enable = 1, reset_warmup = 1;
     int min_outstanding = 0, min_unique = 0;
     int require_ooo = 0, require_buffered = 0, require_capacity = 0, require_stall = 0;
     int peak_w = 0, peak_r = 0, peak_unique_w = 0, peak_unique_r = 0;
     int blocked_aw = 0, blocked_ar = 0, reordered_b = 0, reordered_r = 0;
-    int accepted_aw = 0, accepted_ar = 0;
 
     int warm_requests = 0;
     req_flit_t warm_aw_packets[$], warm_ar_packets[$];
@@ -231,8 +230,6 @@ module tb_nmu_standalone #(
             if (unique_r > peak_unique_r) peak_unique_r = unique_r;
             if (bus.awvalid && !bus.awready) blocked_aw++;
             if (bus.arvalid && !bus.arready) blocked_ar++;
-            if (bus.awvalid && bus.awready) accepted_aw++;
-            if (bus.arvalid && bus.arready) accepted_ar++;
             if (unique_w == 8 && bus.awvalid && !bus.awready && live_w[int'(bus.awid)] == 0)
                 id_exhaustion_w++;
             if (unique_r == 8 && bus.arvalid && !bus.arready && live_r[int'(bus.arid)] == 0)
@@ -356,30 +353,6 @@ module tb_nmu_standalone #(
             end
         end
     end
-    // Keep the existing VIP beat drivers and response collectors. Only admission
-    // pacing changes; the checker measures outstanding at accepted AXI boundaries.
-    task automatic run_block_master;
-        fork
-            begin
-                foreach (expected_aw[i]) begin
-                    do @(negedge axi_clk);
-                    while (max_outstanding != 0 && accepted_aw-b_count >= max_outstanding);
-                    master.drv.send_aw(expected_aw[i]);
-                end
-            end
-            master.run_w();
-            begin
-                foreach (expected_ar[i]) begin
-                    do @(negedge axi_clk);
-                    while (max_outstanding != 0 && accepted_ar-r_count >= max_outstanding);
-                    master.drv.send_ar(expected_ar[i]);
-                end
-            end
-            master.wait_b();
-            master.wait_r();
-        join
-    endtask
-
     initial begin : run
         string stim_dir;
         int pattern_id_width, probe;
@@ -396,7 +369,6 @@ module tb_nmu_standalone #(
             if (!$value$plusargs("response_order=%d", response_order)) $fatal(1, "missing response_order");
             if (!$value$plusargs("response_delay=%d", response_delay)) $fatal(1, "missing response_delay");
             if (!$value$plusargs("startup_delay=%d", startup_delay)) $fatal(1, "missing startup_delay");
-            if (!$value$plusargs("max_outstanding=%d", max_outstanding)) $fatal(1, "missing max_outstanding");
             if (!$value$plusargs("stall_enable=%d", stall_enable)) $fatal(1, "missing stall_enable");
             if (!$value$plusargs("reset_warmup=%d", reset_warmup)) $fatal(1, "missing reset_warmup");
             if (!$value$plusargs("min_outstanding=%d", min_outstanding)) $fatal(1, "missing min_outstanding");
@@ -485,8 +457,7 @@ module tb_nmu_standalone #(
         end else begin
             warmup = 0;
         end
-        if (block_case) run_block_master();
-        else master.run();
+        master.run();
         repeat (20) @(negedge axi_clk);
         if (b_count != expected_aw.size() || r_count != expected_ar.size() ||
             aw_index != expected_aw.size() || ar_index != expected_ar.size() ||
@@ -505,8 +476,6 @@ module tb_nmu_standalone #(
             if ((expected_aw.size() != 0 && (peak_w < min_outstanding || peak_unique_w < min_unique)) ||
                 (expected_ar.size() != 0 && (peak_r < min_outstanding || peak_unique_r < min_unique)))
                 $fatal(1, "outstanding coverage missing");
-            if (max_outstanding != 0 && (peak_w > max_outstanding || peak_r > max_outstanding))
-                $fatal(1, "outstanding limit exceeded");
             if (require_ooo != 0 && (reordered_b == 0 || reordered_r == 0))
                 $fatal(1, "cross-ID out-of-order coverage missing");
             if (require_buffered != 0 && (b_buffered == 0 || (READ_ROB_ENABLED && r_buffered == 0)))

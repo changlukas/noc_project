@@ -80,7 +80,7 @@ def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
             "ctrl_read_single": "Single control read",
             "ctrl_write_burst": "Control write bursts: SIZE, FIXED/INCR/WRAP, WSTRB, LAST",
             "ctrl_read_burst": "Control read bursts: SIZE, FIXED/INCR/WRAP, lanes, LAST",
-            "same_id_in_order": "Same ID, one outstanding transaction per direction",
+            "same_id_in_order": "Same ID, requests and responses in order",
             "same_id_outstanding": "Same ID, multiple outstanding transactions",
             "multi_id_outstanding": "Multiple IDs and outstanding transactions",
             "cross_id_out_of_order": "Out-of-order responses across IDs",
@@ -99,6 +99,7 @@ def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
             "Display this list: make list\n\n"
             + "\n".join(f"{i:2d}. {name}\n    {descriptions[name]}" for i, name in enumerate(names, 1))
             + "\n\nDefault simulator: VCS. Local override: SIMULATOR=verilator.\n"
+            "AW/W/AR use the original axi_file_master.run(); no TB outstanding cap.\n"
             "Changing CASE reuses the binary. Changing DUT settings or WAVE may need compilation.\n"
             "Pattern ID width must match the compiled DUT.\n"
             "Legacy traffic patterns: neighbor, uniform_random, hotspot, directed.\n"
