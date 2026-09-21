@@ -87,7 +87,7 @@ endif
 run: compile sim
 
 sim: sanity_check
-	@test -x "$(run_dir)/simv" || { echo 'Run make compile or make run first' >&2; exit 1; }
+	@test -x "$(run_dir)/simv" || { echo 'No binary for this configuration. Run: make run CASE=$(CASE)'  >&2; exit 1; }
 	@args=(); stim="$(package_dir)/cases/$(PATTERN)"; if [[ -n "$(CASE)" ]]; then \
 	  stim="$(package_dir)/cases/standalone/$(CASE)"; mapfile -t args < "$$stim/schedule.txt"; \
 	elif [[ "$(PATTERN)" == directed ]]; then \
