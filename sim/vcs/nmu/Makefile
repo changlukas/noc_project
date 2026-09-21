@@ -58,7 +58,7 @@ help:
 	 'Tool overrides: VCS, VERILATOR, VERDI_HOME, PLI_DIR, NWAVE; run_dir retains separate runs'
 
 sanity_check:
-	@test -f "$(filelist)" || { echo 'Use the generated offline bundle (files.f missing)' >&2; exit 1; }
+	@test -f "$(filelist)" || { echo 'Use the synchronized simulation directory (files.f missing)' >&2; exit 1; }
 	@case "$(SIMULATOR)" in vcs|verilator) ;; *) echo 'SIMULATOR must be vcs or verilator' >&2; exit 1;; esac
 	@case "$(PATTERN)" in neighbor|uniform_random|hotspot|directed) ;; *) echo 'Invalid PATTERN' >&2; exit 1;; esac
 	@case "$(WAVE)" in 0|1) ;; *) echo 'WAVE must be 0 or 1' >&2; exit 1;; esac

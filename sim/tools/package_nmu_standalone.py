@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package an already generated standalone run for an offline VCS workstation."""
+"""Prepare a generated standalone run for direct SSH synchronization or optional export."""
 import argparse
 import hashlib
 from pathlib import Path
@@ -9,7 +9,7 @@ import tarfile
 import tempfile
 
 
-def package(run_dir, output):
+def package(run_dir, output, directory=False):
     run_dir = Path(run_dir).resolve()
     repo = Path(__file__).resolve().parents[2]
     with tempfile.TemporaryDirectory(prefix="nmu-vcs-package-") as temporary:
@@ -78,7 +78,7 @@ make -C script regress SIMULATOR=verilator "$@"
             "Issue: 118\nCheckout HEAD: " + revision + "\n"
             "Compare SHA256SUMS for exact packaged source/config/pattern bytes.\n")
         (root / "README.txt").write_text(
-            "Issue #118 NMU control-plane standalone snapshot.\n"
+            "Issue #118 NMU control-plane synchronized simulation tree.\n"
             "Run all (VCS default): bash run_vcs.sh\n"
             "Same suite locally: make -C script regress SIMULATOR=verilator\n"
             "Shared configuration: script/config.mk\n"
@@ -98,6 +98,10 @@ make -C script regress SIMULATOR=verilator "$@"
         (root / "SHA256SUMS").write_text("\n".join(checksums) + "\n")
         output = Path(output)
         output.parent.mkdir(parents=True, exist_ok=True)
+        if directory:
+            shutil.copytree(root, output, dirs_exist_ok=True)
+            print(output)
+            return
         with tarfile.open(output, "w:gz") as archive:
             archive.add(root, arcname=root.name)
         print(output)
@@ -107,6 +111,8 @@ make -C script regress SIMULATOR=verilator "$@"
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", required=True)
-    parser.add_argument("--output", required=True)
+    destination = parser.add_mutually_exclusive_group(required=True)
+    destination.add_argument("--output")
+    destination.add_argument("--output-dir")
     args = parser.parse_args()
-    package(args.run_dir, args.output)
+    package(args.run_dir, args.output_dir or args.output, directory=bool(args.output_dir))
