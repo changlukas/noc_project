@@ -35,6 +35,15 @@ module nmu_request_packetize #(
     input  wire logic [DAT_NUM_VC-1:0]                   dat_credit_return_i
 );
 
+    ni_flit_pkg::req_flit_t req_flit;
+    ni_flit_pkg::dat_flit_t dat_flit;
+    logic req_valid, dat_valid;
+
+    assign m_req_o = req_flit;
+    assign m_dat_o = dat_flit;
+    assign m_req_valid_o = req_valid;
+    assign m_dat_valid_o = dat_valid;
+
     localparam int unsigned CL_VC = DAT_NUM_VC > 1 ? $clog2(DAT_NUM_VC) : 1;
     localparam int unsigned CL_CREDIT = $clog2(ROUTER_VC_DEPTH + 1);
     localparam int unsigned NUM_AXI_IDS = 1 << $bits(s_aw_i.axi.awid);
@@ -98,8 +107,8 @@ module nmu_request_packetize #(
     wire logic aw_accept = s_aw_valid_i && s_aw_ready_o;
     wire logic w_accept = s_w_valid_i && s_w_ready_o;
     wire logic ar_accept = s_ar_valid_i && s_ar_ready_o;
-    wire logic req_transfer = m_req_valid_o && m_req_ready_i;
-    wire logic dat_transfer = m_dat_valid_o;
+    wire logic req_transfer = req_valid && m_req_ready_i;
+    wire logic dat_transfer = dat_valid;
     logic req_select_aw;
     logic dat_vc_available;
     logic [CL_VC-1:0] dat_selected_vc;
@@ -256,37 +265,37 @@ module nmu_request_packetize #(
     always_comb begin
         req_header = '0;
         req_payload = '0;
-        m_req_valid_o = 1'b0;
+        req_valid = 1'b0;
         if (req_write_lock_reg && !narrow_w_empty) begin
             req_header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_NarrowW),
                 req_active_aw_reg.meta, req_active_aw_reg.collective_op,
                 req_active_aw_reg.collective_mask, '0, !req_active_aw_reg.meta.ordering_req,
                 narrow_w_head.axi.wlast);
             req_payload = pack_w(narrow_w_head, 1'b1);
-            m_req_valid_o = 1'b1;
+            req_valid = 1'b1;
         end else if (req_select_aw) begin
             req_header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_NarrowAw),
                 narrow_aw_head.meta, narrow_aw_head.collective_op,
                 narrow_aw_head.collective_mask, '0, !narrow_aw_head.meta.ordering_req, 1'b0);
             req_payload = pack_aw(narrow_aw_head);
-            m_req_valid_o = 1'b1;
+            req_valid = 1'b1;
         end else if (!req_write_lock_reg && !ar_empty) begin
             req_header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(
                 ar_head.meta.route.domain.is_data ? ni_flit_pkg::AXI_CH_DataAr :
                                                     ni_flit_pkg::AXI_CH_NarrowAr),
                 ar_head.meta, '0, '0, '0, 1'b0, 1'b1);
             req_payload = pack_ar(ar_head);
-            m_req_valid_o = 1'b1;
+            req_valid = 1'b1;
         end
-        m_req_valid_o = m_req_valid_o && !rst_i;
-        m_req_o.header = req_header;
-        m_req_o.payload = req_payload[ni_flit_pkg::AW_WIDTH-1:0];
+        req_valid = req_valid && !rst_i;
+        req_flit.header = req_header;
+        req_flit.payload = req_payload[ni_flit_pkg::AW_WIDTH-1:0];
     end
 
     always_comb begin
         dat_header = '0;
         dat_payload = '0;
-        m_dat_valid_o = 1'b0;
+        dat_valid = 1'b0;
         if (dat_write_lock_reg && !data_w_empty &&
             (dat_credit_reg[dat_active_vc_reg] != 0 || dat_credit_return_i[dat_active_vc_reg])) begin
             dat_header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataW),
@@ -294,18 +303,18 @@ module nmu_request_packetize #(
                 dat_active_aw_reg.collective_mask, dat_active_vc_reg,
                 !dat_active_aw_reg.meta.ordering_req, data_w_head.axi.wlast);
             dat_payload = pack_w(data_w_head, 1'b0);
-            m_dat_valid_o = 1'b1;
+            dat_valid = 1'b1;
         end else if (!dat_write_lock_reg && !data_aw_empty && !data_w_empty &&
                      dat_vc_available) begin
             dat_header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataAw),
                 data_aw_head.meta, data_aw_head.collective_op, data_aw_head.collective_mask,
                 dat_selected_vc, !data_aw_head.meta.ordering_req, 1'b0);
             dat_payload = pack_aw(data_aw_head);
-            m_dat_valid_o = 1'b1;
+            dat_valid = 1'b1;
         end
-        m_dat_valid_o = m_dat_valid_o && !rst_i;
-        m_dat_o.header = dat_header;
-        m_dat_o.payload = dat_payload;
+        dat_valid = dat_valid && !rst_i;
+        dat_flit.header = dat_header;
+        dat_flit.payload = dat_payload;
     end
 
     cc_fifo #(
@@ -438,7 +447,7 @@ module nmu_request_packetize #(
             fixed_vc_id_next[n] = fixed_vc_id_reg[n];
         end
 
-        req_hold_next = m_req_valid_o && !m_req_ready_i && !req_write_lock_reg;
+        req_hold_next = req_valid && !m_req_ready_i && !req_write_lock_reg;
         if (req_hold_next && !req_hold_reg) begin
             req_hold_aw_next = req_select_aw;
         end

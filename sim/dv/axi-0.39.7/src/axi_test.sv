@@ -2452,7 +2452,7 @@ package axi_test;
           this.b_outst.push_back(1'b1);
           // $display("%p", current_aw);
         end else begin
-          $warning("Issue parsing AW: %p", current_aw);
+          $warning("Issue parsing AW: id=%h addr=%h len=%0d", current_aw.ax_id, current_aw.ax_addr, current_aw.ax_len);
         end
 
         // get write data + strobe
@@ -2467,7 +2467,7 @@ package axi_test;
             this.w_queue.push_back(current_w);
             // $display("%p", current_w);
           end else begin
-            $warning("Issue parsing W: %p of AW: %p", current_w, current_aw);
+            $warning("Issue parsing W: data=%h strb=%h AW id=%h addr=%h", current_w.w_data, current_w.w_strb, current_aw.ax_id, current_aw.ax_addr);
           end
         end
       end
@@ -2501,7 +2501,7 @@ package axi_test;
           this.r_outst.push_back(1'b1);
           // $display("%p", current_ar);
         end else begin
-          $warning("Issue parsing AR: %p", current_ar);
+          $warning("Issue parsing AR: id=%h addr=%h len=%0d", current_ar.ax_id, current_ar.ax_addr, current_ar.ax_len);
         end
       end
 

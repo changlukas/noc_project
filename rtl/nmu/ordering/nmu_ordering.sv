@@ -45,6 +45,9 @@ module nmu_ordering #(
     input  wire logic                                      m_r_ready_i
 );
 
+    ni_signals_pkg::axi_r_t retire_response;
+    assign m_r_o = retire_response;
+
     localparam int unsigned ID_W = $bits(s_aw_i.axi.awid);
     localparam int unsigned NUM_IDS = 1 << ID_W;
     localparam int unsigned TAG_W = ni_flit_pkg::ORDERING_TAG_WIDTH;
@@ -263,9 +266,9 @@ module nmu_ordering #(
                     (retire_byte_addr & (retire_span-1));
         end
         retire_lane = (retire_byte_addr % (ni_params_pkg::AXI_DATA_WIDTH_DFLT/8)) / 8;
-        m_r_o = retire_r;
+        retire_response = retire_r;
         if (!retire_context.is_data)
-            m_r_o.rdata = ni_params_pkg::AXI_DATA_WIDTH_DFLT'(retire_r.rdata[63:0]) << (retire_lane*64);
+            retire_response.rdata = ni_params_pkg::AXI_DATA_WIDTH_DFLT'(retire_r.rdata[63:0]) << (retire_lane*64);
     end
     assign s_r_ready_o = !rst_i && (r_direct ? m_r_ready_i :
         (READ_ROB_ENABLED && s_r_i.meta.ordering_req && r_fill_ready));
