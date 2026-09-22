@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 module tb_nmu_standalone #(
     parameter int ID_WIDTH = 8,
-    parameter int NOC_HALF_PERIOD = 7,
+    parameter int NOC_HALF_PERIOD = 5,
     parameter int BUFFER_DEPTH = 128,
     parameter bit READ_ROB_ENABLED = 1
 );

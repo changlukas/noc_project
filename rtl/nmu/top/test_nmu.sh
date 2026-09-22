@@ -93,7 +93,7 @@ if [[ "${1:-test}" == standalone || "${1:-test}" == prepare ]]; then
         "${task_sources[@]}" > "$task_output/files.f"
     if [[ ${1:-test} != prepare ]]; then
     "${task_verilator[@]}" --top-module tb_nmu_standalone --binary -j 1 \
-        -GID_WIDTH="${NMU_ID_WIDTH:-8}" -GNOC_HALF_PERIOD="${NMU_NOC_HALF_PERIOD:-7}" \
+        -GID_WIDTH="${NMU_ID_WIDTH:-8}" -GNOC_HALF_PERIOD="${NMU_NOC_HALF_PERIOD:-5}" \
         -GBUFFER_DEPTH="${NMU_BUFFER_DEPTH:-128}" -GREAD_ROB_ENABLED="${NMU_READ_ROB:-1}" \
         --Mdir "$task_output/obj" "${task_sources[@]}"
     fi
