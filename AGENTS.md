@@ -70,6 +70,9 @@ Commit incrementally: every commit must compile, pass all existing tests, and in
 
 ## Quality Gates
 
+Run RTL simulation with VCS directly over SSH on the workstation. The agent
+retrieves and reviews reports; do not delegate VCS execution back to the user.
+
 Every commit:
 - Compiles successfully.
 - Passes all existing tests.

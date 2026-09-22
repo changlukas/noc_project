@@ -37,7 +37,7 @@ task_compile() {
             -GDAT_NUM_VC="$task_vcs" -GDAT_VC_MODE="$task_mode" -GDAT_RX_VC_DEPTH="$task_depth" \
             -Ideps/common_cells/include "${task_sources[@]}" \
             "$task_root/rtl/nmu/response_depacketize/tb_nmu_response_depacketize.sv" \
-            "${task_wave[@]}" --Mdir "$task_out/$task_name" > "$task_out/$task_name.compile.log" 2>&1
+            ${task_wave[@]+"${task_wave[@]}"} --Mdir "$task_out/$task_name" > "$task_out/$task_name.compile.log" 2>&1
         task_binary="$task_out/$task_name/Vtb_nmu_response_depacketize"
         task_ext=fst
     elif [[ "$task_sim" == vcs ]]; then
@@ -58,7 +58,7 @@ task_compile() {
             -pvalue+tb_nmu_response_depacketize.DAT_NUM_VC="$task_vcs" \
             -pvalue+tb_nmu_response_depacketize.DAT_VC_MODE="$task_mode" \
             -pvalue+tb_nmu_response_depacketize.DAT_RX_VC_DEPTH="$task_depth" \
-            "${task_wave[@]}" -Mdir="$task_work/csrc" -o "$task_work/simv" \
+            ${task_wave[@]+"${task_wave[@]}"} -Mdir="$task_work/csrc" -o "$task_work/simv" \
             -l "$task_out/$task_name.compile.log" > "$task_out/$task_name.console.log" 2>&1
         task_binary="$task_work/simv"
         task_ext=fsdb
