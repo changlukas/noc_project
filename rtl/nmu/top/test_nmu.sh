@@ -76,6 +76,8 @@ task_verilator=(verilator --timing --assert -Wall -Wno-fatal
     --top-module "${NMU_PATH_TOP:-tb_nmu_elaborate}")
 if [[ "${1:-test}" == standalone || "${1:-test}" == prepare ]]; then
     task_sources+=(
+        "$task_tech_cells/src/rtl/tc_clk.sv"
+        "$task_common_cells/src/cc_rstgen_bypass.sv"
         "$task_root/sim/dv/common_verification-0.2.5/src/rand_id_queue.sv"
         "$task_root/sim/dv/axi-0.39.7/src/axi_intf.sv"
         "$task_root/sim/dv/axi-0.39.7/src/axi_test.sv"

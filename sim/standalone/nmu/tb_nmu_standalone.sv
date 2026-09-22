@@ -21,6 +21,28 @@ module tb_nmu_standalone #(
     end
 `endif
     logic axi_clk = 0, noc_clk = 0, rst_n = 0;
+    wire axi_rst_n, noc_rst_n;
+    cc_rstgen_bypass #(.NumRegs(2)) i_axi_reset_sync (
+        .clk_i(axi_clk), .rst_ni(rst_n), .rst_test_mode_ni(rst_n), .test_mode_i(1'b0),
+        .rst_no(axi_rst_n), .init_no()
+    );
+    cc_rstgen_bypass #(.NumRegs(2)) i_noc_reset_sync (
+        .clk_i(noc_clk), .rst_ni(rst_n), .rst_test_mode_ni(rst_n), .test_mode_i(1'b0),
+        .rst_no(noc_rst_n), .init_no()
+    );
+    // Check asynchronous assertion and clock-aligned release in both domains.
+    realtime axi_reset_edge, noc_reset_edge;
+    always @(posedge axi_clk) axi_reset_edge = $realtime;
+    always @(posedge noc_clk) noc_reset_edge = $realtime;
+    always @(posedge axi_rst_n)
+        if ($realtime != axi_reset_edge) $fatal(1, "AXI reset released off clock edge");
+    always @(posedge noc_rst_n)
+        if ($realtime != noc_reset_edge) $fatal(1, "NoC reset released off clock edge");
+    always @(negedge rst_n) begin
+        #1ps;
+        if (axi_rst_n !== 1'b0 || noc_rst_n !== 1'b0)
+            $fatal(1, "Domain resets did not assert asynchronously");
+    end
     bit warmup = 1;
     bit block_case = 0;
     string case_name = "legacy";
@@ -105,16 +127,16 @@ module tb_nmu_standalone #(
     assign vip.r_user = '0;
     nmu #(.AXI_ID_WIDTH(ID_WIDTH), .READ_ROB_ENABLED(READ_ROB_ENABLED),
         .NMU_ROB_B_DEPTH(BUFFER_DEPTH), .NMU_ROB_R_DEPTH(BUFFER_DEPTH)) dut (
-        .ACLK(axi_clk), .ARESETn(rst_n), .noc_clk(noc_clk), .noc_rst_n(rst_n),
+        .ACLK(axi_clk), .ARESETn(axi_rst_n), .noc_clk(noc_clk), .noc_rst_n(noc_rst_n),
         .axi_wr_i(bus), .axi_rd_i(bus), .tx_req_valid_o(req_valid),
         .tx_req_flit_o(req), .tx_req_ready_i(req_ready),
         .rx_rsp_valid_i(rsp_valid), .rx_rsp_flit_i(rsp), .rx_rsp_ready_o(rsp_ready),
         .tx_dat_valid_o(dat_valid), .tx_dat_flit_o(), .tx_dat_crdvalid_i('0),
         .rx_dat_valid_i(1'b0), .rx_dat_flit_i('0), .rx_dat_ready_o()
     );
-    always @(negedge noc_clk) if (rst_n) cycles++;
-    always @(posedge axi_clk) if (rst_n) #0.5 axi_cycles++;
-    assign req_ready = rst_n && (stall_enable == 0 || cycles % 17 >= 5);
+    always @(negedge noc_clk) if (noc_rst_n) cycles++;
+    always @(posedge axi_clk) if (axi_rst_n) #0.5 axi_cycles++;
+    assign req_ready = noc_rst_n && (stall_enable == 0 || cycles % 17 >= 5);
     function automatic logic [63:0] read_pattern(input int txn, input int beat);
         return 64'hcafe123400000000 | (64'(txn) << 16) | 64'(beat);
     endfunction
@@ -165,12 +187,12 @@ module tb_nmu_standalone #(
     endtask
     always @(posedge noc_clk) begin : monitor_req
         int channel, lane;
-        if (rst_n && warmup && req_valid && req_ready) begin
+        if (noc_rst_n && warmup && req_valid && req_ready) begin
             warm_requests++;
             if (req.header[AXI_CH_LSB +: AXI_CH_WIDTH] == AXI_CH_WIDTH'(AXI_CH_NarrowAw)) warm_aw_packets.push_back(req);
             if (req.header[AXI_CH_LSB +: AXI_CH_WIDTH] == AXI_CH_WIDTH'(AXI_CH_NarrowAr)) warm_ar_packets.push_back(req);
         end
-        if (rst_n && !warmup) begin
+        if (noc_rst_n && !warmup) begin
 
             if (dut.i_response_path.i_ordering.b_free_count == 0) b_full_cycles++;
             if (READ_ROB_ENABLED && dut.i_response_path.i_ordering.r_free_count == 0) r_full_cycles++;
@@ -223,7 +245,7 @@ module tb_nmu_standalone #(
     always @(posedge axi_clk) begin : monitor_response
         int id, txn, lane, popped, unique_w, unique_r, total_w, total_r;
         logic [511:0] data;
-        if (rst_n && !warmup) begin
+        if (axi_rst_n && !warmup) begin
             unique_w = 0; unique_r = 0; total_w = 0; total_r = 0;
             for (int i = 0; i < 256; i++) begin
                 total_w += live_w[i]; total_r += live_r[i];
@@ -282,7 +304,7 @@ module tb_nmu_standalone #(
         bit eligible;
         rsp_flit_t value;
         req_flit_t request;
-        wait(rst_n && !warmup);
+        wait(noc_rst_n && !warmup);
         repeat (startup_delay) @(negedge noc_clk);
         forever begin
             repeat (response_delay) @(negedge noc_clk);
@@ -410,6 +432,8 @@ module tb_nmu_standalone #(
         foreach (expected_ar[i]) expected_r_by_id[int'(expected_ar[i].ax_id)].push_back(i);
         repeat (5) @(negedge axi_clk);
         rst_n = 1;
+        wait(axi_rst_n && noc_rst_n);
+        @(negedge axi_clk);
         if (reset_warmup != 0) begin
         // Populate remap, CDC and order-list state, then flush before the real run.
         fork
@@ -459,7 +483,9 @@ module tb_nmu_standalone #(
         if (warm_requests == 0) $fatal(1, "reset warmup did not reach NMU egress");
         @(negedge axi_clk); rst_n = 0; master.reset();
         repeat (10) @(negedge noc_clk);
-        @(negedge axi_clk); rst_n = 1; warmup = 0;
+        @(negedge axi_clk); rst_n = 1;
+        wait(axi_rst_n && noc_rst_n);
+        @(negedge axi_clk); warmup = 0;
         end else begin
             warmup = 0;
         end
@@ -503,13 +529,13 @@ module tb_nmu_standalone #(
             ID_WIDTH,b_count,r_count,b_buffered,r_buffered,reordered_sent,stall_cycles);
         $finish;
     end
-    assert property (@(posedge noc_clk) disable iff (!rst_n)
+    assert property (@(posedge noc_clk) disable iff (!noc_rst_n)
         req_valid && !req_ready |=> req_valid && $stable(req))
         else $fatal(1, "REQ changed while stalled");
-    assert property (@(posedge axi_clk) disable iff (!rst_n)
+    assert property (@(posedge axi_clk) disable iff (!axi_rst_n)
         bus.bvalid && !bus.bready |=> bus.bvalid && $stable({bus.bid,bus.bresp}))
         else $fatal(1, "B changed while stalled");
-    assert property (@(posedge axi_clk) disable iff (!rst_n)
+    assert property (@(posedge axi_clk) disable iff (!axi_rst_n)
         bus.rvalid && !bus.rready |=> bus.rvalid && $stable({bus.rid,bus.rresp,bus.rdata,bus.rlast}))
         else $fatal(1, "R changed while stalled");
     initial begin #2000000; $fatal(1, "NMU standalone timeout AW=%0d AR=%0d B=%0d R=%0d",aw_index,ar_index,b_count,r_count); end
