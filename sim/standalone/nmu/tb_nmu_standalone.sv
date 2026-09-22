@@ -137,7 +137,13 @@ module tb_nmu_standalone #(
             packet.payload[AW_AWLEN_LSB +: AW_AWLEN_WIDTH] !== ax.ax_len ||
             packet.payload[AW_AWSIZE_LSB +: AW_AWSIZE_WIDTH] !== ax.ax_size ||
             packet.payload[AW_AWBURST_LSB +: AW_AWBURST_WIDTH] !== ax.ax_burst)
-            $fatal(1, "REQ address/length/size/burst mismatch");
+            $fatal(1, "REQ mismatch AW=%0d AR=%0d: got addr=%h len=%h size=%h burst=%h expected addr=%h len=%h size=%h burst=%h",
+                aw_index, ar_index,
+                packet.payload[AW_AWADDR_LSB +: AW_AWADDR_WIDTH],
+                packet.payload[AW_AWLEN_LSB +: AW_AWLEN_WIDTH],
+                packet.payload[AW_AWSIZE_LSB +: AW_AWSIZE_WIDTH],
+                packet.payload[AW_AWBURST_LSB +: AW_AWBURST_WIDTH],
+                ax.ax_addr, ax.ax_len, ax.ax_size, ax.ax_burst);
         if (packet.payload[AW_AWCACHE_LSB +: AW_AWCACHE_WIDTH] !== ax.ax_cache ||
             packet.payload[AW_AWLOCK_LSB] !== ax.ax_lock ||
             packet.payload[AW_AWPROT_LSB +: AW_AWPROT_WIDTH] !== ax.ax_prot ||

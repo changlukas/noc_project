@@ -43,6 +43,14 @@ def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
                 shutil.copytree(source, target, dirs_exist_ok=True)
             else:
                 shutil.copy2(source, target)
+                if relative.parts[0] == "deps" and source.name == "cc_fifo.sv":
+                    # Size the wrap bound explicitly before comparison. Some older
+                    # simulators mis-evaluate the parameter part-select subtraction.
+                    text = source.read_text()
+                    old = "FifoDepth[PtrWidth-1:0] - 1"
+                    if text.count(old) != 2:
+                        raise ValueError("Pinned cc_fifo wrap expressions changed; review compatibility patch")
+                    target.write_text(text.replace(old, "PtrWidth'(FifoDepth - 1)"))
             copied[source] = relative.as_posix()
             return copied[source]
 
@@ -51,7 +59,9 @@ def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
             if line.startswith("+incdir+"):
                 lines.append("+incdir+" + copy_path(line[len("+incdir+"):]))
             elif line.strip():
-                lines.append(copy_path(line))
+                relative = copy_path(line)
+                # Resolve only interfaces actually used by this top from the library.
+                lines.append(("-v " if Path(line).name == "axi_intf.sv" else "") + relative)
         (root / "files.f").write_text("\n".join(lines) + "\n")
         for license_file in (repo / "sim/dv").glob("*/LICENSE*"):
             copy_path(license_file)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Clean only generated artifacts inside the synchronized standalone tree.
+# Clean generated standalone artifacts and the project-specific VCS cache.
 set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 package_dir=$(cd "$script_dir/.." && pwd -P)
@@ -10,6 +10,15 @@ package_dir=$(cd "$script_dir/.." && pwd -P)
 
 # Fixed locations, independent of command-line run_dir or other Make overrides.
 rm -rf -- "$package_dir/build"
+cache_key=$(printf '%s' "$package_dir" | cksum | cut -d' ' -f1)
+cache_root="/tmp/noc-vcs-$(id -u)-$cache_key"
+if [[ -e "$cache_root" || -L "$cache_root" ]]; then
+    [[ ! -L "$cache_root" && -O "$cache_root" ]] || {
+        echo "Refusing unexpected cache owner or symlink: $cache_root" >&2
+        exit 1
+    }
+    rm -rf -- "$cache_root"
+fi
 shopt -s nullglob
 for directory in "$package_dir" "$script_dir"; do
     rm -rf -- "$directory"/csrc "$directory"/simv "$directory"/simv.* \

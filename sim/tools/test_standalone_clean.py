@@ -50,3 +50,65 @@ def test_clean_refuses_non_standalone_tree(tmp_path):
     result = subprocess.run(["bash", str(script / "clean.sh")], capture_output=True)
     assert result.returncode != 0
     assert (build / "keep").exists()
+
+
+def test_vcs_build_uses_local_cache_and_copies_runtime(tmp_path):
+    stage = tmp_path / "standalone"
+    script = stage / "script"
+    script.mkdir(parents=True)
+    for source, target in [("common/clean.sh", "clean.sh"),
+                           ("common/simulator.mk", "Makefile"),
+                           ("nmu/config.mk", "config.mk")]:
+        shutil.copy2(ROOT / "sim/standalone" / source, script / target)
+    (stage / "files.f").touch()
+    (stage / "SHA256SUMS").touch()
+    cases = stage / "cases/standalone"
+    cases.mkdir(parents=True)
+    (cases / "cases.list").write_text("ctrl_write_single\n")
+    stub = tmp_path / "vcs"
+    stub.write_text("#!/usr/bin/env python3\n"
+                    "import pathlib, sys\n"
+                    "out = pathlib.Path(sys.argv[sys.argv.index('-o')+1])\n"
+                    "out.parent.mkdir(parents=True, exist_ok=True)\n"
+                    "out.write_text(str(out))\n"
+                    "out.chmod(0o755)\n"
+                    "database = out.with_name('simv.daidir')\n"
+                    "database.mkdir(exist_ok=True)\n"
+                    "(database / 'runtime.so').write_text('runtime')\n")
+    stub.chmod(0o755)
+    try:
+        subprocess.run(["make", "-C", str(script), "compile", f"VCS={stub}"], check=True)
+        binary = next((stage / "build").glob("*/simv"))
+        cached_binary = Path(binary.read_text())
+        assert str(cached_binary).startswith("/tmp/noc-vcs-")
+        assert cached_binary.exists()
+        assert (binary.parent / "simv.daidir/runtime.so").read_text() == "runtime"
+    finally:
+        subprocess.run(["make", "-C", str(script), "clean"], check=True)
+    assert not cached_binary.exists()
+
+
+def test_fault_requires_checker_diagnostic_not_exit_status(tmp_path):
+    stage = tmp_path / "standalone"
+    script = stage / "script"
+    script.mkdir(parents=True)
+    shutil.copy2(ROOT / "sim/standalone/common/simulator.mk", script / "Makefile")
+    shutil.copy2(ROOT / "sim/standalone/nmu/config.mk", script / "config.mk")
+    (stage / "files.f").touch()
+    cases = stage / "cases/standalone"
+    cases.mkdir(parents=True)
+    (cases / "cases.list").write_text("ctrl_write_single\n")
+    run = stage / "build/test"
+    run.mkdir(parents=True)
+    binary = run / "simv"
+    for diagnostic, status, passes in [
+        ("R data/lane/order/last mismatch", 0, True),
+        ("R data/lane/order/last mismatch", 1, True),
+        ("PASS NMU standalone", 0, False),
+        ("unrelated simulator error", 1, False),
+    ]:
+        binary.write_text(f"#!/bin/sh\necho '{diagnostic}'\nexit {status}\n")
+        binary.chmod(0o755)
+        result = subprocess.run(["make", "-C", str(script), "fault", f"run_dir={run}"],
+                                capture_output=True)
+        assert (result.returncode == 0) == passes

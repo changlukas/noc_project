@@ -152,7 +152,7 @@ module nmu_ordering #(
             r_buffer_ready[n] = READ_ROB_ENABLED && read_usage_reg[n] != 0 &&
                 read_head[n].ordering_req &&
                 int'(read_head[n].base) + int'(r_retire_offset_reg[n]) < NMU_ROB_R_DEPTH &&
-                r_complete[CL_R_DEPTH'(int'(read_head[n].base) + int'(r_retire_offset_reg[n]))];
+                r_complete[CL_R_DEPTH'($unsigned(int'(read_head[n].base) + int'(r_retire_offset_reg[n])))];
         end
     end
 

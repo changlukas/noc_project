@@ -16,12 +16,16 @@ VERDI_HOME ?= /cadtools/synopsys/verdi/M-2017.03-SP1
 PLI_DIR ?= $(VERDI_HOME)/share/PLI/VCS/linux64
 # Keep the caller environment intact; extend only child-process library lookup.
 export LD_LIBRARY_PATH := $(PLI_DIR)$(if $(LD_LIBRARY_PATH),:$(LD_LIBRARY_PATH))
+export VCS_ARCH_OVERRIDE ?= linux
 VCS_EXTRA ?=
 VERILATOR_EXTRA ?=
 SIM_EXTRA ?=
 top := tb_nmu_standalone
 run_dir ?= $(package_dir)/build/$(SIMULATOR)_i$(ID_WIDTH)_n$(NOC_HALF_PERIOD)_b$(BUFFER_DEPTH)_r$(READ_ROB_ENABLED)_wave$(WAVE)
 run_dir := $(abspath $(run_dir))
+# Generated compilation files must use the workstation's local clock, not NFS mtime.
+vcs_cache_root := /tmp/noc-vcs-$(shell id -u)-$(shell cd "$(package_dir)" && pwd -P | tr -d '\n' | cksum | cut -d' ' -f1)
+vcs_work_dir := $(vcs_cache_root)/i$(ID_WIDTH)_n$(NOC_HALF_PERIOD)_b$(BUFFER_DEPTH)_r$(READ_ROB_ENABLED)_wave$(WAVE)
 report_dir := $(run_dir)/report
 wave_dir := $(run_dir)/waves
 filelist := $(package_dir)/files.f
@@ -33,11 +37,11 @@ case_label := $(if $(CASE),$(CASE),$(PATTERN))
 wave_file ?= $(wave_dir)/$(case_label).$(wave_ext)
 
 VCS_FLAGS := -full64 -sverilog -assert svaext -override_timescale=1ns/1ps -debug_access+all \
-    +lint=TFIPC-L +lint=PCWM -Mdir=$(run_dir)/csrc -f $(filelist) -top $(top) \
+    +lint=TFIPC-L +lint=PCWM -Mdir=$(vcs_work_dir)/csrc -f $(filelist) -top $(top) \
     -pvalue+$(top).ID_WIDTH=$(ID_WIDTH) \
     -pvalue+$(top).NOC_HALF_PERIOD=$(NOC_HALF_PERIOD) \
     -pvalue+$(top).BUFFER_DEPTH=$(BUFFER_DEPTH) \
-    -pvalue+$(top).READ_ROB_ENABLED=$(READ_ROB_ENABLED) -o $(run_dir)/simv
+    -pvalue+$(top).READ_ROB_ENABLED=$(READ_ROB_ENABLED) -o $(vcs_work_dir)/simv
 VERILATOR_FLAGS := --binary --timing --assert -j 1 -Wno-fatal \
     -Werror-WIDTHEXPAND -Werror-WIDTHTRUNC -Werror-LATCH \
     $(package_dir)/repo/rtl/nmu/top/nmu_lint.vlt \
@@ -84,7 +88,14 @@ ifeq ($(SIMULATOR),vcs)
 ifeq ($(WAVE),1)
 	@test -r "$(PLI_DIR)/novas.tab" -a -r "$(PLI_DIR)/pli.a" || { echo 'Set VERDI_HOME or PLI_DIR to the installed Verdi PLI directory' >&2; exit 1; }
 endif
+	@mkdir -m 700 "$(vcs_cache_root)" 2>/dev/null || \
+	  [[ -d "$(vcs_cache_root)" && ! -L "$(vcs_cache_root)" && -O "$(vcs_cache_root)" ]]
+	@test ! -L "$(vcs_work_dir)"
+	@mkdir -p "$(vcs_work_dir)"
 	cd "$(package_dir)" && $(VCS) $(VCS_FLAGS) $(VCS_EXTRA) -l "$(report_dir)/compile.log"
+	@cp "$(vcs_work_dir)/simv" "$(run_dir)/simv"
+	@mkdir -p "$(run_dir)/simv.daidir"
+	@cp -a "$(vcs_work_dir)/simv.daidir/." "$(run_dir)/simv.daidir/"
 else
 	cd "$(package_dir)" && $(VERILATOR) $(VERILATOR_FLAGS) $(VERILATOR_EXTRA) 2>&1 | tee "$(report_dir)/compile.log"
 endif
@@ -118,13 +129,12 @@ legacy_regress: compile
 	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" fault run_dir="$(run_dir)"
 	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" report run_dir="$(run_dir)"
 
+# Some simulators return zero after $fatal; require the expected checker diagnostic.
 fault: sanity_check
 	@test -x "$(run_dir)/simv"
-	@cd "$(package_dir)"; if "$(run_dir)/simv" \
+	@cd "$(package_dir)"; "$(run_dir)/simv" \
 	  +stim_dir="$(package_dir)/cases/directed" +corrupt_rsp \
-	  +wave_file="$(wave_dir)/corrupt.$(wave_ext)" 2>&1 | tee "$(report_dir)/corrupt.log"; then \
-	  echo 'ERROR: corrupt response unexpectedly passed' >&2; exit 1; \
-	fi
+	  +wave_file="$(wave_dir)/corrupt.$(wave_ext)" 2>&1 | tee "$(report_dir)/corrupt.log" || :
 	@grep -q 'R data/lane/order/last mismatch' "$(report_dir)/corrupt.log"
 	@echo 'PASS: expected corruption was detected'
 
