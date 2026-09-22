@@ -16,6 +16,7 @@ module nmu #(
     parameter int unsigned NOC_DAT_VC_MODE = ni_params_pkg::NOC_DAT_VC_MODE_DFLT,
     parameter int unsigned NOC_FIFO_DEPTH = ni_params_pkg::NOC_FIFO_DEPTH_DFLT,
     parameter int unsigned NOC_ROUTER_VC_DEPTH = ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT,
+    parameter int unsigned NOC_NI_DAT_RX_VC_DEPTH = ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT,
     parameter int unsigned NMU_ROB_B_DEPTH = ni_params_pkg::NMU_ROB_B_DEPTH_DFLT,
     parameter int unsigned NMU_ROB_R_DEPTH = ni_params_pkg::NMU_ROB_R_DEPTH_DFLT,
     parameter bit READ_ROB_ENABLED = bit'(ni_params_pkg::NMU_READ_ROB_ENABLED_DFLT),
@@ -53,7 +54,7 @@ module nmu #(
     input  wire logic [NOC_DAT_NUM_VC-1:0]                             tx_dat_crdvalid_i,
     input  wire logic                                                   rx_dat_valid_i,
     input  wire logic [ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT-1:0]    rx_dat_flit_i,
-    output wire logic                                                   rx_dat_ready_o
+    output wire logic [NOC_DAT_NUM_VC-1:0]                             rx_dat_crdvalid_o
 );
 
     localparam int unsigned REQ_FLIT_W = $bits(ni_flit_pkg::req_flit_t);
@@ -214,6 +215,9 @@ module nmu #(
         .tx_dat_valid_o, .tx_dat_flit_o, .tx_dat_crdvalid_i
     );
     nmu_response_path #(
+        .NOC_DAT_NUM_VC (NOC_DAT_NUM_VC),
+        .NOC_DAT_VC_MODE (NOC_DAT_VC_MODE),
+        .NOC_NI_DAT_RX_VC_DEPTH (NOC_NI_DAT_RX_VC_DEPTH),
         .AXI_FIFO_DEPTH (AXI_FIFO_DEPTH),
         .NMU_ROB_B_DEPTH (NMU_ROB_B_DEPTH),
         .NMU_ROB_R_DEPTH (NMU_ROB_R_DEPTH),
@@ -246,11 +250,9 @@ module nmu #(
         .m_r_o (axi_r),
         .m_r_valid_o (axi_r_valid),
         .m_r_ready_i (axi_r_ready),
-        .rx_rsp_valid_i, .rx_rsp_flit_i, .rx_rsp_ready_o
+        .rx_rsp_valid_i, .rx_rsp_flit_i, .rx_rsp_ready_o,
+        .rx_dat_valid_i, .rx_dat_flit_i, .rx_dat_crdvalid_o
     );
-    // DAT receive is outside this control-plane integration stage (#83).
-    // Never acknowledge a DataR beat before the receive-VC path exists.
-    assign rx_dat_ready_o = 1'b0;
 
 endmodule
 

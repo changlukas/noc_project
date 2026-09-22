@@ -76,6 +76,8 @@ def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
             generate_standalone(root / "cases/standalone", repo / "sim/configs/mesh_2x2.yml", id_width)
         copy_path(repo / "sim/test_patterns/standalone/cases.json")
         copy_path(repo / "rtl/nmu/top/nmu_lint.vlt")
+        copy_path(repo / "rtl/nmu/response_depacketize/tb_nmu_response_depacketize.sv")
+        copy_path(repo / "rtl/nmu/response_depacketize/test_response_depacketize.sh")
         (root / "script").mkdir()
         shutil.copy2(repo / "sim/standalone/common/simulator.mk", root / "script/Makefile")
         shutil.copy2(repo / "sim/standalone/common/clean.sh", root / "script/clean.sh")
@@ -84,8 +86,8 @@ def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
         shutil.copy2(repo / "sim/standalone/nmu/signals.rc", root / "script/nWaveLog/signals.rc")
         (root / "Makefile").write_text(
             ".DEFAULT_GOAL := help\n"
-            ".PHONY: help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report clean list\n"
-            "help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report clean:\n"
+            ".PHONY: help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report clean dat_regress list\n"
+            "help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report clean dat_regress:\n"
             "\t$(MAKE) --no-print-directory -C script $@\n"
             "list:\n\t@cat pattern_list.txt\n")
         descriptions = {

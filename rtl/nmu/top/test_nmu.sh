@@ -52,6 +52,8 @@ task_sources=(
     "$task_root/rtl/nmu/sam/nmu_sam.sv"
     "$task_root/sim/dv/common_cells-1.37.0/src/cf_math_pkg.sv"
     "$task_root/sim/dv/common_cells-1.37.0/src/lzc.sv"
+    "$task_root/sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv"
+    "$task_root/rtl/common/ni_credit_fifo.sv"
     "$task_root/sim/dv/axi-0.39.7/src/axi_pkg.sv"
     "$task_root/sim/dv/axi-0.39.7/src/axi_id_remap.sv"
     "$task_common_cells/src/cc_fifo.sv"

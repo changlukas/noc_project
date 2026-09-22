@@ -14,6 +14,7 @@ dependencies:
 sources:
   - ../sim/dv/common_cells-1.37.0/src/cf_math_pkg.sv
   - ../sim/dv/common_cells-1.37.0/src/lzc.sv
+  - ../sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv
   - ../sim/dv/axi-0.39.7/src/axi_pkg.sv
   - ../sim/dv/axi-0.39.7/src/axi_id_remap.sv
   - common/axi_if.sv
@@ -21,6 +22,7 @@ sources:
   - common/ni_sam.sv
   - common/stream_register.sv
   - common/axi_async_fifo.sv
+  - common/ni_credit_fifo.sv
   - nmu/sam/nmu_sam.sv
   - nmu/request_path/nmu_request_path.sv
   - nmu/response_fifo/nmu_response_fifo.sv

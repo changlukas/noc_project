@@ -33,3 +33,7 @@ clean:
 	    bash "$$task_stage/script/clean.sh"; \
 	  fi; \
 	done
+
+.PHONY: dat_regress
+dat_regress: prepare
+	$(MAKE) -C "$(stage)/script" dat_regress SIMULATOR=$(SIMULATOR)

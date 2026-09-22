@@ -28,7 +28,7 @@ module tb_nmu_elaborate;
     logic [ni_params_pkg::NOC_DAT_NUM_VC_DFLT-1:0] tx_dat_crdvalid_i;
     logic rx_dat_valid_i;
     logic [ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT-1:0] rx_dat_flit_i;
-    logic rx_dat_ready_o;
+    logic [ni_params_pkg::NOC_DAT_NUM_VC_DFLT-1:0] rx_dat_crdvalid_o;
 
     nmu #(
         .AXI_ID_WIDTH(8)
@@ -50,7 +50,7 @@ module tb_nmu_elaborate;
         .tx_dat_crdvalid_i  ( tx_dat_crdvalid_i  ),
         .rx_dat_valid_i     ( rx_dat_valid_i     ),
         .rx_dat_flit_i      ( rx_dat_flit_i      ),
-        .rx_dat_ready_o     ( rx_dat_ready_o     )
+        .rx_dat_crdvalid_o     ( rx_dat_crdvalid_o     )
     );
 
     initial begin

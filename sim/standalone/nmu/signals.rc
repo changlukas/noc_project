@@ -26,7 +26,7 @@ addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/tx_dat_valid_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/tx_dat_crdvalid_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/rx_dat_flit_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/rx_dat_valid_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/rx_dat_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/rx_dat_crdvalid_o
 endSubGroup "NoC ports"
 addGroup "Request: AXI to NoC"
 addSubGroup "AXI AW" -e FALSE
@@ -216,6 +216,17 @@ addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/b_complete
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/r_complete
 endSubGroup "Ordering retirement"
+addSubGroup "DAT receive credits" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/rx_dat_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/rx_dat_flit_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/rx_dat_crdvalid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_depacketize/dat_push
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_depacketize/dat_pop
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_depacketize/dat_full
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_depacketize/dat_empty
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_depacketize/r_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_depacketize/r_ready
+endSubGroup "DAT receive credits"
 addSubGroup "B storage" -e FALSE
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/i_b_storage/alloc_valid_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/i_b_storage/alloc_base_i

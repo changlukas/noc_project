@@ -132,7 +132,7 @@ module tb_nmu_standalone #(
         .tx_req_flit_o(req), .tx_req_ready_i(req_ready),
         .rx_rsp_valid_i(rsp_valid), .rx_rsp_flit_i(rsp), .rx_rsp_ready_o(rsp_ready),
         .tx_dat_valid_o(dat_valid), .tx_dat_flit_o(), .tx_dat_crdvalid_i('0),
-        .rx_dat_valid_i(1'b0), .rx_dat_flit_i('0), .rx_dat_ready_o()
+        .rx_dat_valid_i(1'b0), .rx_dat_flit_i('0), .rx_dat_crdvalid_o()
     );
     always @(negedge noc_clk) if (noc_rst_n) cycles++;
     always @(posedge axi_clk) if (axi_rst_n) #0.5 axi_cycles++;

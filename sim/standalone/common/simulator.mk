@@ -159,3 +159,7 @@ report:
 
 clean:
 	@bash "$(script_dir)/clean.sh"
+
+.PHONY: dat_regress
+dat_regress:
+	NMU_DAT_STAGE="$(package_dir)" NMU_DAT_TEST_OUTPUT="$(package_dir)/build/dat_$(SIMULATOR)_wave$(WAVE)" SIMULATOR=$(SIMULATOR) WAVE=$(WAVE) bash "$(package_dir)/repo/rtl/nmu/response_depacketize/test_response_depacketize.sh"

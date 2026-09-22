@@ -194,7 +194,11 @@ pytest:
 # compared when both have run. A change to a helper they share (address_map.py's
 # dst_id(), say) moves both sides of the Python-side cross-format check
 # together, leaves pytest green, and shows up in ctest alone.
-check-rtl: rtl-id-remap-test rtl-nmu-paths-test rtl-nmu-ordering-test rtl-nmu-packetize-test
+rtl-nmu-depacketize-test:
+	bash rtl/nmu/response_depacketize/test_response_depacketize.sh
+
+.PHONY: rtl-nmu-depacketize-test
+check-rtl: rtl-id-remap-test rtl-nmu-paths-test rtl-nmu-ordering-test rtl-nmu-packetize-test rtl-nmu-depacketize-test
 
 check: test pytest check-rtl
 
