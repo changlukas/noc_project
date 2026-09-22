@@ -212,7 +212,7 @@ module nmu_request_path #(
     assign s_b_ready_o = internal_req.b_ready;
     assign s_r_ready_o = internal_req.r_ready;
     nmu_request_fifo #(
-        .AXI_FIFO_DEPTH,
+        .AXI_FIFO_DEPTH (AXI_FIFO_DEPTH),
         .AXI_ID_WIDTH   (NOC_ID_WIDTH),
         .AW_T           (ni_signals_pkg::axi_aw_t),
         .W_T            (ni_signals_pkg::axi_w_t),
@@ -230,8 +230,8 @@ module nmu_request_path #(
     );
 
     nmu_sam #(
-        .AW_SAM_REG_TYPE,
-        .AR_SAM_REG_TYPE,
+        .AW_SAM_REG_TYPE (AW_SAM_REG_TYPE),
+        .AR_SAM_REG_TYPE (AR_SAM_REG_TYPE),
         .SAM_NUM_RULES   (SAM_NUM_RULES),
         .addr_t          (addr_t),
         .sam_mask_sel_t  (sam_mask_sel_t),

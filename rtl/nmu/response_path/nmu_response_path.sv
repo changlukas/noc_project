@@ -75,7 +75,7 @@ module nmu_response_path #(
         .m_r_o(decoded_r), .m_r_valid_o(decoded_r_valid), .m_r_ready_i(decoded_r_ready)
     );
     nmu_response_fifo #(
-        .AXI_FIFO_DEPTH,
+        .AXI_FIFO_DEPTH (AXI_FIFO_DEPTH),
         .B_T (ni_signals_pkg::axi_b_t),
         .R_T (ni_signals_pkg::axi_r_t)
     ) i_response_fifo (
