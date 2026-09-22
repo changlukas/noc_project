@@ -84,25 +84,25 @@ module nmu_ordering #(
         logic [1:0] burst;
         logic is_data;
     } read_lane_context_t;
-    read_lane_context_t read_lane_context_reg [NUM_IDS][NMU_MAX_TXNS_PER_ID];
+    read_lane_context_t rd_lane_context_reg [NUM_IDS][NMU_MAX_TXNS_PER_ID];
     read_lane_context_t retire_context;
     ni_signals_pkg::axi_r_t retire_r;
     int unsigned retire_byte_addr, retire_step, retire_span, retire_lane;
 
-    order_entry_t write_order_reg [NUM_IDS][NMU_MAX_TXNS_PER_ID];
-    order_entry_t read_order_reg [NUM_IDS][NMU_MAX_TXNS_PER_ID];
-    logic [CL_ORDER-1:0] write_head_reg [NUM_IDS], write_head_next [NUM_IDS];
-    logic [CL_ORDER-1:0] write_tail_reg [NUM_IDS], write_tail_next [NUM_IDS];
-    logic [CL_ORDER-1:0] read_head_reg [NUM_IDS], read_head_next [NUM_IDS];
-    logic [CL_ORDER-1:0] read_tail_reg [NUM_IDS], read_tail_next [NUM_IDS];
-    logic [CL_MAX_TXNS-1:0] write_usage_reg [NUM_IDS], write_usage_next [NUM_IDS];
-    logic [CL_MAX_TXNS-1:0] read_usage_reg [NUM_IDS], read_usage_next [NUM_IDS];
-    domain_t write_domain_reg [NUM_IDS], write_domain_next [NUM_IDS];
-    domain_t read_domain_reg [NUM_IDS], read_domain_next [NUM_IDS];
+    order_entry_t wr_order_reg [NUM_IDS][NMU_MAX_TXNS_PER_ID];
+    order_entry_t rd_order_reg [NUM_IDS][NMU_MAX_TXNS_PER_ID];
+    logic [CL_ORDER-1:0] wr_order_rd_ptr_reg [NUM_IDS], wr_order_rd_ptr_next [NUM_IDS];
+    logic [CL_ORDER-1:0] wr_order_wr_ptr_reg [NUM_IDS], wr_order_wr_ptr_next [NUM_IDS];
+    logic [CL_ORDER-1:0] rd_order_rd_ptr_reg [NUM_IDS], rd_order_rd_ptr_next [NUM_IDS];
+    logic [CL_ORDER-1:0] rd_order_wr_ptr_reg [NUM_IDS], rd_order_wr_ptr_next [NUM_IDS];
+    logic [CL_MAX_TXNS-1:0] wr_outstanding_cnt_reg [NUM_IDS], wr_outstanding_cnt_next [NUM_IDS];
+    logic [CL_MAX_TXNS-1:0] rd_outstanding_cnt_reg [NUM_IDS], rd_outstanding_cnt_next [NUM_IDS];
+    domain_t wr_domain_reg [NUM_IDS], wr_domain_next [NUM_IDS];
+    domain_t rd_domain_reg [NUM_IDS], rd_domain_next [NUM_IDS];
     logic [BEAT_COUNT_W-1:0] r_retire_offset_reg [NUM_IDS], r_retire_offset_next [NUM_IDS];
-    logic [NUM_IDS-1:0] write_sticky_reg, write_sticky_next;
-    logic [NUM_IDS-1:0] read_sticky_reg, read_sticky_next;
-    logic [NUM_IDS-1:0] write_collective_reg, write_collective_next;
+    logic [NUM_IDS-1:0] wr_reorder_active_reg, wr_reorder_active_next;
+    logic [NUM_IDS-1:0] rd_reorder_active_reg, rd_reorder_active_next;
+    logic [NUM_IDS-1:0] wr_collective_active_reg, wr_collective_active_next;
     logic [CL_NUM_IDS-1:0] b_rr_reg, b_rr_next;
     logic [CL_NUM_IDS-1:0] r_rr_reg, r_rr_next;
     logic aw_hold_reg, aw_hold_next;
@@ -118,65 +118,65 @@ module nmu_ordering #(
     logic [CL_NUM_IDS-1:0] b_hold_id_reg, b_hold_id_next;
     logic [CL_NUM_IDS-1:0] r_hold_id_reg, r_hold_id_next;
 
-    logic [TAG_W:0] b_free_count, r_free_count;
+    logic [TAG_W:0] b_free_cnt, r_free_cnt;
     logic [TAG_W-1:0] b_next_base, r_next_base, aw_tag, ar_tag;
     logic aw_reorder, ar_reorder, aw_can_accept, ar_can_accept;
-    logic aw_classify_reorder, ar_classify_reorder;
-    order_entry_t write_head [NUM_IDS], read_head [NUM_IDS];
+    logic aw_reorder_required, ar_reorder_required;
+    order_entry_t wr_order_head [NUM_IDS], rd_order_head [NUM_IDS];
     logic [NUM_IDS-1:0] b_buffer_ready, r_buffer_ready;
-    logic b_select_valid, r_select_valid;
-    logic [CL_NUM_IDS-1:0] b_select_id, r_select_id;
+    logic b_sel_valid, r_sel_valid;
+    logic [CL_NUM_IDS-1:0] b_sel_id, r_sel_id;
     logic b_direct, r_direct;
     logic [CL_NUM_IDS-1:0] b_retire_id, r_retire_id;
     logic [NMU_ROB_B_DEPTH-1:0] b_complete;
     logic [NMU_ROB_R_DEPTH-1:0] r_complete;
-    logic [TAG_W-1:0] b_peek_addr, r_peek_addr, b_release_addr, r_release_addr;
-    ni_signals_pkg::axi_b_t b_peek_data;
-    ni_signals_pkg::axi_r_t r_peek_data;
-    logic b_fill_ready, r_fill_ready;
-    wire logic [BEAT_COUNT_W-1:0] ar_beat_count =
+    logic [TAG_W-1:0] b_storage_rd_addr, r_storage_rd_addr, b_storage_free_addr, r_storage_free_addr;
+    ni_signals_pkg::axi_b_t b_storage_rd_data;
+    ni_signals_pkg::axi_r_t r_storage_rd_data;
+    logic b_storage_wr_ready, r_storage_wr_ready;
+    wire logic [BEAT_COUNT_W-1:0] ar_beat_cnt =
         BEAT_COUNT_W'(s_ar_i.axi.arlen) + BEAT_COUNT_W'(1);
     wire logic aw_accept = s_aw_valid_i && s_aw_ready_o;
     wire logic ar_accept = s_ar_valid_i && s_ar_ready_o;
     wire logic b_retire = m_b_valid_o && m_b_ready_i;
     wire logic r_retire = m_r_valid_o && m_r_ready_i;
-    wire logic r_retire_last = read_head[r_retire_id].beat_count == 1 || m_r_o.rlast;
+    wire logic r_retire_last = rd_order_head[r_retire_id].beat_count == 1 || m_r_o.rlast;
 
     always_comb begin
         for (int n = 0; n < NUM_IDS; n++) begin
-            write_head[n] = write_order_reg[n][write_head_reg[n]];
-            read_head[n] = read_order_reg[n][read_head_reg[n]];
-            b_buffer_ready[n] = write_usage_reg[n] != 0 && write_head[n].ordering_req &&
-                int'(write_head[n].base) < NMU_ROB_B_DEPTH &&
-                b_complete[CL_B_DEPTH'(write_head[n].base)];
-            r_buffer_ready[n] = READ_ROB_ENABLED && read_usage_reg[n] != 0 &&
-                read_head[n].ordering_req &&
-                int'(read_head[n].base) + int'(r_retire_offset_reg[n]) < NMU_ROB_R_DEPTH &&
-                r_complete[CL_R_DEPTH'($unsigned(int'(read_head[n].base) + int'(r_retire_offset_reg[n])))];
+            wr_order_head[n] = wr_order_reg[n][wr_order_rd_ptr_reg[n]];
+            rd_order_head[n] = rd_order_reg[n][rd_order_rd_ptr_reg[n]];
+            b_buffer_ready[n] = wr_outstanding_cnt_reg[n] != 0 && wr_order_head[n].ordering_req &&
+                int'(wr_order_head[n].base) < NMU_ROB_B_DEPTH &&
+                b_complete[CL_B_DEPTH'(wr_order_head[n].base)];
+            r_buffer_ready[n] = READ_ROB_ENABLED && rd_outstanding_cnt_reg[n] != 0 &&
+                rd_order_head[n].ordering_req &&
+                int'(rd_order_head[n].base) + int'(r_retire_offset_reg[n]) < NMU_ROB_R_DEPTH &&
+                r_complete[CL_R_DEPTH'($unsigned(int'(rd_order_head[n].base) + int'(r_retire_offset_reg[n])))];
         end
     end
 
     always_comb begin
-        aw_classify_reorder = write_usage_reg[s_aw_i.axi.awid] != 0 &&
-            (write_sticky_reg[s_aw_i.axi.awid] ||
-             write_domain_reg[s_aw_i.axi.awid] != s_aw_i.route.route.domain);
-        ar_classify_reorder = read_usage_reg[s_ar_i.axi.arid] != 0 &&
-            (read_sticky_reg[s_ar_i.axi.arid] ||
-             read_domain_reg[s_ar_i.axi.arid] != s_ar_i.route.domain);
-        aw_reorder = aw_hold_reg ? aw_hold_reorder_reg : aw_classify_reorder;
+        aw_reorder_required = wr_outstanding_cnt_reg[s_aw_i.axi.awid] != 0 &&
+            (wr_reorder_active_reg[s_aw_i.axi.awid] ||
+             wr_domain_reg[s_aw_i.axi.awid] != s_aw_i.route.route.domain);
+        ar_reorder_required = rd_outstanding_cnt_reg[s_ar_i.axi.arid] != 0 &&
+            (rd_reorder_active_reg[s_ar_i.axi.arid] ||
+             rd_domain_reg[s_ar_i.axi.arid] != s_ar_i.route.domain);
+        aw_reorder = aw_hold_reg ? aw_hold_reorder_reg : aw_reorder_required;
         ar_reorder = ar_hold_reg ? ar_hold_reorder_reg :
-            READ_ROB_ENABLED && ar_classify_reorder;
+            READ_ROB_ENABLED && ar_reorder_required;
         aw_tag = aw_hold_reg ? aw_hold_tag_reg : (aw_reorder ? b_next_base : '0);
         ar_tag = ar_hold_reg ? ar_hold_tag_reg : (ar_reorder ? r_next_base : '0);
         aw_can_accept = aw_hold_reg ||
-            (write_usage_reg[s_aw_i.axi.awid] < CL_MAX_TXNS'(NMU_MAX_TXNS_PER_ID) &&
-             !write_collective_reg[s_aw_i.axi.awid] &&
-             (s_aw_i.route.collective_op == 0 || write_usage_reg[s_aw_i.axi.awid] == 0) &&
-             (!aw_reorder || b_free_count != 0));
+            (wr_outstanding_cnt_reg[s_aw_i.axi.awid] < CL_MAX_TXNS'(NMU_MAX_TXNS_PER_ID) &&
+             !wr_collective_active_reg[s_aw_i.axi.awid] &&
+             (s_aw_i.route.collective_op == 0 || wr_outstanding_cnt_reg[s_aw_i.axi.awid] == 0) &&
+             (!aw_reorder || b_free_cnt != 0));
         ar_can_accept = ar_hold_reg ||
-            (read_usage_reg[s_ar_i.axi.arid] < CL_MAX_TXNS'(NMU_MAX_TXNS_PER_ID) &&
-             (READ_ROB_ENABLED ? (!ar_reorder || r_free_count >= (TAG_W+1)'(ar_beat_count)) :
-              !ar_classify_reorder));
+            (rd_outstanding_cnt_reg[s_ar_i.axi.arid] < CL_MAX_TXNS'(NMU_MAX_TXNS_PER_ID) &&
+             (READ_ROB_ENABLED ? (!ar_reorder || r_free_cnt >= (TAG_W+1)'(ar_beat_cnt)) :
+              !ar_reorder_required));
     end
 
     assign m_aw_o.axi = s_aw_i.axi;
@@ -199,62 +199,63 @@ module nmu_ordering #(
     assign s_ar_ready_o = !rst_i && m_ar_ready_i && ar_can_accept;
 
     always_comb begin
-        b_select_valid = 1'b0;
-        b_select_id = b_rr_reg;
+        b_sel_valid = 1'b0;
+        b_sel_id = b_rr_reg;
         for (int offset = NUM_IDS-1; offset >= 0; offset--) begin
             if (b_buffer_ready[(int'(b_rr_reg) + offset) % NUM_IDS]) begin
-                b_select_valid = 1'b1;
-                b_select_id = CL_NUM_IDS'(int'(b_rr_reg) + offset);
+                b_sel_valid = 1'b1;
+                b_sel_id = CL_NUM_IDS'(int'(b_rr_reg) + offset);
             end
         end
-        b_direct = !b_select_valid && s_b_valid_i &&
-            write_usage_reg[s_b_i.axi.bid] != 0 &&
-            ((!write_head[s_b_i.axi.bid].ordering_req && !s_b_i.meta.ordering_req) ||
-             (write_head[s_b_i.axi.bid].ordering_req && s_b_i.meta.ordering_req &&
-              write_head[s_b_i.axi.bid].base == s_b_i.meta.ordering_tag));
+        b_direct = !b_sel_valid && s_b_valid_i &&
+            wr_outstanding_cnt_reg[s_b_i.axi.bid] != 0 &&
+            ((!wr_order_head[s_b_i.axi.bid].ordering_req && !s_b_i.meta.ordering_req) ||
+             (wr_order_head[s_b_i.axi.bid].ordering_req && s_b_i.meta.ordering_req &&
+              wr_order_head[s_b_i.axi.bid].base == s_b_i.meta.ordering_tag));
         if (b_hold_reg) begin
-            b_select_valid = !b_hold_direct_reg;
-            b_select_id = b_hold_id_reg;
+            b_sel_valid = !b_hold_direct_reg;
+            b_sel_id = b_hold_id_reg;
             b_direct = b_hold_direct_reg && s_b_valid_i;
         end
     end
 
-    assign m_b_valid_o = !rst_i && (b_select_valid || b_direct);
-    assign b_peek_addr = write_head[b_select_id].base;
-    assign b_release_addr = write_head[b_retire_id].base;
-    assign m_b_o = b_select_valid ? b_peek_data : s_b_i.axi;
+    assign m_b_valid_o = !rst_i && (b_sel_valid || b_direct);
+    assign b_storage_rd_addr = !rst_i && b_sel_valid ? wr_order_head[b_sel_id].base : '0;
+    assign b_storage_free_addr = wr_order_head[b_retire_id].base;
+    assign m_b_o = b_sel_valid ? b_storage_rd_data : s_b_i.axi;
     assign s_b_ready_o = !rst_i && (b_direct ? m_b_ready_i :
-        (s_b_i.meta.ordering_req && b_fill_ready));
-    assign b_retire_id = b_select_valid ? b_select_id : s_b_i.axi.bid;
+        (s_b_i.meta.ordering_req && b_storage_wr_ready));
+    assign b_retire_id = b_sel_valid ? b_sel_id : s_b_i.axi.bid;
 
     always_comb begin
-        r_select_valid = 1'b0;
-        r_select_id = r_rr_reg;
+        r_sel_valid = 1'b0;
+        r_sel_id = r_rr_reg;
         for (int offset = NUM_IDS-1; offset >= 0; offset--) begin
             if (r_buffer_ready[(int'(r_rr_reg) + offset) % NUM_IDS]) begin
-                r_select_valid = 1'b1;
-                r_select_id = CL_NUM_IDS'(int'(r_rr_reg) + offset);
+                r_sel_valid = 1'b1;
+                r_sel_id = CL_NUM_IDS'(int'(r_rr_reg) + offset);
             end
         end
-        r_direct = !r_select_valid && s_r_valid_i && read_usage_reg[s_r_i.axi.rid] != 0 &&
-            ((!read_head[s_r_i.axi.rid].ordering_req && !s_r_i.meta.ordering_req) ||
-             (read_head[s_r_i.axi.rid].ordering_req && s_r_i.meta.ordering_req &&
-              read_head[s_r_i.axi.rid].base == s_r_i.meta.ordering_tag));
+        r_direct = !r_sel_valid && s_r_valid_i && rd_outstanding_cnt_reg[s_r_i.axi.rid] != 0 &&
+            ((!rd_order_head[s_r_i.axi.rid].ordering_req && !s_r_i.meta.ordering_req) ||
+             (rd_order_head[s_r_i.axi.rid].ordering_req && s_r_i.meta.ordering_req &&
+              rd_order_head[s_r_i.axi.rid].base == s_r_i.meta.ordering_tag));
         if (r_hold_reg) begin
-            r_select_valid = !r_hold_direct_reg;
-            r_select_id = r_hold_id_reg;
+            r_sel_valid = !r_hold_direct_reg;
+            r_sel_id = r_hold_id_reg;
             r_direct = r_hold_direct_reg && s_r_valid_i;
         end
     end
 
-    assign m_r_valid_o = !rst_i && (r_select_valid || r_direct);
-    assign r_peek_addr = TAG_W'(int'(read_head[r_select_id].base) + int'(r_retire_offset_reg[r_select_id]));
-    assign r_release_addr = TAG_W'(int'(read_head[r_retire_id].base) + int'(r_retire_offset_reg[r_retire_id]));
+    assign m_r_valid_o = !rst_i && (r_sel_valid || r_direct);
+    assign r_storage_rd_addr = !rst_i && r_sel_valid ?
+        TAG_W'(int'(rd_order_head[r_sel_id].base) + int'(r_retire_offset_reg[r_sel_id])) : '0;
+    assign r_storage_free_addr = TAG_W'(int'(rd_order_head[r_retire_id].base) + int'(r_retire_offset_reg[r_retire_id]));
     // NarrowR payload contains one 64-bit lane; position it using the issuing AR.
     // Context is selected only at retirement, after any out-of-order buffering.
     always_comb begin
-        retire_r = r_select_valid ? r_peek_data : s_r_i.axi;
-        retire_context = read_lane_context_reg[r_retire_id][read_head_reg[r_retire_id]];
+        retire_r = r_sel_valid ? r_storage_rd_data : s_r_i.axi;
+        retire_context = rd_lane_context_reg[r_retire_id][rd_order_rd_ptr_reg[r_retire_id]];
         retire_step = 1 << retire_context.size;
         retire_span = (int'(retire_context.len) + 1) * retire_step;
         retire_byte_addr = int'(retire_context.addr);
@@ -271,13 +272,13 @@ module nmu_ordering #(
             retire_response.rdata = ni_params_pkg::AXI_DATA_WIDTH_DFLT'(retire_r.rdata[63:0]) << (retire_lane*64);
     end
     assign s_r_ready_o = !rst_i && (r_direct ? m_r_ready_i :
-        (READ_ROB_ENABLED && s_r_i.meta.ordering_req && r_fill_ready));
-    assign r_retire_id = r_select_valid ? r_select_id : s_r_i.axi.rid;
+        (READ_ROB_ENABLED && s_r_i.meta.ordering_req && r_storage_wr_ready));
+    assign r_retire_id = r_sel_valid ? r_sel_id : s_r_i.axi.rid;
 
     always_comb begin
-        write_sticky_next = write_sticky_reg;
-        read_sticky_next = read_sticky_reg;
-        write_collective_next = write_collective_reg;
+        wr_reorder_active_next = wr_reorder_active_reg;
+        rd_reorder_active_next = rd_reorder_active_reg;
+        wr_collective_active_next = wr_collective_active_reg;
         b_rr_next = b_rr_reg;
         r_rr_next = r_rr_reg;
         aw_hold_next = aw_hold_reg;
@@ -293,14 +294,14 @@ module nmu_ordering #(
         b_hold_id_next = b_hold_id_reg;
         r_hold_id_next = r_hold_id_reg;
         for (int id = 0; id < NUM_IDS; id++) begin
-            write_head_next[id] = write_head_reg[id];
-            write_tail_next[id] = write_tail_reg[id];
-            read_head_next[id] = read_head_reg[id];
-            read_tail_next[id] = read_tail_reg[id];
-            write_usage_next[id] = write_usage_reg[id];
-            read_usage_next[id] = read_usage_reg[id];
-            write_domain_next[id] = write_domain_reg[id];
-            read_domain_next[id] = read_domain_reg[id];
+            wr_order_rd_ptr_next[id] = wr_order_rd_ptr_reg[id];
+            wr_order_wr_ptr_next[id] = wr_order_wr_ptr_reg[id];
+            rd_order_rd_ptr_next[id] = rd_order_rd_ptr_reg[id];
+            rd_order_wr_ptr_next[id] = rd_order_wr_ptr_reg[id];
+            wr_outstanding_cnt_next[id] = wr_outstanding_cnt_reg[id];
+            rd_outstanding_cnt_next[id] = rd_outstanding_cnt_reg[id];
+            wr_domain_next[id] = wr_domain_reg[id];
+            rd_domain_next[id] = rd_domain_reg[id];
             r_retire_offset_next[id] = r_retire_offset_reg[id];
         end
 
@@ -318,42 +319,42 @@ module nmu_ordering #(
         r_hold_next = m_r_valid_o && !m_r_ready_i;
         if (b_hold_next && !b_hold_reg) begin
             b_hold_direct_next = b_direct;
-            b_hold_id_next = b_select_id;
+            b_hold_id_next = b_sel_id;
         end
         if (r_hold_next && !r_hold_reg) begin
             r_hold_direct_next = r_direct;
-            r_hold_id_next = r_select_id;
+            r_hold_id_next = r_sel_id;
         end
 
         if (aw_accept) begin
-            write_tail_next[s_aw_i.axi.awid] =
-                write_tail_reg[s_aw_i.axi.awid] == CL_ORDER'(NMU_MAX_TXNS_PER_ID-1) ? '0 :
-                write_tail_reg[s_aw_i.axi.awid] + 1'b1;
-            write_domain_next[s_aw_i.axi.awid] = s_aw_i.route.route.domain;
+            wr_order_wr_ptr_next[s_aw_i.axi.awid] =
+                wr_order_wr_ptr_reg[s_aw_i.axi.awid] == CL_ORDER'(NMU_MAX_TXNS_PER_ID-1) ? '0 :
+                wr_order_wr_ptr_reg[s_aw_i.axi.awid] + 1'b1;
+            wr_domain_next[s_aw_i.axi.awid] = s_aw_i.route.route.domain;
             if (s_aw_i.route.collective_op != 0) begin
-                write_collective_next[s_aw_i.axi.awid] = 1'b1;
+                wr_collective_active_next[s_aw_i.axi.awid] = 1'b1;
             end
         end
         if (ar_accept) begin
-            read_tail_next[s_ar_i.axi.arid] =
-                read_tail_reg[s_ar_i.axi.arid] == CL_ORDER'(NMU_MAX_TXNS_PER_ID-1) ? '0 :
-                read_tail_reg[s_ar_i.axi.arid] + 1'b1;
-            read_domain_next[s_ar_i.axi.arid] = s_ar_i.route.domain;
+            rd_order_wr_ptr_next[s_ar_i.axi.arid] =
+                rd_order_wr_ptr_reg[s_ar_i.axi.arid] == CL_ORDER'(NMU_MAX_TXNS_PER_ID-1) ? '0 :
+                rd_order_wr_ptr_reg[s_ar_i.axi.arid] + 1'b1;
+            rd_domain_next[s_ar_i.axi.arid] = s_ar_i.route.domain;
         end
         if (b_retire) begin
-            write_head_next[b_retire_id] =
-                write_head_reg[b_retire_id] == CL_ORDER'(NMU_MAX_TXNS_PER_ID-1) ? '0 :
-                write_head_reg[b_retire_id] + 1'b1;
-            if (write_head[b_retire_id].collective) begin
-                write_collective_next[b_retire_id] = 1'b0;
+            wr_order_rd_ptr_next[b_retire_id] =
+                wr_order_rd_ptr_reg[b_retire_id] == CL_ORDER'(NMU_MAX_TXNS_PER_ID-1) ? '0 :
+                wr_order_rd_ptr_reg[b_retire_id] + 1'b1;
+            if (wr_order_head[b_retire_id].collective) begin
+                wr_collective_active_next[b_retire_id] = 1'b0;
             end
             b_rr_next = b_retire_id + 1'b1;
         end
         if (r_retire) begin
             if (r_retire_last) begin
-                read_head_next[r_retire_id] =
-                    read_head_reg[r_retire_id] == CL_ORDER'(NMU_MAX_TXNS_PER_ID-1) ? '0 :
-                    read_head_reg[r_retire_id] + 1'b1;
+                rd_order_rd_ptr_next[r_retire_id] =
+                    rd_order_rd_ptr_reg[r_retire_id] == CL_ORDER'(NMU_MAX_TXNS_PER_ID-1) ? '0 :
+                    rd_order_rd_ptr_reg[r_retire_id] + 1'b1;
                 r_retire_offset_next[r_retire_id] = '0;
             end else begin
                 r_retire_offset_next[r_retire_id] = r_retire_offset_reg[r_retire_id] + 1'b1;
@@ -364,43 +365,43 @@ module nmu_ordering #(
         for (int id = 0; id < NUM_IDS; id++) begin
             case ({aw_accept && s_aw_i.axi.awid == ID_W'(id),
                    b_retire && b_retire_id == CL_NUM_IDS'(id)})
-                2'b10: write_usage_next[id] = write_usage_reg[id] + 1'b1;
-                2'b01: write_usage_next[id] = write_usage_reg[id] - 1'b1;
+                2'b10: wr_outstanding_cnt_next[id] = wr_outstanding_cnt_reg[id] + 1'b1;
+                2'b01: wr_outstanding_cnt_next[id] = wr_outstanding_cnt_reg[id] - 1'b1;
                 default: begin end
             endcase
             if (aw_accept && s_aw_i.axi.awid == ID_W'(id)) begin
-                if (write_usage_reg[id] == 0) begin
-                    write_sticky_next[id] = aw_reorder;
+                if (wr_outstanding_cnt_reg[id] == 0) begin
+                    wr_reorder_active_next[id] = aw_reorder;
                 end else if (aw_reorder) begin
-                    write_sticky_next[id] = 1'b1;
+                    wr_reorder_active_next[id] = 1'b1;
                 end
-            end else if (b_retire && b_retire_id == CL_NUM_IDS'(id) && write_usage_reg[id] == 1) begin
-                write_sticky_next[id] = 1'b0;
+            end else if (b_retire && b_retire_id == CL_NUM_IDS'(id) && wr_outstanding_cnt_reg[id] == 1) begin
+                wr_reorder_active_next[id] = 1'b0;
             end
             case ({ar_accept && s_ar_i.axi.arid == ID_W'(id),
                    r_retire && r_retire_id == CL_NUM_IDS'(id) && r_retire_last})
-                2'b10: read_usage_next[id] = read_usage_reg[id] + 1'b1;
-                2'b01: read_usage_next[id] = read_usage_reg[id] - 1'b1;
+                2'b10: rd_outstanding_cnt_next[id] = rd_outstanding_cnt_reg[id] + 1'b1;
+                2'b01: rd_outstanding_cnt_next[id] = rd_outstanding_cnt_reg[id] - 1'b1;
                 default: begin end
             endcase
             if (ar_accept && s_ar_i.axi.arid == ID_W'(id)) begin
-                if (read_usage_reg[id] == 0) begin
-                    read_sticky_next[id] = ar_reorder;
+                if (rd_outstanding_cnt_reg[id] == 0) begin
+                    rd_reorder_active_next[id] = ar_reorder;
                 end else if (ar_reorder) begin
-                    read_sticky_next[id] = 1'b1;
+                    rd_reorder_active_next[id] = 1'b1;
                 end
             end else if (r_retire && r_retire_id == CL_NUM_IDS'(id) &&
-                    read_usage_reg[id] == 1 && r_retire_last) begin
-                read_sticky_next[id] = 1'b0;
+                    rd_outstanding_cnt_reg[id] == 1 && r_retire_last) begin
+                rd_reorder_active_next[id] = 1'b0;
             end
         end
     end
 
     always_ff @(posedge clk_i) begin
         if (rst_i) begin
-            write_sticky_reg <= '0;
-            read_sticky_reg <= '0;
-            write_collective_reg <= '0;
+            wr_reorder_active_reg <= '0;
+            rd_reorder_active_reg <= '0;
+            wr_collective_active_reg <= '0;
             b_rr_reg <= '0;
             r_rr_reg <= '0;
             aw_hold_reg <= '0;
@@ -416,20 +417,20 @@ module nmu_ordering #(
             b_hold_id_reg <= '0;
             r_hold_id_reg <= '0;
             for (int id = 0; id < NUM_IDS; id++) begin
-                write_head_reg[id] <= '0;
-                write_tail_reg[id] <= '0;
-                read_head_reg[id] <= '0;
-                read_tail_reg[id] <= '0;
-                write_usage_reg[id] <= '0;
-                read_usage_reg[id] <= '0;
-                write_domain_reg[id] <= '0;
-                read_domain_reg[id] <= '0;
+                wr_order_rd_ptr_reg[id] <= '0;
+                wr_order_wr_ptr_reg[id] <= '0;
+                rd_order_rd_ptr_reg[id] <= '0;
+                rd_order_wr_ptr_reg[id] <= '0;
+                wr_outstanding_cnt_reg[id] <= '0;
+                rd_outstanding_cnt_reg[id] <= '0;
+                wr_domain_reg[id] <= '0;
+                rd_domain_reg[id] <= '0;
                 r_retire_offset_reg[id] <= '0;
             end
         end else begin
-            write_sticky_reg <= write_sticky_next;
-            read_sticky_reg <= read_sticky_next;
-            write_collective_reg <= write_collective_next;
+            wr_reorder_active_reg <= wr_reorder_active_next;
+            rd_reorder_active_reg <= rd_reorder_active_next;
+            wr_collective_active_reg <= wr_collective_active_next;
             b_rr_reg <= b_rr_next;
             r_rr_reg <= r_rr_next;
             aw_hold_reg <= aw_hold_next;
@@ -445,36 +446,36 @@ module nmu_ordering #(
             b_hold_id_reg <= b_hold_id_next;
             r_hold_id_reg <= r_hold_id_next;
             for (int id = 0; id < NUM_IDS; id++) begin
-                write_head_reg[id] <= write_head_next[id];
-                write_tail_reg[id] <= write_tail_next[id];
-                read_head_reg[id] <= read_head_next[id];
-                read_tail_reg[id] <= read_tail_next[id];
-                write_usage_reg[id] <= write_usage_next[id];
-                read_usage_reg[id] <= read_usage_next[id];
-                write_domain_reg[id] <= write_domain_next[id];
-                read_domain_reg[id] <= read_domain_next[id];
+                wr_order_rd_ptr_reg[id] <= wr_order_rd_ptr_next[id];
+                wr_order_wr_ptr_reg[id] <= wr_order_wr_ptr_next[id];
+                rd_order_rd_ptr_reg[id] <= rd_order_rd_ptr_next[id];
+                rd_order_wr_ptr_reg[id] <= rd_order_wr_ptr_next[id];
+                wr_outstanding_cnt_reg[id] <= wr_outstanding_cnt_next[id];
+                rd_outstanding_cnt_reg[id] <= rd_outstanding_cnt_next[id];
+                wr_domain_reg[id] <= wr_domain_next[id];
+                rd_domain_reg[id] <= rd_domain_next[id];
                 r_retire_offset_reg[id] <= r_retire_offset_next[id];
             end
             if (aw_accept) begin
-                write_order_reg[s_aw_i.axi.awid][write_tail_reg[s_aw_i.axi.awid]] <= '{
+                wr_order_reg[s_aw_i.axi.awid][wr_order_wr_ptr_reg[s_aw_i.axi.awid]] <= '{
                     base: aw_tag, beat_count: BEAT_COUNT_W'(1),
                     ordering_req: aw_reorder, collective: s_aw_i.route.collective_op != 0
                 };
             end
             if (ar_accept) begin
-                read_lane_context_reg[s_ar_i.axi.arid][read_tail_reg[s_ar_i.axi.arid]] <= '{
+                rd_lane_context_reg[s_ar_i.axi.arid][rd_order_wr_ptr_reg[s_ar_i.axi.arid]] <= '{
                     addr: BYTE_OFFSET_W'(s_ar_i.axi.araddr), len: s_ar_i.axi.arlen,
                     size: s_ar_i.axi.arsize, burst: s_ar_i.axi.arburst,
                     is_data: s_ar_i.route.domain.is_data
                 };
-                read_order_reg[s_ar_i.axi.arid][read_tail_reg[s_ar_i.axi.arid]] <= '{
-                    base: ar_tag, beat_count: ar_beat_count,
+                rd_order_reg[s_ar_i.axi.arid][rd_order_wr_ptr_reg[s_ar_i.axi.arid]] <= '{
+                    base: ar_tag, beat_count: ar_beat_cnt,
                     ordering_req: ar_reorder, collective: 1'b0
                 };
             end
             if (r_retire && !r_retire_last) begin
-                read_order_reg[r_retire_id][read_head_reg[r_retire_id]].beat_count <=
-                    read_head[r_retire_id].beat_count - 1'b1;
+                rd_order_reg[r_retire_id][rd_order_rd_ptr_reg[r_retire_id]].beat_count <=
+                    rd_order_head[r_retire_id].beat_count - 1'b1;
             end
         end
     end
@@ -485,22 +486,24 @@ module nmu_ordering #(
     ) i_b_storage (
         .clk_i,
         .rst_i,
-        .reserve_valid_i (aw_accept && aw_reorder),
-        .reserve_base_i (aw_tag),
-        .reserve_count_i ((TAG_W+1)'(1)),
+        .alloc_valid_i (aw_accept && aw_reorder),
+        .alloc_base_i (aw_tag),
+        .alloc_cnt_i ((TAG_W+1)'(1)),
         .next_base_o (b_next_base),
-        .free_count_o (b_free_count),
-        .fill_valid_i (s_b_valid_i && s_b_i.meta.ordering_req && (!b_direct || m_b_ready_i)),
-        .fill_bypass_i (b_direct),
-        .fill_ready_o (b_fill_ready),
-        .fill_base_i (s_b_i.meta.ordering_tag),
-        .fill_last_i (1'b1),
-        .fill_data_i (s_b_i.axi),
-        .peek_addr_i (b_peek_addr),
-        .peek_complete_o (),
-        .peek_data_o (b_peek_data),
-        .release_valid_i (b_retire && write_head[b_retire_id].ordering_req),
-        .release_addr_i (b_release_addr),
+        .free_cnt_o (b_free_cnt),
+        .wr_valid_i (!rst_i && s_b_valid_i && s_b_i.meta.ordering_req && (!b_direct || m_b_ready_i)),
+        .wr_bypass_i (b_direct),
+        .wr_ready_o (b_storage_wr_ready),
+        .wr_base_i (!rst_i && s_b_valid_i && s_b_i.meta.ordering_req ?
+            s_b_i.meta.ordering_tag : '0),
+        .wr_last_i (1'b1),
+        .wr_data_i (s_b_i.axi),
+        .rd_en_i (b_sel_valid),
+        .rd_addr_i (b_storage_rd_addr),
+        .rd_entry_complete_o (),
+        .rd_data_o (b_storage_rd_data),
+        .free_valid_i (b_retire && wr_order_head[b_retire_id].ordering_req),
+        .free_addr_i (b_storage_free_addr),
         .complete_o (b_complete)
     );
 
@@ -511,29 +514,31 @@ module nmu_ordering #(
         ) i_r_storage (
             .clk_i,
             .rst_i,
-            .reserve_valid_i (ar_accept && ar_reorder),
-            .reserve_base_i (ar_tag),
-            .reserve_count_i ((TAG_W+1)'(ar_beat_count)),
+            .alloc_valid_i (ar_accept && ar_reorder),
+            .alloc_base_i (ar_tag),
+            .alloc_cnt_i ((TAG_W+1)'(ar_beat_cnt)),
             .next_base_o (r_next_base),
-            .free_count_o (r_free_count),
-            .fill_valid_i (s_r_valid_i && s_r_i.meta.ordering_req && (!r_direct || m_r_ready_i)),
-            .fill_bypass_i (r_direct),
-            .fill_ready_o (r_fill_ready),
-            .fill_base_i (s_r_i.meta.ordering_tag),
-            .fill_last_i (s_r_i.axi.rlast),
-            .fill_data_i (s_r_i.axi),
-            .peek_addr_i (r_peek_addr),
-            .peek_complete_o (),
-            .peek_data_o (r_peek_data),
-            .release_valid_i (r_retire && read_head[r_retire_id].ordering_req),
-            .release_addr_i (r_release_addr),
+            .free_cnt_o (r_free_cnt),
+            .wr_valid_i (!rst_i && s_r_valid_i && s_r_i.meta.ordering_req && (!r_direct || m_r_ready_i)),
+            .wr_bypass_i (r_direct),
+            .wr_ready_o (r_storage_wr_ready),
+            .wr_base_i (!rst_i && s_r_valid_i && s_r_i.meta.ordering_req ?
+                s_r_i.meta.ordering_tag : '0),
+            .wr_last_i (!rst_i && s_r_valid_i && s_r_i.meta.ordering_req && s_r_i.axi.rlast),
+            .wr_data_i (s_r_i.axi),
+            .rd_en_i (r_sel_valid),
+            .rd_addr_i (r_storage_rd_addr),
+            .rd_entry_complete_o (),
+            .rd_data_o (r_storage_rd_data),
+            .free_valid_i (r_retire && rd_order_head[r_retire_id].ordering_req),
+            .free_addr_i (r_storage_free_addr),
             .complete_o (r_complete)
         );
     end else begin : gen_no_read_reorder_storage
         assign r_next_base = '0;
-        assign r_free_count = '0;
-        assign r_fill_ready = 1'b0;
-        assign r_peek_data = '0;
+        assign r_free_cnt = '0;
+        assign r_storage_wr_ready = 1'b0;
+        assign r_storage_rd_data = '0;
         assign r_complete = '0;
     end
 endmodule

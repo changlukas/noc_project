@@ -6,9 +6,7 @@
 
 /* Ready/valid adapter for the production Gray-pointer CDC FIFO primitive. */
 module axi_async_fifo #(
-    // AXI channel FIFO depth in entries.
     parameter int unsigned AXI_FIFO_DEPTH = 8,
-    // Complete AXI channel record type.
     parameter type T = logic
 ) (
     input  wire logic  src_clk_i,

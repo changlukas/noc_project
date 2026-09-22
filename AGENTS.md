@@ -113,3 +113,34 @@ Always:
 - Commit working code incrementally.
 - Update `IMPLEMENTATION_PLAN.md` as you progress.
 - Use RTL analogies when explaining C++ concepts to the user.
+
+## RTL naming and comments
+
+Apply these rules to project-owned RTL together with the SystemVerilog style skill.
+- Use lower_snake_case for signals and instances. Name the object before its
+  operation or property, such as rsp_fifo_full and rd_outstanding_cnt_reg.
+- Registered state uses _reg and computed next state uses _next. Do not add
+  wire/register type prefixes or mix _q/_d into project-owned blocks.
+- Flat ports use _i/_o. Active-low signals use _n, combined as _ni/_no on ports.
+  Qualify clock domains where needed. Preserve existing public clock/reset APIs.
+- Use rd/wr, req/rsp, addr/data, sel, cnt, ptr, idx, en consistently. Keep
+  reorder, outstanding, complete and other words readable, without novel abbreviations.
+- valid means usable data, ready means acceptance capability, accept means an
+  actual transfer, en means operation enable. Do not interchange these meanings.
+- Use push/pop for FIFO insertion/removal, alloc/free for entry ownership,
+  rd/wr for storage access, and retire for ordered response delivery.
+- Distinguish cnt (quantity), idx (array index), ptr (position), id (identity),
+  tag (transaction tracking), sel (mux selection), and grant (arbitration grant).
+- Name persistent flags after their meaning, for example wr_reorder_active_reg.
+  Avoid generic sticky/classify names. Name entry completion rd_entry_complete
+  rather than implying that a memory read has completed.
+- New width parameters use _W, feature enables _EN, and derived clog2 widths
+  CL_*. Preserve established public parameters, protocol fields, generated
+  contracts and upstream names. Parameter values/ranges are a separate change.
+- Keep only comments explaining design intent, ordering/CDC/reset constraints,
+  non-obvious boundaries or tool workarounds. Remove prose repeating declarations
+  or assignments. Retain licenses, provenance and tool directives.
+- Renames must update tests, assertions, scripts and waveform signal paths.
+  Migrate the user's current RC by exact identifiers, preserving groups, order
+  and display settings. Keep an old/new name map and an RC backup.
+- Naming/comment cleanup must not change logic, widths, reset or timing.

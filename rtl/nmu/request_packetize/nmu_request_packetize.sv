@@ -4,10 +4,7 @@
 `timescale 1ns / 1ps
 `default_nettype none
 
-/* Packetize ordered NMU requests and independently schedule the REQ and DAT
- * NoC faces.  Accepted AWs form the global ownership order used to associate
- * the AXI W stream with its route, traffic class, ordering metadata, and VC.
- */
+// Packetize REQ/DAT independently; accepted AW order determines W ownership.
 module nmu_request_packetize #(
     parameter int unsigned FIFO_DEPTH = ni_params_pkg::NOC_FIFO_DEPTH_DFLT,
     parameter int unsigned DAT_NUM_VC = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
@@ -109,9 +106,9 @@ module nmu_request_packetize #(
     wire logic ar_accept = s_ar_valid_i && s_ar_ready_o;
     wire logic req_transfer = req_valid && m_req_ready_i;
     wire logic dat_transfer = dat_valid;
-    logic req_select_aw;
+    logic req_sel_aw;
     logic dat_vc_available;
-    logic [CL_VC-1:0] dat_selected_vc;
+    logic [CL_VC-1:0] dat_sel_vc;
     logic [ni_flit_pkg::HEADER_WIDTH-1:0] req_header, dat_header;
     logic [ni_flit_pkg::PAYLOAD_WIDTH-1:0] req_payload, dat_payload;
 
@@ -229,13 +226,13 @@ module nmu_request_packetize #(
     assign s_ar_ready_o = !rst_i && !ar_full;
 
     always_comb begin
-        req_select_aw = 1'b0;
+        req_sel_aw = 1'b0;
         if (req_hold_reg) begin
-            req_select_aw = req_hold_aw_reg;
+            req_sel_aw = req_hold_aw_reg;
         end else if (!req_write_lock_reg) begin
             if (!narrow_aw_empty && !narrow_w_empty &&
                 (ar_empty || !req_rr_reg)) begin
-                req_select_aw = 1'b1;
+                req_sel_aw = 1'b1;
             end
         end
     end
@@ -243,20 +240,20 @@ module nmu_request_packetize #(
     always_comb begin
         int candidate;
         dat_vc_available = 1'b0;
-        dat_selected_vc = dat_vc_rr_reg;
+        dat_sel_vc = dat_vc_rr_reg;
         candidate = 0;
         if (!data_aw_head.meta.ordering_req &&
             fixed_vc_valid_reg[data_aw_head.axi.awid] &&
             fixed_vc_dst_reg[data_aw_head.axi.awid] == data_aw_head.meta.route.domain.dst_id) begin
-            dat_selected_vc = fixed_vc_id_reg[data_aw_head.axi.awid];
-            dat_vc_available = dat_credit_reg[dat_selected_vc] != 0 ||
-                dat_credit_return_i[dat_selected_vc];
+            dat_sel_vc = fixed_vc_id_reg[data_aw_head.axi.awid];
+            dat_vc_available = dat_credit_reg[dat_sel_vc] != 0 ||
+                dat_credit_return_i[dat_sel_vc];
         end else begin
             for (int offset = WRITE_VC_COUNT-1; offset >= 0; offset--) begin
                 candidate = (int'(dat_vc_rr_reg) + offset) % WRITE_VC_COUNT;
                 if (dat_credit_reg[candidate] != 0 || dat_credit_return_i[candidate]) begin
                     dat_vc_available = 1'b1;
-                    dat_selected_vc = CL_VC'(candidate);
+                    dat_sel_vc = CL_VC'(candidate);
                 end
             end
         end
@@ -273,7 +270,7 @@ module nmu_request_packetize #(
                 narrow_w_head.axi.wlast);
             req_payload = pack_w(narrow_w_head, 1'b1);
             req_valid = 1'b1;
-        end else if (req_select_aw) begin
+        end else if (req_sel_aw) begin
             req_header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_NarrowAw),
                 narrow_aw_head.meta, narrow_aw_head.collective_op,
                 narrow_aw_head.collective_mask, '0, !narrow_aw_head.meta.ordering_req, 1'b0);
@@ -308,7 +305,7 @@ module nmu_request_packetize #(
                      dat_vc_available) begin
             dat_header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataAw),
                 data_aw_head.meta, data_aw_head.collective_op, data_aw_head.collective_mask,
-                dat_selected_vc, !data_aw_head.meta.ordering_req, 1'b0);
+                dat_sel_vc, !data_aw_head.meta.ordering_req, 1'b0);
             dat_payload = pack_aw(data_aw_head);
             dat_valid = 1'b1;
         end
@@ -350,7 +347,7 @@ module nmu_request_packetize #(
         .data_i (s_aw_i),
         .push_i (aw_accept && !aw_is_data),
         .data_o (narrow_aw_head),
-        .pop_i (req_transfer && req_select_aw && !req_write_lock_reg)
+        .pop_i (req_transfer && req_sel_aw && !req_write_lock_reg)
     );
 
     cc_fifo #(
@@ -386,7 +383,7 @@ module nmu_request_packetize #(
         .data_i (s_ar_i),
         .push_i (ar_accept),
         .data_o (ar_head),
-        .pop_i (req_transfer && !req_write_lock_reg && !req_select_aw)
+        .pop_i (req_transfer && !req_write_lock_reg && !req_sel_aw)
     );
 
     cc_fifo #(
@@ -449,7 +446,7 @@ module nmu_request_packetize #(
 
         req_hold_next = req_valid && !m_req_ready_i && !req_write_lock_reg;
         if (req_hold_next && !req_hold_reg) begin
-            req_hold_aw_next = req_select_aw;
+            req_hold_aw_next = req_sel_aw;
         end
         if (w_accept) begin
             owner_beat_index_next = s_w_i.wlast ? '0 : owner_beat_index_reg + 1'b1;
@@ -459,7 +456,7 @@ module nmu_request_packetize #(
                 if (narrow_w_head.axi.wlast) begin
                     req_write_lock_next = 1'b0;
                 end
-            end else if (req_select_aw) begin
+            end else if (req_sel_aw) begin
                 req_active_aw_next = narrow_aw_head;
                 req_write_lock_next = 1'b1;
                 req_rr_next = 1'b1;
@@ -474,20 +471,20 @@ module nmu_request_packetize #(
                 end
             end else begin
                 dat_active_aw_next = data_aw_head;
-                dat_active_vc_next = dat_selected_vc;
+                dat_active_vc_next = dat_sel_vc;
                 dat_write_lock_next = 1'b1;
-                dat_vc_rr_next = dat_selected_vc == CL_VC'(WRITE_VC_COUNT-1) ? '0 :
-                    dat_selected_vc + 1'b1;
+                dat_vc_rr_next = dat_sel_vc == CL_VC'(WRITE_VC_COUNT-1) ? '0 :
+                    dat_sel_vc + 1'b1;
                 if (!data_aw_head.meta.ordering_req) begin
                     fixed_vc_valid_next[data_aw_head.axi.awid] = 1'b1;
                     fixed_vc_dst_next[data_aw_head.axi.awid] = data_aw_head.meta.route.domain.dst_id;
-                    fixed_vc_id_next[data_aw_head.axi.awid] = dat_selected_vc;
+                    fixed_vc_id_next[data_aw_head.axi.awid] = dat_sel_vc;
                 end
             end
         end
         for (int vc = 0; vc < DAT_NUM_VC; vc++) begin
             case ({dat_credit_return_i[vc], dat_transfer &&
-                   (dat_write_lock_reg ? dat_active_vc_reg : dat_selected_vc) == CL_VC'(vc)})
+                   (dat_write_lock_reg ? dat_active_vc_reg : dat_sel_vc) == CL_VC'(vc)})
                 2'b10: dat_credit_next[vc] = dat_credit_reg[vc] + 1'b1;
                 2'b01: dat_credit_next[vc] = dat_credit_reg[vc] - 1'b1;
                 default: begin end

@@ -6,19 +6,16 @@
 
 // Network Master Unit production top-level interface and parameter contract.
 module nmu #(
-    // External AXI interface configuration.
     parameter int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_ID_WIDTH_DFLT,
     parameter int unsigned NOC_ID_WIDTH = ni_params_pkg::NOC_ID_WIDTH_DFLT,
     parameter int unsigned AXI_ADDR_WIDTH = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
     parameter int unsigned AXI_DATA_WIDTH = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
     parameter int unsigned AXI_AWUSER_WIDTH = ni_params_pkg::AXI_AWUSER_WIDTH_DFLT,
     parameter int unsigned AXI_FIFO_DEPTH = ni_params_pkg::AXI_FIFO_DEPTH_DFLT,
-    // NoC interface configuration.
     parameter int unsigned NOC_DAT_NUM_VC = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
     parameter int unsigned NOC_DAT_VC_MODE = ni_params_pkg::NOC_DAT_VC_MODE_DFLT,
     parameter int unsigned NOC_FIFO_DEPTH = ni_params_pkg::NOC_FIFO_DEPTH_DFLT,
     parameter int unsigned NOC_ROUTER_VC_DEPTH = ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT,
-    // NMU transaction ordering configuration.
     parameter int unsigned NMU_ROB_B_DEPTH = ni_params_pkg::NMU_ROB_B_DEPTH_DFLT,
     parameter int unsigned NMU_ROB_R_DEPTH = ni_params_pkg::NMU_ROB_R_DEPTH_DFLT,
     parameter bit READ_ROB_ENABLED = bit'(ni_params_pkg::NMU_READ_ROB_ENABLED_DFLT),
@@ -32,7 +29,6 @@ module nmu #(
     parameter type sam_idx_t = topology_pkg::sam_idx_t,
     parameter type sam_rule_t = topology_pkg::sam_rule_t,
     parameter sam_rule_t [SAM_NUM_RULES-1:0] SAM = topology_pkg::SAM,
-    // Local network-interface identity.
     parameter logic [ni_flit_pkg::SRC_ID_WIDTH-1:0] SRC_ID = '0,
     parameter logic [ni_flit_pkg::SRC_PORT_ID_WIDTH-1:0] SRC_PORT_ID = '0
 ) (

@@ -194,8 +194,8 @@ module tb_nmu_standalone #(
         end
         if (noc_rst_n && !warmup) begin
 
-            if (dut.i_response_path.i_ordering.b_free_count == 0) b_full_cycles++;
-            if (READ_ROB_ENABLED && dut.i_response_path.i_ordering.r_free_count == 0) r_full_cycles++;
+            if (dut.i_response_path.i_ordering.b_free_cnt == 0) b_full_cycles++;
+            if (READ_ROB_ENABLED && dut.i_response_path.i_ordering.r_free_cnt == 0) r_full_cycles++;
             if (dat_valid) $fatal(1, "control-plane test unexpectedly used DAT");
             if (dut.i_response_path.i_ordering.s_b_valid_i && dut.i_response_path.i_ordering.s_b_ready_o && !dut.i_response_path.i_ordering.b_direct)
                 b_buffered = b_buffered + 1;

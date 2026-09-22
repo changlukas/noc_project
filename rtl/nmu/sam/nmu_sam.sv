@@ -10,7 +10,6 @@ module nmu_sam #(
     parameter int unsigned AW_SAM_REG_TYPE = 0,
     // AR decode-to-RoB timing cut: 0 bypass, 1 simple, 2 full skid.
     parameter int unsigned AR_SAM_REG_TYPE = 0,
-    // Generated System Address Map contract.
     parameter int unsigned SAM_NUM_RULES,
     parameter type         addr_t,
     parameter type         sam_mask_sel_t,

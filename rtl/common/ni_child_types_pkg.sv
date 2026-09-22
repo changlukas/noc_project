@@ -12,9 +12,6 @@ package ni_child_types_pkg;
         logic                                      is_data;
     } nmu_ordering_domain_t;
 
-    // SAM-resolved request metadata.  The SAM child consumes the generated
-    // topology_pkg::sam_idx_t directly; only the ordering-domain projection
-    // crosses every request stream.
     typedef struct packed {
         nmu_ordering_domain_t domain;
     } nmu_route_t;
@@ -27,14 +24,12 @@ package ni_child_types_pkg;
         logic [ni_flit_pkg::COLLECTIVE_MASK_WIDTH-1:0] collective_mask;
     } nmu_aw_route_t;
 
-    // RoB-admitted request metadata carried beside axi_aw_t/axi_w_t/axi_ar_t.
     typedef struct packed {
         nmu_route_t                                  route;
         logic                                        ordering_req;
         logic [ni_flit_pkg::ORDERING_TAG_WIDTH-1:0] ordering_tag;
     } nmu_request_t;
 
-    // Decoded response metadata carried beside axi_b_t or axi_r_t.
     typedef struct packed {
         logic                                        is_data;
         logic                                        ordering_req;
@@ -51,7 +46,6 @@ package ni_child_types_pkg;
         nmu_route_t               route;
     } nmu_sam_ar_result_t;
 
-    // nmu_rob ordered request and decoded response stream payloads.
     typedef struct packed {
         ni_signals_pkg::axi_aw_t axi;
         nmu_request_t            meta;
@@ -126,7 +120,6 @@ package ni_child_types_pkg;
         logic [ni_flit_pkg::COLLECTIVE_MASK_WIDTH-1:0] collective_mask;
     } response_entry_t;
 
-    // nsu_depacketize request outputs and nsu_response_queue response outputs.
     typedef struct packed {
         ni_signals_pkg::axi_aw_t axi;
         response_entry_t         response;

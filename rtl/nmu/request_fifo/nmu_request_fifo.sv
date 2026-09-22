@@ -6,15 +6,11 @@
 
 /* AXI-clock to NoC-clock request-channel FIFO bank. */
 module nmu_request_fifo #(
-    // Common request-channel FIFO depth in entries.
     parameter int unsigned AXI_FIFO_DEPTH = 8,
     // External AXI ID width; request records retain this width across CDC.
     parameter int unsigned AXI_ID_WIDTH = 3,
-    // Complete write-address channel record type.
     parameter type AW_T = logic [AXI_ID_WIDTH-1:0],
-    // Complete write-data channel record type.
     parameter type W_T = logic,
-    // Complete read-address channel record type.
     parameter type AR_T = logic [AXI_ID_WIDTH-1:0]
 ) (
     input  wire logic  axi_clk_i,

@@ -8,7 +8,6 @@
 module stream_register #(
     // 0: bypass, 1: simple register, 2: full spill register.
     parameter int unsigned REG_TYPE = 0,
-    // Complete transaction record type.
     parameter type T = logic
 ) (
     input  wire logic  clk_i,

@@ -12,22 +12,23 @@ module nmu_reorder_storage #(
 ) (
     input wire logic clk_i,
     input wire logic rst_i,
-    input wire logic reserve_valid_i,
-    input wire logic [TAG_W-1:0] reserve_base_i,
-    input wire logic [TAG_W:0] reserve_count_i,
+    input wire logic alloc_valid_i,
+    input wire logic [TAG_W-1:0] alloc_base_i,
+    input wire logic [TAG_W:0] alloc_cnt_i,
     output wire logic [TAG_W-1:0] next_base_o,
-    output wire logic [TAG_W:0] free_count_o,
-    input wire logic fill_valid_i,
-    input wire logic fill_bypass_i,
-    output wire logic fill_ready_o,
-    input wire logic [TAG_W-1:0] fill_base_i,
-    input wire logic fill_last_i,
-    input wire T fill_data_i,
-    input wire logic [TAG_W-1:0] peek_addr_i,
-    output wire logic peek_complete_o,
-    output wire T peek_data_o,
-    input wire logic release_valid_i,
-    input wire logic [TAG_W-1:0] release_addr_i,
+    output wire logic [TAG_W:0] free_cnt_o,
+    input wire logic wr_valid_i,
+    input wire logic wr_bypass_i,
+    output wire logic wr_ready_o,
+    input wire logic [TAG_W-1:0] wr_base_i,
+    input wire logic wr_last_i,
+    input wire T wr_data_i,
+    input wire logic rd_en_i,
+    input wire logic [TAG_W-1:0] rd_addr_i,
+    output wire logic rd_entry_complete_o,
+    output wire T rd_data_o,
+    input wire logic free_valid_i,
+    input wire logic [TAG_W-1:0] free_addr_i,
     output wire logic [DEPTH-1:0] complete_o
 );
 
@@ -41,61 +42,63 @@ module nmu_reorder_storage #(
     T data_reg [DEPTH];
     logic [DEPTH-1:0] alloc_reg, alloc_next;
     logic [DEPTH-1:0] complete_reg, complete_next;
-    logic [TAG_W-1:0] fill_offset_reg [TAG_SPACE], fill_offset_next [TAG_SPACE];
-    logic [TAG_W:0] free_count;
+    logic [TAG_W-1:0] wr_offset_reg [TAG_SPACE], wr_offset_next [TAG_SPACE];
+    logic [TAG_W:0] free_cnt;
     logic [TAG_W-1:0] next_base;
-    wire logic [TAG_W:0] fill_addr =
-        {1'b0, fill_base_i} + {1'b0, fill_offset_reg[fill_base_i]};
-    wire logic fill_transfer = fill_valid_i && fill_ready_o;
-    wire logic [CL_DEPTH-1:0] fill_index = CL_DEPTH'(fill_addr);
-    wire logic [CL_DEPTH-1:0] peek_index = CL_DEPTH'(peek_addr_i);
-    wire logic [CL_DEPTH-1:0] release_index = CL_DEPTH'(release_addr_i);
+    wire logic [TAG_W:0] wr_addr =
+        {1'b0, wr_base_i} + {1'b0, wr_offset_reg[wr_base_i]};
+    wire logic wr_accept = wr_valid_i && wr_ready_o;
+    wire logic [CL_DEPTH-1:0] wr_idx = CL_DEPTH'(wr_addr);
+    wire logic [CL_DEPTH-1:0] rd_idx = CL_DEPTH'(rd_addr_i);
+    wire logic [CL_DEPTH-1:0] free_idx = CL_DEPTH'(free_addr_i);
 
     always_comb begin
-        free_count = (TAG_W+1)'(DEPTH);
+        free_cnt = (TAG_W+1)'(DEPTH);
         next_base = '0;
         for (int n = 0; n < DEPTH; n++) begin
             if (alloc_reg[n]) begin
-                free_count = (TAG_W+1)'(DEPTH - n - 1);
+                free_cnt = (TAG_W+1)'(DEPTH - n - 1);
                 next_base = TAG_W'(n + 1);
             end
         end
     end
 
     assign next_base_o = next_base;
-    assign free_count_o = free_count;
-    assign fill_ready_o = fill_addr < (TAG_W+1)'(DEPTH) &&
-        alloc_reg[fill_index] && !complete_reg[fill_index];
-    assign peek_complete_o = int'(peek_addr_i) < DEPTH && complete_reg[peek_index];
-    assign peek_data_o = int'(peek_addr_i) < DEPTH ? data_reg[peek_index] : T'('0);
+    assign free_cnt_o = free_cnt;
+    assign wr_ready_o = !rst_i && wr_valid_i && wr_addr < (TAG_W+1)'(DEPTH) &&
+        alloc_reg[wr_idx] && !complete_reg[wr_idx];
+    assign rd_entry_complete_o = !rst_i && rd_en_i &&
+        int'(rd_addr_i) < DEPTH && complete_reg[rd_idx];
+    // Payload memory is intentionally unreset; expose only completed entries.
+    assign rd_data_o = rd_entry_complete_o ? data_reg[rd_idx] : T'('0);
     assign complete_o = complete_reg;
 
     always_comb begin
         alloc_next = alloc_reg;
         complete_next = complete_reg;
         for (int tag = 0; tag < TAG_SPACE; tag++) begin
-            fill_offset_next[tag] = fill_offset_reg[tag];
+            wr_offset_next[tag] = wr_offset_reg[tag];
         end
 
-        if (reserve_valid_i) begin
+        if (alloc_valid_i) begin
             for (int n = 0; n < DEPTH; n++) begin
-                if (n >= int'(reserve_base_i) &&
-                        n < int'(reserve_base_i) + int'(reserve_count_i)) begin
+                if (n >= int'(alloc_base_i) &&
+                        n < int'(alloc_base_i) + int'(alloc_cnt_i)) begin
                     alloc_next[n] = 1'b1;
                 end
             end
-            fill_offset_next[reserve_base_i] = '0;
+            wr_offset_next[alloc_base_i] = '0;
         end
-        if (fill_transfer) begin
-            if (!fill_bypass_i) begin
-                complete_next[fill_index] = 1'b1;
+        if (wr_accept) begin
+            if (!wr_bypass_i) begin
+                complete_next[wr_idx] = 1'b1;
             end
-            fill_offset_next[fill_base_i] = fill_last_i ? '0 :
-                fill_offset_reg[fill_base_i] + 1'b1;
+            wr_offset_next[wr_base_i] = wr_last_i ? '0 :
+                wr_offset_reg[wr_base_i] + 1'b1;
         end
-        if (release_valid_i && int'(release_addr_i) < DEPTH) begin
-            alloc_next[release_index] = 1'b0;
-            complete_next[release_index] = 1'b0;
+        if (free_valid_i && int'(free_addr_i) < DEPTH) begin
+            alloc_next[free_idx] = 1'b0;
+            complete_next[free_idx] = 1'b0;
         end
     end
 
@@ -104,19 +107,31 @@ module nmu_reorder_storage #(
             alloc_reg <= '0;
             complete_reg <= '0;
             for (int tag = 0; tag < TAG_SPACE; tag++) begin
-                fill_offset_reg[tag] <= '0;
+                wr_offset_reg[tag] <= '0;
             end
         end else begin
             alloc_reg <= alloc_next;
             complete_reg <= complete_next;
             for (int tag = 0; tag < TAG_SPACE; tag++) begin
-                fill_offset_reg[tag] <= fill_offset_next[tag];
+                wr_offset_reg[tag] <= wr_offset_next[tag];
             end
-            if (fill_transfer && !fill_bypass_i) begin
-                data_reg[fill_index] <= fill_data_i;
+            if (wr_accept && !wr_bypass_i) begin
+                data_reg[wr_idx] <= wr_data_i;
             end
         end
     end
+    // synthesis translate_off
+    always @(posedge clk_i) begin
+        if (!rst_i) begin
+            if (!wr_valid_i && wr_ready_o !== 1'b0)
+                $fatal(1, "inactive storage fill ready must be zero (%m)");
+            if (!rd_en_i && {rd_entry_complete_o, rd_data_o} !== '0)
+                $fatal(1, "inactive storage peek must be zero (%m)");
+            if (rd_en_i && rd_entry_complete_o && $isunknown(rd_data_o))
+                $fatal(1, "completed storage payload contains X (%m)");
+        end
+    end
+    // synthesis translate_on
 endmodule
 
 `resetall
