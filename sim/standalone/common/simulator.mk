@@ -49,7 +49,7 @@ VCS_FLAGS += +define+DUMP_WAVE -P $(PLI_DIR)/novas.tab $(PLI_DIR)/pli.a
 VERILATOR_FLAGS += +define+DUMP_WAVE --trace-fst
 endif
 
-.PHONY: help sanity_check compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report
+.PHONY: help sanity_check compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report clean
 help:
 	@printf '%s\n' \
 	 'make run CASE=ctrl_write_single     Compile and run (VCS default)' \
@@ -59,6 +59,7 @@ help:
 	 'make run_wave CASE=same_id_cross_dst_reorder' \
 	 'make nWave CASE=same_id_cross_dst_reorder  (load signal groups)' \
 	 'make run_wave_view CASE=ctrl_write_single (run then open nWave)' \
+	 'make clean                         Remove all build/wave/log/GUI artifacts; retain signal RC files' \
 	 'make regress SIMULATOR=verilator    Same sources, cases and configuration' \
 	 'Shared overrides: ID_WIDTH, NOC_HALF_PERIOD, BUFFER_DEPTH, READ_ROB_ENABLED' \
 	 'Patterns are generated for a specific ID_WIDTH; synchronize matching inputs before changing it.'
@@ -145,3 +146,6 @@ report:
 	@test -d "$(report_dir)" || { echo 'No report directory yet' >&2; exit 1; }
 	tar -czf "$(package_dir)/nmu-$(SIMULATOR)-results.tar.gz" -C "$(run_dir)" report
 	@echo 'Reports: $(package_dir)/nmu-$(SIMULATOR)-results.tar.gz'
+
+clean:
+	@bash "$(script_dir)/clean.sh"

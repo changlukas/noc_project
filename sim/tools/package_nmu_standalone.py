@@ -68,13 +68,14 @@ def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
         copy_path(repo / "rtl/nmu/top/nmu_lint.vlt")
         (root / "script").mkdir()
         shutil.copy2(repo / "sim/standalone/common/simulator.mk", root / "script/Makefile")
+        shutil.copy2(repo / "sim/standalone/common/clean.sh", root / "script/clean.sh")
         shutil.copy2(repo / "sim/standalone/nmu/config.mk", root / "script/config.mk")
         (root / "script/nWaveLog").mkdir()
         shutil.copy2(repo / "sim/standalone/nmu/signals.rc", root / "script/nWaveLog/signals.rc")
         (root / "Makefile").write_text(
             ".DEFAULT_GOAL := help\n"
-            ".PHONY: help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report list\n"
-            "help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report:\n"
+            ".PHONY: help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report clean list\n"
+            "help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report clean:\n"
             "\t$(MAKE) --no-print-directory -C script $@\n"
             "list:\n\t@cat pattern_list.txt\n")
         descriptions = {
@@ -131,6 +132,7 @@ make regress SIMULATOR=verilator "$@"
             "Open waveform and signal groups: make nWave CASE=same_id_cross_dst_reorder\n"
             "Waveform template: script/nWaveLog/signals.rc (@FSDB@ is replaced for the selected CASE).\n"
             "Package logs: make report\n"
+            "Clean all build/wave/log/GUI artifacts: make clean (retains signal RC files).\n"
             "Requires an initialized VCS environment, GNU Make and Bash. No Git, Python or network needed.\n"
             "Default: external ID width 8, AXI clock 10ns, NoC clock 14ns, B/R depth 128.\n"
             "No NSU, memory model or C++ DPI. DAT RX is not implemented in this stage.\n"

@@ -8,7 +8,7 @@ output := $(CURDIR)/output/i$(ID_WIDTH)_n$(NOC_HALF_PERIOD)_b$(BUFFER_DEPTH)_r$(
 stage := $(output)/stage
 SIMULATOR ?= verilator
 CASE ?= ctrl_write_single
-.PHONY: help prepare compile run sim regress legacy_regress run_wave run_wave_view nWave
+.PHONY: help prepare compile run sim regress legacy_regress run_wave run_wave_view nWave clean
 help:
 	@echo 'make run CASE=ctrl_write_single SIMULATOR=verilator'
 	@echo 'make regress  (all standalone cases; compile once)'
@@ -24,3 +24,12 @@ regress: prepare
 	$(MAKE) -C "$(stage)/script" block_regress SIMULATOR=$(SIMULATOR) ID_WIDTH=$(ID_WIDTH) NOC_HALF_PERIOD=$(NOC_HALF_PERIOD) BUFFER_DEPTH=$(BUFFER_DEPTH) READ_ROB_ENABLED=$(READ_ROB_ENABLED)
 legacy_regress: prepare
 	$(MAKE) -C "$(stage)/script" legacy_regress SIMULATOR=$(SIMULATOR) CASE= ID_WIDTH=$(ID_WIDTH) NOC_HALF_PERIOD=$(NOC_HALF_PERIOD) BUFFER_DEPTH=$(BUFFER_DEPTH) READ_ROB_ENABLED=$(READ_ROB_ENABLED)
+
+# Clean every prepared profile without regenerating sources or patterns.
+clean:
+	@set -e; for task_stage in "$(CURDIR)"/output/*/stage; do \
+	  if [[ -f "$$task_stage/files.f" ]]; then \
+	    cp "$(root)/sim/standalone/common/clean.sh" "$$task_stage/script/clean.sh"; \
+	    bash "$$task_stage/script/clean.sh"; \
+	  fi; \
+	done
