@@ -19,7 +19,8 @@ module tb_nmu_response_depacketize #(
     logic b_valid, r_valid, b_ready = 1, r_ready = 0;
     int wr_cnt [DAT_NUM_VC+1], rd_cnt [DAT_NUM_VC+1];
     int credit [DAT_NUM_VC];
-    int total_r = 0, total_b = 0, replacements = 0, parallel_ingress = 0;
+    int total_r = 0, total_b = 0, recoveries = 0, parallel_ingress = 0;
+    logic [DAT_NUM_VC-1:0] expected_credit = '0;
     nmu_r_response_t held_r;
     bit held = 0;
     int fault = 0;
@@ -89,13 +90,14 @@ module tb_nmu_response_depacketize #(
         int vc;
         if (rst) begin
             held = 0;
+            expected_credit = '0;
             for (int n = 0; n <= DAT_NUM_VC; n++) begin
                 wr_cnt[n] = 0; rd_cnt[n] = 0;
             end
             for (int n = 0; n < DAT_NUM_VC; n++) credit[n] = DAT_RX_VC_DEPTH;
             if (credit_return !== '0) $fatal(1, "credit pulse during reset");
         end else if (fault == 0) begin
-            if (r_ready && |dut.r_valid && !r_valid) $fatal(1, "avoidable R output bubble");
+            if (r_ready && |dut.i_buffer.r_valid && !r_valid) $fatal(1, "avoidable R output bubble");
             if (held && (!r_valid || r !== held_r)) $fatal(1, "stalled R changed");
             held = r_valid && !r_ready; held_r = r;
             if (!$onehot0(credit_return)) $fatal(1, "multiple DAT pops");
@@ -104,22 +106,23 @@ module tb_nmu_response_depacketize #(
                 if (rd_cnt[vc] >= wr_cnt[vc] || r !== expected(vc, rd_cnt[vc]))
                     $fatal(1, "response mismatch vc=%0d seq=%0d", vc, rd_cnt[vc]);
                 rd_cnt[vc]++; total_r++;
-                if (r.meta.is_data && credit_return !== (DAT_NUM_VC'(1) << vc))
-                    $fatal(1, "missing or wrong VC credit");
-                if (!r.meta.is_data && credit_return != 0) $fatal(1, "credit on NarrowR");
-            end else if (credit_return != 0) $fatal(1, "credit without pop");
+            end
+            if (credit_return !== expected_credit) $fatal(1, "registered credit mismatch");
+            expected_credit = '0;
+            if (r_valid && r_ready && r.meta.is_data)
+                expected_credit[int'(r.axi.rid)] = 1'b1;
             for (int n = 0; n < DAT_NUM_VC; n++) credit[n] += int'(credit_return[n]);
             if (dat_valid) begin
                 vc = int'(dat.header[VC_ID_LSB +: VC_ID_WIDTH]);
                 if (credit[vc] <= 0) $fatal(1, "sender violated credits");
-                if (credit[vc] == 1 && credit_return[vc]) replacements++;
+                if (credit[vc] == 1 && credit_return[vc]) recoveries++;
                 credit[vc]--; wr_cnt[vc]++;
                 if (rsp_valid && rsp_ready) parallel_ingress++;
             end
             if (rsp_valid && rsp_ready && rsp.header[AXI_CH_LSB +: AXI_CH_WIDTH] == AXI_CH_WIDTH'(AXI_CH_NarrowR))
                 wr_cnt[DAT_NUM_VC]++;
             for (int n = FIRST_VC; n < DAT_NUM_VC; n++)
-                if (credit[n] + wr_cnt[n] - rd_cnt[n] != DAT_RX_VC_DEPTH)
+                if (credit[n] + wr_cnt[n] - rd_cnt[n] + int'(expected_credit[n]) != DAT_RX_VC_DEPTH)
                     $fatal(1, "per-VC conservation mismatch");
             if (b_valid && b_ready) begin
                 if (b.axi.bid != 3 || b.axi.bresp != 2 || !b.meta.is_data || !b.meta.ordering_req)
@@ -156,7 +159,8 @@ module tb_nmu_response_depacketize #(
         if (total_b != 1) $fatal(1, "B blocked behind DAT");
         set_rsp(1); @(negedge clk); rsp_valid = 0;
         r_ready = 1;
-        // Replace the first full VC head in the very cycle its credit returns.
+        // A full FIFO pops first; the registered credit permits refill next cycle.
+        @(negedge clk);
         #1ps;
         sel = -1;
         for (int vc = FIRST_VC; vc < DAT_NUM_VC; vc++) if (credit_return[vc]) sel = vc;
@@ -173,7 +177,25 @@ module tb_nmu_response_depacketize #(
             for (int vc = 0; vc <= DAT_NUM_VC; vc++) if (rd_cnt[vc] != wr_cnt[vc]) drained = 0;
             @(negedge clk);
         end while (!drained);
-        if (replacements == 0 || parallel_ingress == 0) $fatal(1, "vacuous full/parallel coverage");
+        if (recoveries == 0 || parallel_ingress == 0) $fatal(1, "vacuous full/parallel coverage");
+        begin : throughput
+            int sent, cycles, start_r;
+            sent = 0; cycles = 0; start_r = total_r;
+            while (sent < 64) begin
+                if (credit[FIRST_VC] + int'(credit_return[FIRST_VC]) > 0) begin
+                    set_dat(FIRST_VC); sent++;
+                end else dat_valid = 0;
+                @(negedge clk); cycles++;
+            end
+            dat_valid = 0;
+            while (rd_cnt[FIRST_VC] != wr_cnt[FIRST_VC]) begin
+                @(negedge clk); cycles++;
+            end
+            repeat (2) @(negedge clk);
+            if (total_r-start_r != 64) $fatal(1, "throughput lost response");
+            $display("PERF depth=%0d beats=64 cycles=%0d", DAT_RX_VC_DEPTH, cycles);
+            if (cycles > 66) $fatal(1, "avoidable throughput bubble with one-cycle credits");
+        end
         // Flush occupied queues and a held arbitration decision, then reseed.
         r_ready = 0; set_dat(FIRST_VC); @(negedge clk); dat_valid = 0;
         repeat (2) @(negedge clk); rst = 1;
@@ -183,8 +205,8 @@ module tb_nmu_response_depacketize #(
         repeat (5) @(negedge clk);
         if (rd_cnt[FIRST_VC] != 1 || credit[FIRST_VC] != DAT_RX_VC_DEPTH)
             $fatal(1, "reset credit reseed/drain failed");
-        $display("PASS depacketize vcs=%0d mode=%0d depth=%0d R=%0d full_replace=%0d parallel=%0d",
-            DAT_NUM_VC, DAT_VC_MODE, DAT_RX_VC_DEPTH, total_r, replacements, parallel_ingress);
+        $display("PASS depacketize vcs=%0d mode=%0d depth=%0d R=%0d credit_recovery=%0d parallel=%0d",
+            DAT_NUM_VC, DAT_VC_MODE, DAT_RX_VC_DEPTH, total_r, recoveries, parallel_ingress);
         $finish;
     end
 `ifdef DUMP_WAVE

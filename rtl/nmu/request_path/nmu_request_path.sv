@@ -246,17 +246,24 @@ module nmu_request_path #(
         .s_ar_i (fifo_ar), .m_ar_valid_o, .m_ar_ready_i, .m_ar_o
     );
 
-    nmu_request_packetize #(
-        .FIFO_DEPTH(NOC_FIFO_DEPTH), .DAT_NUM_VC(NOC_DAT_NUM_VC),
-        .DAT_VC_MODE(NOC_DAT_VC_MODE), .ROUTER_VC_DEPTH(NOC_ROUTER_VC_DEPTH),
-        .SRC_ID(SRC_ID), .SRC_PORT_ID(SRC_PORT_ID)
-    ) i_packetize (
-        .clk_i(noc_clk_i), .rst_i(!noc_rst_ni),
-        .s_aw_i(s_ordered_aw_i), .s_aw_valid_i(s_ordered_aw_valid_i), .s_aw_ready_o(s_ordered_aw_ready_o),
+    wire ni_flit_pkg::req_flit_t [2:0] req_candidates;
+    wire ni_flit_pkg::dat_flit_t [1:0] dat_candidates;
+    wire [2:0] req_valid, req_ready;
+    wire [1:0] dat_valid, dat_ready;
+    nmu_request_packetize #(.FIFO_DEPTH(NOC_FIFO_DEPTH), .SRC_ID(SRC_ID), .SRC_PORT_ID(SRC_PORT_ID)) i_packetize (
+        .clk_i(noc_clk_i), .rst_i(!noc_rst_ni), .s_aw_i(s_ordered_aw_i), .s_aw_valid_i(s_ordered_aw_valid_i),
+        .s_aw_ready_o(s_ordered_aw_ready_o),
         .s_w_i(s_ordered_w_i), .s_w_valid_i(s_ordered_w_valid_i), .s_w_ready_o(s_ordered_w_ready_o),
         .s_ar_i(s_ordered_ar_i), .s_ar_valid_i(s_ordered_ar_valid_i), .s_ar_ready_o(s_ordered_ar_ready_o),
-        .m_req_o(tx_req), .m_req_valid_o(tx_req_valid_o), .m_req_ready_i(tx_req_ready_i),
-        .m_dat_o(tx_dat), .m_dat_valid_o(tx_dat_valid_o), .dat_credit_return_i(tx_dat_crdvalid_i)
+        .m_req_o(req_candidates), .m_req_valid_o(req_valid), .m_req_ready_i(req_ready),
+        .m_dat_o(dat_candidates), .m_dat_valid_o(dat_valid), .m_dat_ready_i(dat_ready)
+    );
+    nmu_channel_assign #(.DAT_NUM_VC(NOC_DAT_NUM_VC), .DAT_VC_MODE(NOC_DAT_VC_MODE),
+        .ROUTER_VC_DEPTH(NOC_ROUTER_VC_DEPTH)) i_channel_assign (
+        .clk_i(noc_clk_i), .rst_i(!noc_rst_ni), .s_req_i(req_candidates), .s_req_valid_i(req_valid), .s_req_ready_o(req_ready),
+        .s_dat_i(dat_candidates), .s_dat_valid_i(dat_valid), .s_dat_ready_o(dat_ready),
+        .m_req_o(tx_req), .m_req_valid_o(tx_req_valid_o), .m_req_ready_i(tx_req_ready_i), .m_dat_o(tx_dat),
+        .m_dat_valid_o(tx_dat_valid_o), .dat_credit_return_i(tx_dat_crdvalid_i)
     );
     assign tx_req_flit_o = tx_req_valid_o ? tx_req : '0;
     assign tx_dat_flit_o = tx_dat_valid_o ? tx_dat : '0;

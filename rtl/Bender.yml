@@ -22,13 +22,14 @@ sources:
   - common/ni_sam.sv
   - common/stream_register.sv
   - common/axi_async_fifo.sv
-  - common/ni_credit_fifo.sv
   - nmu/sam/nmu_sam.sv
   - nmu/request_path/nmu_request_path.sv
   - nmu/response_fifo/nmu_response_fifo.sv
   - nmu/ordering/nmu_reorder_storage.sv
   - nmu/ordering/nmu_ordering.sv
+  - nmu/channel_assign/nmu_channel_assign.sv
   - nmu/request_packetize/nmu_request_packetize.sv
+  - nmu/response_depacketize/nmu_response_buffer.sv
   - nmu/response_depacketize/nmu_response_depacketize.sv
   - nmu/response_path/nmu_response_path.sv
   - nmu/top/nmu.sv

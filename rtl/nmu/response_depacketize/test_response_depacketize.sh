@@ -22,7 +22,7 @@ task_sources=(
     repo/sim/dv/common_cells-1.37.0/src/cf_math_pkg.sv
     repo/sim/dv/common_cells-1.37.0/src/lzc.sv
     repo/sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv
-    repo/rtl/common/ni_credit_fifo.sv
+    repo/rtl/nmu/response_depacketize/nmu_response_buffer.sv
     repo/rtl/nmu/response_depacketize/nmu_response_depacketize.sv
 )
 task_compile() {

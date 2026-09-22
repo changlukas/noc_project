@@ -131,10 +131,10 @@ make regress SIMULATOR=verilator "$@"
 ''')
         revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
         (root / "VERSION.txt").write_text(
-            "Issue: 118\nCheckout HEAD: " + revision + "\n"
+            "Issue: 83\nCheckout HEAD: " + revision + "\n"
             "Compare SHA256SUMS for exact packaged source/config/pattern bytes.\n")
         (root / "README.txt").write_text(
-            "Issue #118 NMU control-plane synchronized simulation tree.\n"
+            "Issue #83 NMU injection/ejection synchronized simulation tree.\n"
             "Run all (VCS default): bash run_vcs.sh\n"
             "Same suite locally: make regress SIMULATOR=verilator\n"
             "Shared configuration: script/config.mk\n"
@@ -146,8 +146,8 @@ make regress SIMULATOR=verilator "$@"
             "Package logs: make report\n"
             "Clean all build/wave/log/GUI artifacts: make clean (retains signal RC files).\n"
             "Requires an initialized VCS environment, GNU Make and Bash. No Git, Python or network needed.\n"
-            "Default: external ID width 8, AXI clock 10ns, NoC clock 14ns, B/R depth 128.\n"
-            "No NSU, memory model or C++ DPI. DAT RX is not implemented in this stage.\n"
+            "Default: external ID width 8, AXI clock 10ns, NoC clock 10ns, B/R depth 128.\n"
+            "No NSU, memory model or C++ DPI. DAT RX is covered by make dat_regress; AXI patterns remain control-only.\n"
             "This package has not been validated with VCS until workstation results are returned.\n")
         checksums = []
         for file in sorted(root.rglob("*")):

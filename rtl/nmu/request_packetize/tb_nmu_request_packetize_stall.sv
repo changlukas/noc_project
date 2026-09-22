@@ -22,7 +22,7 @@ module tb_nmu_request_packetize_stall;
 
     always #5 clk = ~clk;
 
-    nmu_request_packetize #(
+    nmu_request_inject_tb_dut #(
         .FIFO_DEPTH       (4),
         .DAT_NUM_VC       (DAT_NUM_VC),
         .ROUTER_VC_DEPTH  (ROUTER_VC_DEPTH),

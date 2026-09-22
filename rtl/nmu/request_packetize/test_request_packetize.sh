@@ -14,14 +14,17 @@ fi
 [[ $(git -C "$task_common_cells" rev-parse HEAD) == "$task_revision" ]]
 task_sources=(
     "$task_common_cells/src/cc_pkg.sv"
+    "$task_common_cells/src/cc_credit_counter.sv"
     "$task_common_cells/src/cc_fifo.sv"
     "$task_root/specgen/generated/sv/ni_params_pkg.sv"
     "$task_root/specgen/generated/sv/ni_flit_pkg.sv"
     "$task_root/specgen/generated/sv/ni_signals_pkg.sv"
     "$task_root/rtl/common/ni_child_types_pkg.sv"
+    "$task_root/rtl/nmu/channel_assign/nmu_channel_assign.sv"
     "$task_root/rtl/nmu/request_packetize/nmu_request_packetize.sv"
+    "$task_root/rtl/nmu/request_packetize/nmu_request_inject_tb_dut.sv"
 )
-task_verilator=(verilator --timing --assert -Wall -Wno-fatal -Wno-DECLFILENAME
+task_verilator=(verilator "$task_root/rtl/nmu/top/nmu_lint.vlt" --timing --assert -Wall -Wno-fatal -Wno-DECLFILENAME
     -Wno-TIMESCALEMOD -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-PINCONNECTEMPTY
     -Werror-WIDTHTRUNC -Werror-WIDTHEXPAND -Werror-LATCH
     -I"$task_common_cells/include")

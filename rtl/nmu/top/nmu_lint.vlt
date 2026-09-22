@@ -3,3 +3,7 @@
 // and the standalone checker keep width truncation/expansion fatal.
 lint_off -rule WIDTHEXPAND -file "*/sim/dv/*"
 lint_off -rule WIDTHTRUNC -file "*/sim/dv/*"
+// Pinned upstream counter: bounded reset constant and unsigned parameter comparisons.
+lint_off -rule WIDTHTRUNC -file "*/cc_credit_counter.sv" -lines 45
+lint_off -rule WIDTHEXPAND -file "*/cc_credit_counter.sv" -lines 49-50
+lint_off -rule WIDTHEXPAND -file "*/cc_credit_counter.sv" -lines 54

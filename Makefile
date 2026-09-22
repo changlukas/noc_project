@@ -291,3 +291,9 @@ clean-vcs:
 .PHONY: rtl-nmu-standalone-test
 rtl-nmu-standalone-test:
 	bash rtl/nmu/top/test_nmu.sh standalone
+
+.PHONY: rtl-nmu-vc-arbiter-test
+rtl-nmu-vc-arbiter-test:
+	bash rtl/nmu/channel_assign/test_vc_arbiter.sh
+
+check-rtl: rtl-nmu-vc-arbiter-test

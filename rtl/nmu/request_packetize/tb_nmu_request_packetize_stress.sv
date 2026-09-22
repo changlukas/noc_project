@@ -31,7 +31,7 @@ module tb_nmu_request_packetize_stress #(
     int credit [DAT_NUM_VC];
     bit writes_done = 0, reads_done = 0;
 
-    nmu_request_packetize #(
+    nmu_request_inject_tb_dut #(
         .FIFO_DEPTH (FIFO_DEPTH), .DAT_NUM_VC (DAT_NUM_VC),
         .DAT_VC_MODE (DAT_VC_MODE), .ROUTER_VC_DEPTH (CREDIT_DEPTH)
     ) dut (.*);

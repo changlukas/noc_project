@@ -7,9 +7,6 @@
 // Packetize REQ/DAT independently; accepted AW order determines W ownership.
 module nmu_request_packetize #(
     parameter int unsigned FIFO_DEPTH = ni_params_pkg::NOC_FIFO_DEPTH_DFLT,
-    parameter int unsigned DAT_NUM_VC = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
-    parameter int unsigned DAT_VC_MODE = ni_params_pkg::NOC_DAT_VC_MODE_DFLT,
-    parameter int unsigned ROUTER_VC_DEPTH = ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT,
     parameter logic [ni_flit_pkg::SRC_ID_WIDTH-1:0] SRC_ID = '0,
     parameter logic [ni_flit_pkg::SRC_PORT_ID_WIDTH-1:0] SRC_PORT_ID = '0
 ) (
@@ -24,47 +21,18 @@ module nmu_request_packetize #(
     input  wire ni_child_types_pkg::nmu_ar_request_t     s_ar_i,
     input  wire logic                                    s_ar_valid_i,
     output wire logic                                    s_ar_ready_o,
-    output wire ni_flit_pkg::req_flit_t                  m_req_o,
-    output wire logic                                    m_req_valid_o,
-    input  wire logic                                    m_req_ready_i,
-    output wire ni_flit_pkg::dat_flit_t                  m_dat_o,
-    output wire logic                                    m_dat_valid_o,
-    input  wire logic [DAT_NUM_VC-1:0]                   dat_credit_return_i
+    output wire ni_flit_pkg::req_flit_t [2:0] m_req_o,
+    output wire logic [2:0] m_req_valid_o,
+    input wire logic [2:0] m_req_ready_i,
+    output wire ni_flit_pkg::dat_flit_t [1:0] m_dat_o,
+    output wire logic [1:0] m_dat_valid_o,
+    input wire logic [1:0] m_dat_ready_i
 );
-
-    ni_flit_pkg::req_flit_t req_flit;
-    ni_flit_pkg::dat_flit_t dat_flit;
-    logic req_valid, dat_valid;
-
-    assign m_req_o = req_flit;
-    assign m_dat_o = dat_flit;
-    assign m_req_valid_o = req_valid;
-    assign m_dat_valid_o = dat_valid;
-
-    localparam int unsigned CL_VC = DAT_NUM_VC > 1 ? $clog2(DAT_NUM_VC) : 1;
-    localparam int unsigned CL_CREDIT = $clog2(ROUTER_VC_DEPTH + 1);
-    localparam int unsigned NUM_AXI_IDS = 1 << $bits(s_aw_i.axi.awid);
-    localparam int unsigned DAT_VC_MODE_READ_WRITE_SPLIT = 1;
     localparam logic [ni_flit_pkg::AXI_BURST_WIDTH-1:0] AXI_BURST_INCR = 2'b01;
     localparam logic [ni_flit_pkg::AXI_BURST_WIDTH-1:0] AXI_BURST_WRAP = 2'b10;
-    localparam int unsigned WRITE_VC_COUNT =
-        DAT_VC_MODE == DAT_VC_MODE_READ_WRITE_SPLIT ? DAT_NUM_VC / 2 : DAT_NUM_VC;
-
     if (FIFO_DEPTH < 2 || (FIFO_DEPTH & (FIFO_DEPTH-1)) != 0) begin : gen_invalid_fifo_depth
         initial $fatal(0, "Error: FIFO_DEPTH must be a power of two >= 2 (instance %m)");
     end
-    if (DAT_NUM_VC < 1 || DAT_NUM_VC > (1 << ni_flit_pkg::VC_ID_WIDTH)) begin : gen_invalid_vc_count
-        initial $fatal(0, "Error: DAT_NUM_VC is outside the encoded VC range (instance %m)");
-    end
-    if (DAT_VC_MODE > DAT_VC_MODE_READ_WRITE_SPLIT ||
-        (DAT_VC_MODE == DAT_VC_MODE_READ_WRITE_SPLIT &&
-         (DAT_NUM_VC < 2 || DAT_NUM_VC[0]))) begin : gen_invalid_vc_mode
-        initial $fatal(0, "Error: split DAT VC mode requires a positive even DAT_NUM_VC (instance %m)");
-    end
-    if (ROUTER_VC_DEPTH < 2 || (ROUTER_VC_DEPTH & (ROUTER_VC_DEPTH-1)) != 0) begin : gen_invalid_credit_depth
-        initial $fatal(0, "Error: ROUTER_VC_DEPTH must be a power of two >= 2 (instance %m)");
-    end
-
     typedef struct packed {
         ni_signals_pkg::axi_w_t axi;
         ni_child_types_pkg::nmu_aw_request_t owner;
@@ -72,19 +40,6 @@ module nmu_request_packetize #(
     } write_beat_t;
 
     logic [ni_flit_pkg::AXI_LEN_WIDTH-1:0] owner_beat_index_reg, owner_beat_index_next;
-    logic req_write_lock_reg, req_write_lock_next;
-    logic dat_write_lock_reg, dat_write_lock_next;
-    logic req_rr_reg, req_rr_next;
-    logic req_hold_reg, req_hold_next;
-    logic req_hold_aw_reg, req_hold_aw_next;
-    ni_child_types_pkg::nmu_aw_request_t req_active_aw_reg, req_active_aw_next;
-    ni_child_types_pkg::nmu_aw_request_t dat_active_aw_reg, dat_active_aw_next;
-    logic [CL_VC-1:0] dat_active_vc_reg, dat_active_vc_next;
-    logic [CL_VC-1:0] dat_vc_rr_reg, dat_vc_rr_next;
-    logic [NUM_AXI_IDS-1:0] fixed_vc_valid_reg, fixed_vc_valid_next;
-    logic [CL_CREDIT-1:0] dat_credit_reg [DAT_NUM_VC], dat_credit_next [DAT_NUM_VC];
-    logic [ni_flit_pkg::DST_ID_WIDTH-1:0] fixed_vc_dst_reg [NUM_AXI_IDS], fixed_vc_dst_next [NUM_AXI_IDS];
-    logic [CL_VC-1:0] fixed_vc_id_reg [NUM_AXI_IDS], fixed_vc_id_next [NUM_AXI_IDS];
     wire ni_child_types_pkg::nmu_aw_request_t owner_head;
     wire logic owner_full, owner_empty;
     wire ni_child_types_pkg::nmu_aw_request_t narrow_aw_head;
@@ -104,20 +59,12 @@ module nmu_request_packetize #(
     wire logic aw_accept = s_aw_valid_i && s_aw_ready_o;
     wire logic w_accept = s_w_valid_i && s_w_ready_o;
     wire logic ar_accept = s_ar_valid_i && s_ar_ready_o;
-    wire logic req_transfer = req_valid && m_req_ready_i;
-    wire logic dat_transfer = dat_valid;
-    logic req_sel_aw;
-    logic dat_vc_available;
-    logic [CL_VC-1:0] dat_sel_vc;
-    logic [ni_flit_pkg::HEADER_WIDTH-1:0] req_header, dat_header;
-    logic [ni_flit_pkg::PAYLOAD_WIDTH-1:0] req_payload, dat_payload;
-
     function automatic logic [ni_flit_pkg::HEADER_WIDTH-1:0] make_header(
         input logic [ni_flit_pkg::AXI_CH_WIDTH-1:0] axi_ch,
         input ni_child_types_pkg::nmu_request_t meta,
         input logic [ni_flit_pkg::COLLECTIVE_OP_WIDTH-1:0] collective_op,
         input logic [ni_flit_pkg::COLLECTIVE_MASK_WIDTH-1:0] collective_mask,
-        input logic [CL_VC-1:0] vc_id,
+        input logic [ni_flit_pkg::VC_ID_WIDTH-1:0] vc_id,
         input logic fixed_vc,
         input logic tail
     );
@@ -225,95 +172,41 @@ module nmu_request_packetize #(
         (owner_head.meta.route.domain.is_data ? !data_w_full : !narrow_w_full);
     assign s_ar_ready_o = !rst_i && !ar_full;
 
-    always_comb begin
-        req_sel_aw = 1'b0;
-        if (req_hold_reg) begin
-            req_sel_aw = req_hold_aw_reg;
-        end else if (!req_write_lock_reg) begin
-            if (!narrow_aw_empty && !narrow_w_empty &&
-                (ar_empty || !req_rr_reg)) begin
-                req_sel_aw = 1'b1;
-            end
-        end
+    // Candidate order: REQ AW/W/AR and DAT AW/W.
+    ni_flit_pkg::req_flit_t [2:0] req_flit;
+    ni_flit_pkg::dat_flit_t [1:0] dat_flit;
+    assign m_req_valid_o = {3{!rst_i}} & { !ar_empty, !narrow_w_empty, !narrow_aw_empty };
+    assign m_dat_valid_o = {2{!rst_i}} & { !data_w_empty, !data_aw_empty };
+    for (genvar i = 0; i < 3; i++) begin : gen_req
+        assign m_req_o[i] = m_req_valid_o[i] ? req_flit[i] : '0;
     end
-
-    always_comb begin
-        int candidate;
-        dat_vc_available = 1'b0;
-        dat_sel_vc = dat_vc_rr_reg;
-        candidate = 0;
-        if (!data_aw_head.meta.ordering_req &&
-            fixed_vc_valid_reg[data_aw_head.axi.awid] &&
-            fixed_vc_dst_reg[data_aw_head.axi.awid] == data_aw_head.meta.route.domain.dst_id) begin
-            dat_sel_vc = fixed_vc_id_reg[data_aw_head.axi.awid];
-            dat_vc_available = dat_credit_reg[dat_sel_vc] != 0 ||
-                dat_credit_return_i[dat_sel_vc];
-        end else begin
-            for (int offset = WRITE_VC_COUNT-1; offset >= 0; offset--) begin
-                candidate = (int'(dat_vc_rr_reg) + offset) % WRITE_VC_COUNT;
-                if (dat_credit_reg[candidate] != 0 || dat_credit_return_i[candidate]) begin
-                    dat_vc_available = 1'b1;
-                    dat_sel_vc = CL_VC'(candidate);
-                end
-            end
-        end
+    for (genvar i = 0; i < 2; i++) begin : gen_dat
+        assign m_dat_o[i] = m_dat_valid_o[i] ? dat_flit[i] : '0;
     end
-
     always_comb begin
-        req_header = '0;
-        req_payload = '0;
-        req_valid = 1'b0;
-        if (req_write_lock_reg && !narrow_w_empty) begin
-            req_header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_NarrowW),
-                req_active_aw_reg.meta, req_active_aw_reg.collective_op,
-                req_active_aw_reg.collective_mask, '0, !req_active_aw_reg.meta.ordering_req,
-                narrow_w_head.axi.wlast);
-            req_payload = pack_w(narrow_w_head, 1'b1);
-            req_valid = 1'b1;
-        end else if (req_sel_aw) begin
-            req_header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_NarrowAw),
-                narrow_aw_head.meta, narrow_aw_head.collective_op,
-                narrow_aw_head.collective_mask, '0, !narrow_aw_head.meta.ordering_req, 1'b0);
-            req_payload = pack_aw(narrow_aw_head);
-            req_valid = 1'b1;
-        end else if (!req_write_lock_reg && !ar_empty) begin
-            req_header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(
-                ar_head.meta.route.domain.is_data ? ni_flit_pkg::AXI_CH_DataAr :
-                                                    ni_flit_pkg::AXI_CH_NarrowAr),
-                ar_head.meta, '0, '0, '0, 1'b0, 1'b1);
-            req_payload = pack_ar(ar_head);
-            req_valid = 1'b1;
-        end
-        req_valid = req_valid && !rst_i;
-        req_flit.header = req_header;
-        req_flit.payload = req_payload[ni_flit_pkg::AW_WIDTH-1:0];
+        req_flit = '0;
+        dat_flit = '0;
+        req_flit[0].header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_NarrowAw),
+            narrow_aw_head.meta, narrow_aw_head.collective_op, narrow_aw_head.collective_mask,
+            '0, !narrow_aw_head.meta.ordering_req, 1'b0);
+        req_flit[0].payload = ni_flit_pkg::AW_WIDTH'(pack_aw(narrow_aw_head));
+        req_flit[1].header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_NarrowW),
+            narrow_w_head.owner.meta, narrow_w_head.owner.collective_op, narrow_w_head.owner.collective_mask,
+            '0, !narrow_w_head.owner.meta.ordering_req, narrow_w_head.axi.wlast);
+        req_flit[1].payload = ni_flit_pkg::AW_WIDTH'(pack_w(narrow_w_head, 1'b1));
+        req_flit[2].header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(
+            ar_head.meta.route.domain.is_data ? ni_flit_pkg::AXI_CH_DataAr : ni_flit_pkg::AXI_CH_NarrowAr),
+            ar_head.meta, '0, '0, '0, 1'b0, 1'b1);
+        req_flit[2].payload = ni_flit_pkg::AW_WIDTH'(pack_ar(ar_head));
+        dat_flit[0].header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataAw),
+            data_aw_head.meta, data_aw_head.collective_op, data_aw_head.collective_mask,
+            '0, !data_aw_head.meta.ordering_req, 1'b0);
+        dat_flit[0].payload = pack_aw(data_aw_head);
+        dat_flit[1].header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataW),
+            data_w_head.owner.meta, data_w_head.owner.collective_op, data_w_head.owner.collective_mask,
+            '0, !data_w_head.owner.meta.ordering_req, data_w_head.axi.wlast);
+        dat_flit[1].payload = pack_w(data_w_head, 1'b0);
     end
-
-    always_comb begin
-        dat_header = '0;
-        dat_payload = '0;
-        dat_valid = 1'b0;
-        if (dat_write_lock_reg && !data_w_empty &&
-            (dat_credit_reg[dat_active_vc_reg] != 0 || dat_credit_return_i[dat_active_vc_reg])) begin
-            dat_header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataW),
-                dat_active_aw_reg.meta, dat_active_aw_reg.collective_op,
-                dat_active_aw_reg.collective_mask, dat_active_vc_reg,
-                !dat_active_aw_reg.meta.ordering_req, data_w_head.axi.wlast);
-            dat_payload = pack_w(data_w_head, 1'b0);
-            dat_valid = 1'b1;
-        end else if (!dat_write_lock_reg && !data_aw_empty && !data_w_empty &&
-                     dat_vc_available) begin
-            dat_header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataAw),
-                data_aw_head.meta, data_aw_head.collective_op, data_aw_head.collective_mask,
-                dat_sel_vc, !data_aw_head.meta.ordering_req, 1'b0);
-            dat_payload = pack_aw(data_aw_head);
-            dat_valid = 1'b1;
-        end
-        dat_valid = dat_valid && !rst_i;
-        dat_flit.header = dat_header;
-        dat_flit.payload = dat_payload;
-    end
-
     cc_fifo #(
         .Depth (FIFO_DEPTH),
         .FallThrough (1'b0),
@@ -347,7 +240,7 @@ module nmu_request_packetize #(
         .data_i (s_aw_i),
         .push_i (aw_accept && !aw_is_data),
         .data_o (narrow_aw_head),
-        .pop_i (req_transfer && req_sel_aw && !req_write_lock_reg)
+        .pop_i (m_req_valid_o[0] && m_req_ready_i[0])
     );
 
     cc_fifo #(
@@ -365,7 +258,7 @@ module nmu_request_packetize #(
         .data_i (s_aw_i),
         .push_i (aw_accept && aw_is_data),
         .data_o (data_aw_head),
-        .pop_i (dat_transfer && !dat_write_lock_reg)
+        .pop_i (m_dat_valid_o[0] && m_dat_ready_i[0])
     );
 
     cc_fifo #(
@@ -383,7 +276,7 @@ module nmu_request_packetize #(
         .data_i (s_ar_i),
         .push_i (ar_accept),
         .data_o (ar_head),
-        .pop_i (req_transfer && !req_write_lock_reg && !req_sel_aw)
+        .pop_i (m_req_valid_o[2] && m_req_ready_i[2])
     );
 
     cc_fifo #(
@@ -401,7 +294,7 @@ module nmu_request_packetize #(
         .data_i (write_beat),
         .push_i (w_accept && !owner_head.meta.route.domain.is_data),
         .data_o (narrow_w_head),
-        .pop_i (req_transfer && req_write_lock_reg)
+        .pop_i (m_req_valid_o[1] && m_req_ready_i[1])
     );
 
     cc_fifo #(
@@ -419,116 +312,17 @@ module nmu_request_packetize #(
         .data_i (write_beat),
         .push_i (w_accept && owner_head.meta.route.domain.is_data),
         .data_o (data_w_head),
-        .pop_i (dat_transfer && dat_write_lock_reg)
+        .pop_i (m_dat_valid_o[1] && m_dat_ready_i[1])
     );
 
     always_comb begin
         owner_beat_index_next = owner_beat_index_reg;
-        req_write_lock_next = req_write_lock_reg;
-        dat_write_lock_next = dat_write_lock_reg;
-        req_rr_next = req_rr_reg;
-        req_hold_next = req_hold_reg;
-        req_hold_aw_next = req_hold_aw_reg;
-        req_active_aw_next = req_active_aw_reg;
-        dat_active_aw_next = dat_active_aw_reg;
-        dat_active_vc_next = dat_active_vc_reg;
-        dat_vc_rr_next = dat_vc_rr_reg;
-        fixed_vc_valid_next = fixed_vc_valid_reg;
-        for (int n = 0; n < DAT_NUM_VC; n++) begin
-            dat_credit_next[n] = dat_credit_reg[n];
-        end
-        for (int n = 0; n < NUM_AXI_IDS; n++) begin
-            fixed_vc_dst_next[n] = fixed_vc_dst_reg[n];
-        end
-        for (int n = 0; n < NUM_AXI_IDS; n++) begin
-            fixed_vc_id_next[n] = fixed_vc_id_reg[n];
-        end
-
-        req_hold_next = req_valid && !m_req_ready_i && !req_write_lock_reg;
-        if (req_hold_next && !req_hold_reg) begin
-            req_hold_aw_next = req_sel_aw;
-        end
-        if (w_accept) begin
+        if (w_accept)
             owner_beat_index_next = s_w_i.wlast ? '0 : owner_beat_index_reg + 1'b1;
-        end
-        if (req_transfer) begin
-            if (req_write_lock_reg) begin
-                if (narrow_w_head.axi.wlast) begin
-                    req_write_lock_next = 1'b0;
-                end
-            end else if (req_sel_aw) begin
-                req_active_aw_next = narrow_aw_head;
-                req_write_lock_next = 1'b1;
-                req_rr_next = 1'b1;
-            end else begin
-                req_rr_next = 1'b0;
-            end
-        end
-        if (dat_transfer) begin
-            if (dat_write_lock_reg) begin
-                if (data_w_head.axi.wlast) begin
-                    dat_write_lock_next = 1'b0;
-                end
-            end else begin
-                dat_active_aw_next = data_aw_head;
-                dat_active_vc_next = dat_sel_vc;
-                dat_write_lock_next = 1'b1;
-                dat_vc_rr_next = dat_sel_vc == CL_VC'(WRITE_VC_COUNT-1) ? '0 :
-                    dat_sel_vc + 1'b1;
-                if (!data_aw_head.meta.ordering_req) begin
-                    fixed_vc_valid_next[data_aw_head.axi.awid] = 1'b1;
-                    fixed_vc_dst_next[data_aw_head.axi.awid] = data_aw_head.meta.route.domain.dst_id;
-                    fixed_vc_id_next[data_aw_head.axi.awid] = dat_sel_vc;
-                end
-            end
-        end
-        for (int vc = 0; vc < DAT_NUM_VC; vc++) begin
-            case ({dat_credit_return_i[vc], dat_transfer &&
-                   (dat_write_lock_reg ? dat_active_vc_reg : dat_sel_vc) == CL_VC'(vc)})
-                2'b10: dat_credit_next[vc] = dat_credit_reg[vc] + 1'b1;
-                2'b01: dat_credit_next[vc] = dat_credit_reg[vc] - 1'b1;
-                default: begin end
-            endcase
-        end
     end
-
     always_ff @(posedge clk_i) begin
-        if (rst_i) begin
-            owner_beat_index_reg <= '0;
-            req_write_lock_reg <= '0;
-            dat_write_lock_reg <= '0;
-            req_rr_reg <= '0;
-            req_hold_reg <= '0;
-            req_hold_aw_reg <= '0;
-            dat_active_vc_reg <= '0;
-            dat_vc_rr_reg <= '0;
-            fixed_vc_valid_reg <= '0;
-            for (int n = 0; n < DAT_NUM_VC; n++) begin
-                dat_credit_reg[n] <= CL_CREDIT'(ROUTER_VC_DEPTH);
-            end
-        end else begin
-            owner_beat_index_reg <= owner_beat_index_next;
-            req_write_lock_reg <= req_write_lock_next;
-            dat_write_lock_reg <= dat_write_lock_next;
-            req_rr_reg <= req_rr_next;
-            req_hold_reg <= req_hold_next;
-            req_hold_aw_reg <= req_hold_aw_next;
-            req_active_aw_reg <= req_active_aw_next;
-            dat_active_aw_reg <= dat_active_aw_next;
-            dat_active_vc_reg <= dat_active_vc_next;
-            dat_vc_rr_reg <= dat_vc_rr_next;
-            fixed_vc_valid_reg <= fixed_vc_valid_next;
-            for (int n = 0; n < DAT_NUM_VC; n++) begin
-                dat_credit_reg[n] <= dat_credit_next[n];
-            end
-            for (int n = 0; n < NUM_AXI_IDS; n++) begin
-                fixed_vc_dst_reg[n] <= fixed_vc_dst_next[n];
-            end
-            for (int n = 0; n < NUM_AXI_IDS; n++) begin
-                fixed_vc_id_reg[n] <= fixed_vc_id_next[n];
-            end
-        end
+        if (rst_i) owner_beat_index_reg <= '0;
+        else owner_beat_index_reg <= owner_beat_index_next;
     end
 endmodule
-
 `resetall
