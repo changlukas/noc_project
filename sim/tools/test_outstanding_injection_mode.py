@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,7 +20,7 @@ def test_mode4_uses_bounded_write_admission_without_awready_to_w_dependency():
     assert "source_aw_admitted - source_b_returned < source_outstanding_depth" in source
     assert "source_aw_admitted += 1;" in source
     assert "source_aw_accepted <= source_aw_accepted + 1;" in source
-    assert "source_b_returned <= source_b_returned + 1;" in source
+    assert re.search(r"source_b_returned\s*<=\s*source_b_returned\s*\+\s*1;", source)
     assert "!(mst_flat_rsp.bvalid && mst_flat_req.bready)" in source
 
     w_task = source.split("task automatic run_w_admitted();", 1)[1].split("endtask", 1)[0]
@@ -199,8 +200,8 @@ def test_link_counters_are_gated_by_the_top_measurement_window():
     assert "if (!measure_en)" in monitor
     assert "flit_count <= 0;" in monitor
     assert "stall_cyc  <= 0;" in monitor
-    assert ".measure_en(measure_en)" in fabric
-    assert ".measure_en(perf_measure_en)" in top
+    assert re.search(r"\.measure_en\s*\(\s*measure_en\s*\)", fabric)
+    assert re.search(r"\.measure_en\s*\(\s*perf_measure_en\s*\)", top)
 
 
 def test_fabric_monitors_every_local_injection_and_ejection_resource():
@@ -220,6 +221,7 @@ def test_fabric_monitors_every_local_injection_and_ejection_resource():
         'LINK_NAME($sformatf("dat_eject_%0d", i))':
             ".valid(tx_dat_valid[i][RP_LOCAL])",
     }
+    compact_source = re.sub(r"\s+", "", source)
     for name, valid in expected.items():
-        assert source.count(name) == 1
-        assert valid in source
+        assert compact_source.count(re.sub(r"\s+", "", name)) == 1
+        assert re.sub(r"\s+", "", valid) in compact_source
