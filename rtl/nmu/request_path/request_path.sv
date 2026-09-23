@@ -150,22 +150,22 @@ module nmu_request_path #(
     assign axi_rd_i.ruser   = '0;
     assign axi_rd_i.rvalid  = external_rsp.r_valid;
 
-    axi_id_remap #(
-        .AxiSlvPortIdWidth    (AXI_ID_WIDTH          ),
-        .AxiSlvPortMaxUniqIds (MAX_ACTIVE_IDS        ),
-        .AxiMaxTxnsPerId      (MAX_OUTSTANDING_PER_ID),
-        .AxiMstPortIdWidth    (NOC_ID_WIDTH          ),
-        .slv_req_t            (external_req_t        ),
-        .slv_resp_t           (external_resp_t       ),
-        .mst_req_t            (internal_req_t        ),
-        .mst_resp_t           (internal_resp_t       )
+    nmu_id_remap #(
+        .AXI_ID_WIDTH          (AXI_ID_WIDTH          ),
+        .MAX_ACTIVE_IDS        (MAX_ACTIVE_IDS        ),
+        .MAX_OUTSTANDING_PER_ID(MAX_OUTSTANDING_PER_ID),
+        .NOC_ID_WIDTH          (NOC_ID_WIDTH          ),
+        .slv_req_t             (external_req_t        ),
+        .slv_resp_t            (external_resp_t       ),
+        .mst_req_t             (internal_req_t        ),
+        .mst_resp_t            (internal_resp_t       )
     ) i_id_remap (
-        .clk_i      (axi_clk_i   ),
-        .rst_ni     (axi_rst_n_i ),
-        .slv_req_i  (external_req),
-        .slv_resp_o (external_rsp),
-        .mst_req_o  (internal_req),
-        .mst_resp_i (internal_rsp)
+        .clk_i                 (axi_clk_i             ),
+        .rst_n_i               (axi_rst_n_i           ),
+        .slv_req_i             (external_req          ),
+        .slv_resp_o            (external_rsp          ),
+        .mst_req_o             (internal_req          ),
+        .mst_resp_i            (internal_rsp          )
     );
 
     always_comb begin

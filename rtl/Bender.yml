@@ -23,6 +23,7 @@ sources:
   - common/stream_register.sv
   - common/axi_async_fifo.sv
   - nmu/sam/sam.sv
+  - nmu/request_path/id_remap.sv
   - nmu/request_path/request_path.sv
   - nmu/response_fifo/response_fifo.sv
   - nmu/ordering/reorder_storage.sv

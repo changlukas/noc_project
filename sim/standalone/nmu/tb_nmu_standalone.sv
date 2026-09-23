@@ -824,7 +824,7 @@ module tb_nmu_standalone #(
                 dut.i_response_path.i_ordering.r_retire_id,
                 |dut.i_response_path.i_ordering.b_complete,
                 |dut.i_response_path.i_ordering.r_complete,
-                dut.i_request_path.i_id_remap.state_q,
+                {dut.i_request_path.i_id_remap.aw_hold_reg, dut.i_request_path.i_id_remap.ar_hold_reg},
                 dut.i_request_path.i_id_remap.mst_req_o.aw_valid,
                 dut.i_request_path.i_id_remap.mst_resp_i.aw_ready,
                 dut.i_request_path.i_id_remap.mst_req_o.ar_valid,

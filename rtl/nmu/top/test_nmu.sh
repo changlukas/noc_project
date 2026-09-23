@@ -66,6 +66,7 @@ task_sources=(
     "$task_root/rtl/nmu/response_depacketize/response_depacketize.sv"
     "$task_root/rtl/nmu/response_fifo/response_fifo.sv"
     "$task_root/rtl/nmu/response_path/response_path.sv"
+    "$task_root/rtl/nmu/request_path/id_remap.sv"
     "$task_root/rtl/nmu/request_path/request_path.sv"
     "$task_root/rtl/nmu/top/nmu.sv"
     "${NMU_PATH_TB:-$task_root/rtl/nmu/top/tb_nmu_elaborate.sv}"

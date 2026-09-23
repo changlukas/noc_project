@@ -4,7 +4,8 @@
 
 module axi_id_remap_case #(
     parameter int unsigned AXI_ID_WIDTH = 3,
-    parameter int unsigned NOC_ID_WIDTH = 3
+    parameter int unsigned NOC_ID_WIDTH = 3,
+    parameter bit NMU_REMAP = 0
 ) (
     input  wire logic  clk_i,
     input  wire logic  rst_n_i,
@@ -45,6 +46,28 @@ module axi_id_remap_case #(
 
     assign done_o = done_reg;
 
+    logic test_rst_n = 1'b1;
+    wire local_rst_n = rst_n_i && test_rst_n;
+    if (NMU_REMAP) begin : gen_nmu
+    nmu_id_remap #(
+        .AXI_ID_WIDTH    (AXI_ID_WIDTH),
+        .MAX_ACTIVE_IDS (MAX_UNIQ_IDS),
+        .MAX_OUTSTANDING_PER_ID      (4           ),
+        .NOC_ID_WIDTH    (NOC_ID_WIDTH),
+        .slv_req_t            (slv_req_t   ),
+        .slv_resp_t           (slv_rsp_t   ),
+        .mst_req_t            (mst_req_t   ),
+        .mst_resp_t           (mst_rsp_t   )
+    ) dut (
+        .clk_i      (clk_i  ),
+        .rst_n_i    (local_rst_n),
+        .slv_req_i  (slv_req),
+        .slv_resp_o (slv_rsp),
+        .mst_req_o  (mst_req),
+        .mst_resp_i (mst_rsp)
+    );
+
+    end else begin : gen_upstream
     axi_id_remap #(
         .AxiSlvPortIdWidth    (AXI_ID_WIDTH),
         .AxiSlvPortMaxUniqIds (MAX_UNIQ_IDS),
@@ -62,6 +85,8 @@ module axi_id_remap_case #(
         .mst_req_o  (mst_req),
         .mst_resp_i (mst_rsp)
     );
+
+    end
 
     task automatic issue_aw(input axi_id_t axi_id, output noc_id_t noc_id);
         @(negedge clk_i);
@@ -107,6 +132,72 @@ module axi_id_remap_case #(
         mst_rsp.ar_ready = 1'b1;
 
         wait (rst_n_i);
+        if (NMU_REMAP) begin
+            // Stall each direction, then both; the independent side must continue.
+            for (int mode = 0; mode < 3; mode++) begin
+                @(negedge clk_i);
+                slv_req.aw.id = AXI_ID_WIDTH'(1);
+                slv_req.ar.id = AXI_ID_WIDTH'(1);
+                slv_req.aw_valid = 1;
+                slv_req.ar_valid = 1;
+                slv_req.r_ready = 1;
+                mst_rsp.aw_ready = mode == 1;
+                mst_rsp.ar_ready = mode == 0;
+                #1;
+                if (!mst_req.aw_valid || !mst_req.ar_valid) $fatal(1, "initial offer missing");
+                @(posedge clk_i);
+                @(negedge clk_i);
+                for (int cycle = 0; cycle < 3; cycle++) begin
+                    #1;
+                    if (slv_rsp.aw_ready !== (mode == 1) || slv_rsp.ar_ready !== (mode == 0))
+                        $fatal(1, "cross-direction hold coupling mode=%0d", mode);
+                    if (mst_req.aw.id != 0 || mst_req.ar.id != 0) $fatal(1, "held ID changed");
+                    @(posedge clk_i);
+                    @(negedge clk_i);
+                end
+                slv_req.aw_valid = mode != 1;
+                slv_req.ar_valid = mode != 0;
+                mst_rsp.aw_ready = 1;
+                mst_rsp.ar_ready = 1;
+                #1;
+                if ((slv_req.aw_valid && !slv_rsp.aw_ready) ||
+                    (slv_req.ar_valid && !slv_rsp.ar_ready)) $fatal(1, "held request did not release");
+                @(posedge clk_i);
+                @(negedge clk_i);
+                slv_req.aw_valid = 0;
+                slv_req.ar_valid = 0;
+                for (int response = 0; response < 4; response++) begin
+                    mst_rsp.b.id = '0;
+                    mst_rsp.r.id = '0;
+                    mst_rsp.r.last = 1;
+                    mst_rsp.b_valid = response == 0 || mode == 1;
+                    mst_rsp.r_valid = response == 0 || mode == 0;
+                    #1;
+                    if ((mst_rsp.b_valid && slv_rsp.b.id != AXI_ID_WIDTH'(1)) ||
+                        (mst_rsp.r_valid && slv_rsp.r.id != AXI_ID_WIDTH'(1)))
+                        $fatal(1, "held mapping response restore failed");
+                    @(posedge clk_i);
+                    @(negedge clk_i);
+                end
+                mst_rsp.b_valid = 0;
+                mst_rsp.r_valid = 0;
+                slv_req.aw_valid = 1;
+                slv_req.ar_valid = 1;
+                mst_rsp.aw_ready = 0;
+                mst_rsp.ar_ready = 0;
+                @(posedge clk_i);
+                @(negedge clk_i);
+                // Reset occupied tables and held requests, including simultaneous holds.
+                test_rst_n = 0;
+                slv_req.aw_valid = 0;
+                slv_req.ar_valid = 0;
+                #1;
+                @(negedge clk_i);
+                test_rst_n = 1;
+                mst_rsp.aw_ready = 1;
+                mst_rsp.ar_ready = 1;
+            end
+        end
         issue_aw(AXI_ID_WIDTH'(1), noc_id);
         return_b(AXI_ID_WIDTH'(1), noc_id);
 
@@ -151,7 +242,7 @@ module axi_id_remap_case #(
 
 endmodule
 
-module tb_axi_id_remap;
+module tb_axi_id_remap #(parameter bit NMU_REMAP = 0);
 
     logic clk = 1'b0;
     logic rst_n = 1'b0;
@@ -159,9 +250,9 @@ module tb_axi_id_remap;
 
     always #5 clk = ~clk;
 
-    axi_id_remap_case #(.AXI_ID_WIDTH(1)) case_1 (.clk_i(clk), .rst_n_i(rst_n), .done_o(done_1));
-    axi_id_remap_case #(.AXI_ID_WIDTH(3)) case_3 (.clk_i(clk), .rst_n_i(rst_n), .done_o(done_3));
-    axi_id_remap_case #(.AXI_ID_WIDTH(8)) case_8 (.clk_i(clk), .rst_n_i(rst_n), .done_o(done_8));
+    axi_id_remap_case #(.AXI_ID_WIDTH(1), .NMU_REMAP(NMU_REMAP)) case_1 (.clk_i(clk), .rst_n_i(rst_n), .done_o(done_1));
+    axi_id_remap_case #(.AXI_ID_WIDTH(3), .NMU_REMAP(NMU_REMAP)) case_3 (.clk_i(clk), .rst_n_i(rst_n), .done_o(done_3));
+    axi_id_remap_case #(.AXI_ID_WIDTH(8), .NMU_REMAP(NMU_REMAP)) case_8 (.clk_i(clk), .rst_n_i(rst_n), .done_o(done_8));
 
     initial begin
         repeat (2) @(posedge clk);

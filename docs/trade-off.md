@@ -635,3 +635,24 @@ leaking into generic request-path, CDC, FIFO, and testbench boundaries. The cost
 and CDC-width increase is required because AWUSER must remain associated with AW through the
 request path; dropping or carrying it in a parallel untyped sideband would make the channel
 contract easier to misuse.
+
+## Independent NMU remap admission
+
+Approved on 2026-09-23. Replace shared request hold control with independent AW
+and AR hold flags and saved mapped IDs. Reuse the existing two remap tables.
+The NMU drives ATOP zero, so this controller supports ordinary AXI4 only.
+Allocation reserves a mapping on the first offered transfer, including a stalled
+transfer, and is not repeated while held. B and accepted RLAST release entries.
+
+The measured baseline loses 101 read cycles in mixed data single and has 1730
+AR admission stalls in mixed data burst due solely to HoldAW. The intended gain
+is independent read admission without adding a pipeline or queue. Burst R is
+already full rate. Write throughput and ordering must not regress. Balanced batch
+completion may remain write-limited. Increasing FIFO depth would only delay this
+coupling and adds storage, so capacities remain unchanged.
+
+Two hold bits replace the two-bit shared FSM. Held-ID registers and table storage
+are retained. Cross-direction decode and ATOP arbitration are unnecessary in this
+NMU configuration. Actual area, power and maximum frequency are [TBD] pending
+synthesis. Table lookup and downstream-ready paths remain combinational; no
+critical-path improvement is assumed without timing evidence.
