@@ -22,13 +22,25 @@ module tb_nmu_standalone #(
 `endif
     logic axi_clk = 0, noc_clk = 0, rst_n = 0;
     wire axi_rst_n, noc_rst_n;
-    cc_rstgen_bypass #(.NumRegs(2)) i_axi_reset_sync (
-        .clk_i(axi_clk), .rst_ni(rst_n), .rst_test_mode_ni(rst_n), .test_mode_i(1'b0),
-        .rst_no(axi_rst_n), .init_no()
+    cc_rstgen_bypass #(
+        .NumRegs (2)
+    ) i_axi_reset_sync (
+        .clk_i            (axi_clk  ),
+        .rst_ni           (rst_n    ),
+        .rst_test_mode_ni (rst_n    ),
+        .test_mode_i      (1'b0     ),
+        .rst_no           (axi_rst_n),
+        .init_no          (         )
     );
-    cc_rstgen_bypass #(.NumRegs(2)) i_noc_reset_sync (
-        .clk_i(noc_clk), .rst_ni(rst_n), .rst_test_mode_ni(rst_n), .test_mode_i(1'b0),
-        .rst_no(noc_rst_n), .init_no()
+    cc_rstgen_bypass #(
+        .NumRegs (2)
+    ) i_noc_reset_sync (
+        .clk_i            (noc_clk  ),
+        .rst_ni           (rst_n    ),
+        .rst_test_mode_ni (rst_n    ),
+        .test_mode_i      (1'b0     ),
+        .rst_no           (noc_rst_n),
+        .init_no          (         )
     );
     // Check asynchronous assertion and clock-aligned release in both domains.
     realtime axi_reset_edge, noc_reset_edge;
@@ -42,6 +54,11 @@ module tb_nmu_standalone #(
         #1ps;
         if (axi_rst_n !== 1'b0 || noc_rst_n !== 1'b0)
             $fatal(1, "Domain resets did not assert asynchronously");
+        if ({dut.i_request_path.i_channel_assign.req_write_lock_reg,
+             dut.i_request_path.i_channel_assign.dat_write_lock_reg,
+             dut.i_response_path.i_ordering.b_complete,
+             dut.i_response_path.i_ordering.r_complete} !== '0)
+            $fatal(1, "NMU control/storage reset waited for a clock edge");
     end
     bit warmup = 1;
     bit block_case = 0;
@@ -58,16 +75,19 @@ module tb_nmu_standalone #(
     always #5 axi_clk = ~axi_clk;
     always #(NOC_HALF_PERIOD) noc_clk = ~noc_clk;
     AXI_BUS_DV #(.AXI_ADDR_WIDTH(48), .AXI_DATA_WIDTH(512),
-        .AXI_ID_WIDTH(ID_WIDTH), .AXI_USER_WIDTH(58)) vip(axi_clk);
+        .AXI_ID_WIDTH (ID_WIDTH),
+        .AXI_USER_WIDTH(58)) vip(axi_clk);
     axi_if #(.ADDR_W(48), .DATA_W(512), .ID_W(ID_WIDTH), .AWUSER_W(58)) bus();
     typedef axi_test::axi_file_master #(.AW(48), .DW(512), .IW(ID_WIDTH),
-        .UW(58), .TA(1ns), .TT(2ns)) master_t;
-    master_t master;
+        .UW (58 ),
+        .TA (1ns),
+        .TT(2ns)) master_t;
+    master_t            master;
     master_t::ax_beat_t expected_aw[$], expected_ar[$];
-    master_t::w_beat_t expected_w[$];
+    master_t::w_beat_t  expected_w[$];
     int expected_b_by_id[256][$], expected_r_by_id[256][$];
-    int read_beat[256];
-    int pending_b[$], pending_r[$];
+    int        read_beat[256];
+    int        pending_b[$], pending_r[$];
     req_flit_t aw_packets[$], ar_packets[$];
     int aw_index = 0, ar_index = 0, w_index = 0, w_beat = 0, active_aw = -1;
     int b_count = 0, r_count = 0, cycles = 0, axi_cycles = 0;
@@ -81,58 +101,71 @@ module tb_nmu_standalone #(
     rsp_flit_t rsp = '0;
     wire allow_b = !warmup && (stall_enable == 0 || axi_cycles % 23 >= 7);
     wire allow_r = !warmup && (stall_enable == 0 || axi_cycles % 19 >= 6);
-    assign bus.awid = vip.aw_id;
-    assign bus.awaddr = vip.aw_addr;
-    assign bus.awlen = vip.aw_len;
-    assign bus.awsize = vip.aw_size;
-    assign bus.awburst = vip.aw_burst;
-    assign bus.awlock = vip.aw_lock;
-    assign bus.awcache = vip.aw_cache;
-    assign bus.awprot = vip.aw_prot;
-    assign bus.awqos = vip.aw_qos;
+    assign bus.awid     = vip.aw_id;
+    assign bus.awaddr   = vip.aw_addr;
+    assign bus.awlen    = vip.aw_len;
+    assign bus.awsize   = vip.aw_size;
+    assign bus.awburst  = vip.aw_burst;
+    assign bus.awlock   = vip.aw_lock;
+    assign bus.awcache  = vip.aw_cache;
+    assign bus.awprot   = vip.aw_prot;
+    assign bus.awqos    = vip.aw_qos;
     assign bus.awregion = vip.aw_region;
-    assign bus.awuser = vip.aw_user;
-    assign bus.awvalid = vip.aw_valid;
+    assign bus.awuser   = vip.aw_user;
+    assign bus.awvalid  = vip.aw_valid;
     assign vip.aw_ready = bus.awready;
-    assign bus.wdata = vip.w_data;
-    assign bus.wstrb = vip.w_strb;
-    assign bus.wlast = vip.w_last;
-    assign bus.wvalid = vip.w_valid;
-    assign vip.w_ready = bus.wready;
-    assign bus.arid = vip.ar_id;
-    assign bus.araddr = vip.ar_addr;
-    assign bus.arlen = vip.ar_len;
-    assign bus.arsize = vip.ar_size;
-    assign bus.arburst = vip.ar_burst;
-    assign bus.arlock = vip.ar_lock;
-    assign bus.arcache = vip.ar_cache;
-    assign bus.arprot = vip.ar_prot;
-    assign bus.arqos = vip.ar_qos;
+    assign bus.wdata    = vip.w_data;
+    assign bus.wstrb    = vip.w_strb;
+    assign bus.wlast    = vip.w_last;
+    assign bus.wvalid   = vip.w_valid;
+    assign vip.w_ready  = bus.wready;
+    assign bus.arid     = vip.ar_id;
+    assign bus.araddr   = vip.ar_addr;
+    assign bus.arlen    = vip.ar_len;
+    assign bus.arsize   = vip.ar_size;
+    assign bus.arburst  = vip.ar_burst;
+    assign bus.arlock   = vip.ar_lock;
+    assign bus.arcache  = vip.ar_cache;
+    assign bus.arprot   = vip.ar_prot;
+    assign bus.arqos    = vip.ar_qos;
     assign bus.arregion = vip.ar_region;
-    assign bus.arvalid = vip.ar_valid;
+    assign bus.arvalid  = vip.ar_valid;
     assign vip.ar_ready = bus.arready;
-    assign bus.wuser = '0;
-    assign bus.aruser = '0;
-    assign bus.bready = vip.b_ready && allow_b;
-    assign vip.b_valid = bus.bvalid && allow_b;
-    assign vip.b_id = bus.bid;
-    assign vip.b_resp = bus.bresp;
-    assign vip.b_user = '0;
-    assign bus.rready = vip.r_ready && allow_r;
-    assign vip.r_valid = bus.rvalid && allow_r;
-    assign vip.r_id = bus.rid;
-    assign vip.r_data = bus.rdata;
-    assign vip.r_resp = bus.rresp;
-    assign vip.r_last = bus.rlast;
-    assign vip.r_user = '0;
+    assign bus.wuser    = '0;
+    assign bus.aruser   = '0;
+    assign bus.bready   = vip.b_ready && allow_b;
+    assign vip.b_valid  = bus.bvalid && allow_b;
+    assign vip.b_id     = bus.bid;
+    assign vip.b_resp   = bus.bresp;
+    assign vip.b_user   = '0;
+    assign bus.rready   = vip.r_ready && allow_r;
+    assign vip.r_valid  = bus.rvalid && allow_r;
+    assign vip.r_id     = bus.rid;
+    assign vip.r_data   = bus.rdata;
+    assign vip.r_resp   = bus.rresp;
+    assign vip.r_last   = bus.rlast;
+    assign vip.r_user   = '0;
     nmu #(.AXI_ID_WIDTH(ID_WIDTH), .R_ROB_EN(R_ROB_EN),
-        .B_ROB_DEPTH(BUFFER_DEPTH), .R_ROB_DEPTH(BUFFER_DEPTH)) dut (
-        .ACLK(axi_clk), .ARESETn(axi_rst_n), .noc_clk(noc_clk), .noc_rst_n(noc_rst_n),
-        .axi_wr_i(bus), .axi_rd_i(bus), .tx_req_valid_o(req_valid),
-        .tx_req_flit_o(req), .tx_req_ready_i(req_ready),
-        .rx_rsp_valid_i(rsp_valid), .rx_rsp_flit_i(rsp), .rx_rsp_ready_o(rsp_ready),
-        .tx_dat_valid_o(dat_valid), .tx_dat_flit_o(), .tx_dat_crdvalid_i('0),
-        .rx_dat_valid_i(1'b0), .rx_dat_flit_i('0), .rx_dat_crdvalid_o()
+        .B_ROB_DEPTH (BUFFER_DEPTH),
+        .R_ROB_DEPTH(BUFFER_DEPTH)) dut (
+        .ACLK              (axi_clk  ),
+        .ARESETn           (axi_rst_n),
+        .noc_clk           (noc_clk  ),
+        .noc_rst_n         (noc_rst_n),
+        .axi_wr_i          (bus      ),
+        .axi_rd_i          (bus      ),
+        .tx_req_valid_o    (req_valid),
+        .tx_req_flit_o     (req      ),
+        .tx_req_ready_i    (req_ready),
+        .rx_rsp_valid_i    (rsp_valid),
+        .rx_rsp_flit_i     (rsp      ),
+        .rx_rsp_ready_o    (rsp_ready),
+        .tx_dat_valid_o    (dat_valid),
+        .tx_dat_flit_o     (         ),
+        .tx_dat_crdvalid_i ('0       ),
+        .rx_dat_valid_i    (1'b0     ),
+        .rx_dat_flit_i     ('0       ),
+        .rx_dat_crdvalid_o (         )
     );
     always @(negedge noc_clk) if (noc_rst_n) cycles++;
     always @(posedge axi_clk) if (axi_rst_n) #0.5 axi_cycles++;
@@ -143,8 +176,8 @@ module tb_nmu_standalone #(
     function automatic longint unsigned beat_address(input master_t::ax_beat_t ax, input int beat);
         longint unsigned step_size, span, address;
         step_size = 64'd1 << ax.ax_size;
-        span = (64'(ax.ax_len)+1)*step_size;
-        address = 64'(ax.ax_addr);
+        span      = (64'(ax.ax_len)+1)*step_size;
+        address   = 64'(ax.ax_addr);
         if (beat != 0 && ax.ax_burst != 0) begin
             address = (address & ~(step_size-1)) + 64'(beat)*step_size;
             if (ax.ax_burst == 2)
@@ -243,7 +276,7 @@ module tb_nmu_standalone #(
         end
     end
     always @(posedge axi_clk) begin : monitor_response
-        int id, txn, lane, popped, unique_w, unique_r, total_w, total_r;
+        int           id, txn, lane, popped, unique_w, unique_r, total_w, total_r;
         logic [511:0] data;
         if (axi_rst_n && !warmup) begin
             unique_w = 0; unique_r = 0; total_w = 0; total_r = 0;
@@ -276,7 +309,7 @@ module tb_nmu_standalone #(
             if (bus.rvalid && bus.rready) begin
                 id = int'(bus.rid);
                 if (expected_r_by_id[id].size() == 0) $fatal(1, "unexpected R ID");
-                txn = expected_r_by_id[id][0];
+                txn  = expected_r_by_id[id][0];
                 lane = int'((beat_address(expected_ar[txn], read_beat[id]) % 64) / 8);
                 data = 512'(read_pattern(txn, read_beat[id])) << (lane*64);
                 if (bus.rdata !== data || bus.rresp !== 0 ||
@@ -284,7 +317,7 @@ module tb_nmu_standalone #(
                     $fatal(1, "R data/lane/order/last mismatch txn=%0d beat=%0d got=%h expected=%h", txn, read_beat[id], bus.rdata, data);
                 read_beat[id]++;
                 if (bus.rlast) begin
-                    popped = expected_r_by_id[id].pop_front();
+                    popped        = expected_r_by_id[id].pop_front();
                     read_beat[id] = 0;
                     live_r[id]--;
                     r_count++;
@@ -300,8 +333,8 @@ module tb_nmu_standalone #(
     // Select the latest tagged response first to exercise reorder storage.
     // Untagged same-ID responses retain their request order.
     initial begin : response_stimulus
-        int index, txn;
-        bit eligible;
+        int        index, txn;
+        bit        eligible;
         rsp_flit_t value;
         req_flit_t request;
         wait(noc_rst_n && !warmup);
@@ -328,17 +361,17 @@ module tb_nmu_standalone #(
                 txn = pending_b[index]; pending_b.delete(index);
                 if (index != 0) reordered_b++;
                 if (index != 0) reordered_sent++;
-                request = aw_packets[txn];
-                value = '0;
-                value.header = request.header;
-                value.header[DST_ID_LSB +: DST_ID_WIDTH] = request.header[SRC_ID_LSB +: SRC_ID_WIDTH];
-                value.header[SRC_ID_LSB +: SRC_ID_WIDTH] = request.header[DST_ID_LSB +: DST_ID_WIDTH];
+                request                                            = aw_packets[txn];
+                value                                              = '0;
+                value.header                                       = request.header;
+                value.header[DST_ID_LSB +: DST_ID_WIDTH]           = request.header[SRC_ID_LSB +: SRC_ID_WIDTH];
+                value.header[SRC_ID_LSB +: SRC_ID_WIDTH]           = request.header[DST_ID_LSB +: DST_ID_WIDTH];
                 value.header[DST_PORT_ID_LSB +: DST_PORT_ID_WIDTH] = request.header[SRC_PORT_ID_LSB +: SRC_PORT_ID_WIDTH];
                 value.header[SRC_PORT_ID_LSB +: SRC_PORT_ID_WIDTH] = request.header[DST_PORT_ID_LSB +: DST_PORT_ID_WIDTH];
-                value.header[AXI_CH_LSB +: AXI_CH_WIDTH] = AXI_CH_WIDTH'(AXI_CH_NarrowB);
-                value.header[FLIT_TAIL_LSB] = 1;
-                value.payload[B_BID_LSB +: B_BID_WIDTH] = request.payload[AW_AWID_LSB +: AW_AWID_WIDTH];
-                value.payload[B_BRESP_LSB +: B_BRESP_WIDTH] = 2'(txn % 3);
+                value.header[AXI_CH_LSB +: AXI_CH_WIDTH]           = AXI_CH_WIDTH'(AXI_CH_NarrowB);
+                value.header[FLIT_TAIL_LSB]                        = 1;
+                value.payload[B_BID_LSB +: B_BID_WIDTH]            = request.payload[AW_AWID_LSB +: AW_AWID_WIDTH];
+                value.payload[B_BRESP_LSB +: B_BRESP_WIDTH]        = 2'(txn % 3);
                 send_rsp(value);
             end
             if (pending_r.size() != 0) begin
@@ -363,17 +396,17 @@ module tb_nmu_standalone #(
                 if (index != 0) reordered_sent++;
                 request = ar_packets[txn];
                 for (int beat = 0; beat <= int'(expected_ar[txn].ax_len); beat++) begin
-                    value = '0;
+                    value        = '0;
                     value.header = request.header;
-                value.header[DST_ID_LSB +: DST_ID_WIDTH] = request.header[SRC_ID_LSB +: SRC_ID_WIDTH];
-                value.header[SRC_ID_LSB +: SRC_ID_WIDTH] = request.header[DST_ID_LSB +: DST_ID_WIDTH];
+                value.header[DST_ID_LSB +: DST_ID_WIDTH]           = request.header[SRC_ID_LSB +: SRC_ID_WIDTH];
+                value.header[SRC_ID_LSB +: SRC_ID_WIDTH]           = request.header[DST_ID_LSB +: DST_ID_WIDTH];
                 value.header[DST_PORT_ID_LSB +: DST_PORT_ID_WIDTH] = request.header[SRC_PORT_ID_LSB +: SRC_PORT_ID_WIDTH];
                 value.header[SRC_PORT_ID_LSB +: SRC_PORT_ID_WIDTH] = request.header[DST_PORT_ID_LSB +: DST_PORT_ID_WIDTH];
-                    value.header[AXI_CH_LSB +: AXI_CH_WIDTH] = AXI_CH_WIDTH'(AXI_CH_NarrowR);
-                    value.header[FLIT_TAIL_LSB] = 1;
-                    value.payload[NARROW_R_RLAST_LSB] = beat == int'(expected_ar[txn].ax_len);
+                    value.header[AXI_CH_LSB +: AXI_CH_WIDTH]              = AXI_CH_WIDTH'(AXI_CH_NarrowR);
+                    value.header[FLIT_TAIL_LSB]                           = 1;
+                    value.payload[NARROW_R_RLAST_LSB]                     = beat == int'(expected_ar[txn].ax_len);
                     value.payload[NARROW_R_RID_LSB +: NARROW_R_RID_WIDTH] = request.payload[AR_ARID_LSB +: AR_ARID_WIDTH];
-                    value.payload[NARROW_R_RDATA_LSB +: 64] = read_pattern(txn, beat);
+                    value.payload[NARROW_R_RDATA_LSB +: 64]               = read_pattern(txn, beat);
                     if ($test$plusargs("corrupt_rsp") && txn == 0 && beat == 0)
                         value.payload[NARROW_R_RDATA_LSB] = ~value.payload[NARROW_R_RDATA_LSB];
                     send_rsp(value);
@@ -382,11 +415,11 @@ module tb_nmu_standalone #(
         end
     end
     initial begin : run
-        string stim_dir;
-        int pattern_id_width, probe;
+        string              stim_dir;
+        int                 pattern_id_width, probe;
         master_t::ax_beat_t warm_aw, warm_ar;
-        master_t::w_beat_t warm_w;
-        rsp_flit_t warm_rsp;
+        master_t::w_beat_t  warm_w;
+        rsp_flit_t          warm_rsp;
         master = new(vip);
         if (!$value$plusargs("stim_dir=%s", stim_dir)) $fatal(1, "missing stim_dir");
         block_case = $test$plusargs("block_case");
@@ -407,7 +440,7 @@ module tb_nmu_standalone #(
             if (!$value$plusargs("require_stall=%d", require_stall)) $fatal(1, "missing require_stall");
             // The upstream file parser assumes nonempty input. Probe empty
             // directions before using its existing parse functions.
-            master.read_fd = $fopen({stim_dir,"/read.txt"}, "r");
+            master.read_fd  = $fopen({stim_dir,"/read.txt"}, "r");
             master.write_fd = $fopen({stim_dir,"/write.txt"}, "r");
             if (master.read_fd == 0 || master.write_fd == 0) $fatal(1, "missing AXI input file");
             probe = $fgetc(master.read_fd);
@@ -427,7 +460,7 @@ module tb_nmu_standalone #(
         end
         expected_aw = master.aw_queue;
         expected_ar = master.ar_queue;
-        expected_w = master.w_queue;
+        expected_w  = master.w_queue;
         foreach (expected_aw[i]) expected_b_by_id[int'(expected_aw[i].ax_id)].push_back(i);
         foreach (expected_ar[i]) expected_r_by_id[int'(expected_ar[i].ax_id)].push_back(i);
         repeat (5) @(negedge axi_clk);
@@ -443,9 +476,9 @@ module tb_nmu_standalone #(
             end
             master.drv.send_ar(expected_ar[0]);
         join
-        warm_aw = new;
-        warm_ar = new;
-        warm_w = new;
+        warm_aw       = new;
+        warm_ar       = new;
+        warm_w        = new;
         warm_aw.ax_id = expected_aw[0].ax_id;
         warm_ar.ax_id = expected_ar[0].ax_id;
         // A second destination forces tagged responses in enabled mode.
@@ -453,7 +486,7 @@ module tb_nmu_standalone #(
         warm_ar.ax_addr = expected_ar[0].ax_addr ^ 48'h100000000;
         warm_aw.ax_size = 3; warm_aw.ax_burst = 1;
         warm_ar.ax_size = 3; warm_ar.ax_burst = 1;
-        warm_w.w_last = 1;
+        warm_w.w_last   = 1;
         if (R_ROB_EN) begin
             fork
                 master.drv.send_aw(warm_aw);
@@ -462,18 +495,18 @@ module tb_nmu_standalone #(
             join
             wait(warm_aw_packets.size() == 2 && warm_ar_packets.size() == 2);
             repeat (10) @(negedge noc_clk);
-            warm_rsp = '0;
-            warm_rsp.header = warm_aw_packets[1].header;
+            warm_rsp                                    = '0;
+            warm_rsp.header                             = warm_aw_packets[1].header;
             warm_rsp.header[AXI_CH_LSB +: AXI_CH_WIDTH] = AXI_CH_WIDTH'(AXI_CH_NarrowB);
-            warm_rsp.header[FLIT_TAIL_LSB] = 1;
-            warm_rsp.payload[B_BID_LSB +: B_BID_WIDTH] = warm_aw_packets[1].payload[AW_AWID_LSB +: AW_AWID_WIDTH];
+            warm_rsp.header[FLIT_TAIL_LSB]              = 1;
+            warm_rsp.payload[B_BID_LSB +: B_BID_WIDTH]  = warm_aw_packets[1].payload[AW_AWID_LSB +: AW_AWID_WIDTH];
             send_rsp(warm_rsp);
-            warm_rsp = '0;
-            warm_rsp.header = warm_ar_packets[1].header;
-            warm_rsp.header[AXI_CH_LSB +: AXI_CH_WIDTH] = AXI_CH_WIDTH'(AXI_CH_NarrowR);
-            warm_rsp.header[FLIT_TAIL_LSB] = 1;
+            warm_rsp                                                 = '0;
+            warm_rsp.header                                          = warm_ar_packets[1].header;
+            warm_rsp.header[AXI_CH_LSB +: AXI_CH_WIDTH]              = AXI_CH_WIDTH'(AXI_CH_NarrowR);
+            warm_rsp.header[FLIT_TAIL_LSB]                           = 1;
             warm_rsp.payload[NARROW_R_RID_LSB +: NARROW_R_RID_WIDTH] = warm_ar_packets[1].payload[AR_ARID_LSB +: AR_ARID_WIDTH];
-            warm_rsp.payload[NARROW_R_RLAST_LSB] = 1;
+            warm_rsp.payload[NARROW_R_RLAST_LSB]                     = 1;
             send_rsp(warm_rsp);
         end
         repeat (40) @(negedge noc_clk);

@@ -6,9 +6,9 @@ module axi_id_remap_case #(
     parameter int unsigned AXI_ID_WIDTH = 3,
     parameter int unsigned NOC_ID_WIDTH = 3
 ) (
-    input  wire logic clk_i,
-    input  wire logic rst_ni,
-    output wire logic done_o
+    input  wire logic  clk_i,
+    input  wire logic  rst_n_i,
+    output wire logic  done_o
 );
 
     localparam int unsigned MAX_UNIQ_IDS =
@@ -48,15 +48,15 @@ module axi_id_remap_case #(
     axi_id_remap #(
         .AxiSlvPortIdWidth    (AXI_ID_WIDTH),
         .AxiSlvPortMaxUniqIds (MAX_UNIQ_IDS),
-        .AxiMaxTxnsPerId      (4),
+        .AxiMaxTxnsPerId      (4           ),
         .AxiMstPortIdWidth    (NOC_ID_WIDTH),
-        .slv_req_t            (slv_req_t),
-        .slv_resp_t           (slv_rsp_t),
-        .mst_req_t            (mst_req_t),
-        .mst_resp_t           (mst_rsp_t)
+        .slv_req_t            (slv_req_t   ),
+        .slv_resp_t           (slv_rsp_t   ),
+        .mst_req_t            (mst_req_t   ),
+        .mst_resp_t           (mst_rsp_t   )
     ) dut (
-        .clk_i,
-        .rst_ni,
+        .clk_i      (clk_i  ),
+        .rst_ni     (rst_n_i),
         .slv_req_i  (slv_req),
         .slv_resp_o (slv_rsp),
         .mst_req_o  (mst_req),
@@ -65,7 +65,7 @@ module axi_id_remap_case #(
 
     task automatic issue_aw(input axi_id_t axi_id, output noc_id_t noc_id);
         @(negedge clk_i);
-        slv_req.aw.id = axi_id;
+        slv_req.aw.id    = axi_id;
         slv_req.aw_valid = 1'b1;
         @(posedge clk_i);
         #1;
@@ -80,7 +80,7 @@ module axi_id_remap_case #(
 
     task automatic return_b(input axi_id_t axi_id, input noc_id_t noc_id);
         @(negedge clk_i);
-        mst_rsp.b.id = noc_id;
+        mst_rsp.b.id    = noc_id;
         mst_rsp.b_valid = 1'b1;
         @(posedge clk_i);
         #1;
@@ -101,12 +101,12 @@ module axi_id_remap_case #(
             $fatal(1, "illegal AXI/NoC ID-width contract");
         end
 
-        slv_req.b_ready = 1'b1;
+        slv_req.b_ready  = 1'b1;
         mst_rsp.aw_ready = 1'b1;
-        mst_rsp.w_ready = 1'b1;
+        mst_rsp.w_ready  = 1'b1;
         mst_rsp.ar_ready = 1'b1;
 
-        wait (rst_ni);
+        wait (rst_n_i);
         issue_aw(AXI_ID_WIDTH'(1), noc_id);
         return_b(AXI_ID_WIDTH'(1), noc_id);
 
@@ -119,7 +119,7 @@ module axi_id_remap_case #(
             end
 
             @(negedge clk_i);
-            slv_req.aw.id = AXI_ID_WIDTH'(8);
+            slv_req.aw.id    = AXI_ID_WIDTH'(8);
             slv_req.aw_valid = 1'b1;
             @(posedge clk_i);
             #1;
@@ -128,7 +128,7 @@ module axi_id_remap_case #(
             end
 
             @(negedge clk_i);
-            mst_rsp.b.id = allocated_ids[0];
+            mst_rsp.b.id    = allocated_ids[0];
             mst_rsp.b_valid = 1'b1;
             @(posedge clk_i);
             #1;
@@ -159,9 +159,9 @@ module tb_axi_id_remap;
 
     always #5 clk = ~clk;
 
-    axi_id_remap_case #(.AXI_ID_WIDTH(1)) case_1 (.clk_i(clk), .rst_ni(rst_n), .done_o(done_1));
-    axi_id_remap_case #(.AXI_ID_WIDTH(3)) case_3 (.clk_i(clk), .rst_ni(rst_n), .done_o(done_3));
-    axi_id_remap_case #(.AXI_ID_WIDTH(8)) case_8 (.clk_i(clk), .rst_ni(rst_n), .done_o(done_8));
+    axi_id_remap_case #(.AXI_ID_WIDTH(1)) case_1 (.clk_i(clk), .rst_n_i(rst_n), .done_o(done_1));
+    axi_id_remap_case #(.AXI_ID_WIDTH(3)) case_3 (.clk_i(clk), .rst_n_i(rst_n), .done_o(done_3));
+    axi_id_remap_case #(.AXI_ID_WIDTH(8)) case_8 (.clk_i(clk), .rst_n_i(rst_n), .done_o(done_8));
 
     initial begin
         repeat (2) @(posedge clk);

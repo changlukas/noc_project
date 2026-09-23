@@ -531,7 +531,7 @@ def _dma_check(topo, n_ep, jobs_per_node, job_bytes, rw):
     w("        bad_total = 0;")
     w("        do begin")
     w("            @(posedge clk_i);")
-    w("            all_done = rst_ni;")
+    w("            all_done = rst_n_i;")
     w("            for (int i = 0; i < NUM_NODES; i++)")
     w("                all_done &= (jobs_retired[i] >= JOBS_PER_NODE);")
     w("        end while (!all_done);")
@@ -583,9 +583,9 @@ def _dpi_error_poll():
         "    // -------------------------------------------------------------------------",
         '    import "DPI-C" context function int cmodel_check_error(output string msg);',
         "",
-        "    always_ff @(posedge clk_i) begin",
+        "    always @(posedge clk_i) begin",
         "        /* verilator lint_off WIDTHTRUNC */",
-        "        if (rst_ni) begin",
+        "        if (rst_n_i) begin",
         "            string dpi_err_msg;",
         "            int    dpi_err_code;",
         "            dpi_err_code = cmodel_check_error(dpi_err_msg);",
@@ -690,7 +690,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
         w("// Checking: pulp axi_scoreboard lives inside each endpoint on master_dv,")
         w("// comparing read data end-to-end through the NoC against golden write data.")
     w("//")
-    w("// Self-clocked: clk_i/rst_ni are internal logic (10 ns clock, 4-cycle reset).")
+    w("// Self-clocked: clk_i/rst_n_i are internal logic (10 ns clock, 4-cycle reset).")
     w("// Plusargs: +num_reads=<n> +num_writes=<n> (per node); seed via +verilator+seed+<N>.")
     w("")
     w("`ifndef TB_TOP_SV")
@@ -700,11 +700,11 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w("")
     w("module tb_top;")
     w("    logic clk_i  = 1'b0;")
-    w("    logic rst_ni = 1'b0;")
+    w("    logic rst_n_i = 1'b0;")
     w("    always #5 clk_i = ~clk_i;")
     w("    initial begin")
     w("        repeat (4) @(posedge clk_i);")
-    w("        rst_ni = 1'b1;")
+    w("        rst_n_i = 1'b1;")
     w("    end")
     w("")
     w("    // -------------------------------------------------------------------------")
@@ -778,8 +778,8 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w(f"    int unsigned last_progress  [{exit_n}];")
     w(f"    int unsigned axi_outstanding[{exit_n}];")
     w("")
-    w("    always_ff @(posedge clk_i) begin")
-    w("        if (!rst_ni) begin")
+    w("    always @(posedge clk_i or negedge rst_n_i) begin")
+    w("        if (~rst_n_i) begin")
     w("            live_cyc <= 0;")
     w(f"            for (int i = 0; i < {exit_n}; i++) begin")
     w("                last_progress[i]   <= 0;")
@@ -835,7 +835,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
         w(f"            + K_CYC_PER_BEAT * (tb_num_reads + tb_num_writes) * MAX_BURST_BEATS * {exit_n};")
     else:
         w("        int unsigned expected_total;")
-        w("        @(posedge rst_ni);")
+        w("        @(posedge rst_n_i);")
         w("        expected_total = 0;")
         w(f"        for (int i = 0; i < {exit_n}; i++)")
         w("            expected_total += expected_txn_cnt[i];")
@@ -1008,7 +1008,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
     else:
         w("        .ROUTER_VC_DEPTH(ROUTER_VC_DEPTH)")
     w("    ) u_fabric (")
-    w("        .clk_i(clk_i), .rst_ni(rst_ni),")
+    w("        .clk_i(clk_i), .rst_n_i(rst_n_i),")
     w("        .router_ctx(router_ctx), .nmu_ctx(nmu_ctx), .nsu_ctx(nsu_ctx),")
     w("        .dat_merge_ctx(dat_merge_ctx),")
     w("        .measure_en(perf_measure_en),")
@@ -1079,7 +1079,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w("            .MST_STALL_RANDOM_OUTPUT(MST_STALL_RANDOM_OUTPUT),")
     w("            .MST_FIXED_DELAY_OUTPUT(MST_FIXED_DELAY_OUTPUT)")
     w("        ) u_endpoint (")
-    w("            .clk_i(clk_i), .rst_ni(rst_ni),")
+    w("            .clk_i(clk_i), .rst_n_i(rst_n_i),")
     w("            .master_axi_req_o(master_axi_req[i]), .master_awuser_o(master_awuser[i]),")
     w("            .master_axi_rsp_i(master_axi_rsp[i]),")
     w("            .slave_axi_req_i(slave_axi_req[i]),   .slave_axi_rsp_o(slave_axi_rsp[i]),")
@@ -1115,7 +1115,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
         w('        $fdisplay(packet_trace_fd, "cycle,event,node,plane,vc,tail,src,dst,dst_port,collective,mask,in_window,flit");')
         w("    end")
         w("    always @(posedge clk_i) begin")
-        w("        if (!rst_ni) begin")
+        w("        if (~rst_n_i) begin")
         w('            $fdisplay(packet_trace_fd, "%0d,RESET,0,REQ,0,0,0,0,0,0,0,0,0", live_cyc);')
         w("        end else begin")
         for ep, x, y, cid, port in endpoints:
@@ -1161,10 +1161,10 @@ def emit_tb_top(topo: dict, dma: bool = False,
     if dma and dependent:
         w('    import "DPI-C" context function void cmodel_perf_end(input longint end_cyc);')
         w("    bit operation_window_started = 0, operation_window_ended = 0;")
-        trigger = "|operation_job_valid" if plan.transfers else "rst_ni && !clk_i"
+        trigger = "|operation_job_valid" if plan.transfers else "rst_n_i && !clk_i"
         w(f"    wire operation_request_pending = {trigger};")
         w("    always @(posedge operation_request_pending) begin")
-        w("        if (rst_ni && !operation_window_started) begin")
+        w("        if (rst_n_i && !operation_window_started) begin")
         w("            cmodel_perf_begin(longint'(live_cyc));")
         w("            perf_measure_en = 1;")
         w("            operation_window_started = 1;")
@@ -1243,7 +1243,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w("        // aliases; Verilator --timing wait() on it does not wake reliably.")
     w("        do begin")
     w("            @(posedge clk_i);")
-    w("            all_done = rst_ni;")
+    w("            all_done = rst_n_i;")
     w(f"            for (int i = 0; i < {exit_n}; i++)")
     w("                all_done &= injection_mode == 3 ? compare_done[i] : end_of_sim[i];")
     w("        end while (!all_done);")

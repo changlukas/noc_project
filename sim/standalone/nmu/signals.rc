@@ -77,36 +77,36 @@ addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_id_remap/
 endSubGroup "ID remap request"
 addSubGroup "AW CDC FIFO" -e FALSE
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_aw_fifo/src_clk_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_aw_fifo/src_rst_ni
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_aw_fifo/src_rst_n_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_aw_fifo/src_data_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_aw_fifo/src_valid_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_aw_fifo/src_ready_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_aw_fifo/dst_clk_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_aw_fifo/dst_rst_ni
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_aw_fifo/dst_rst_n_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_aw_fifo/dst_data_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_aw_fifo/dst_valid_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_aw_fifo/dst_ready_i
 endSubGroup "AW CDC FIFO"
 addSubGroup "W CDC FIFO" -e FALSE
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_w_fifo/src_clk_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_w_fifo/src_rst_ni
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_w_fifo/src_rst_n_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_w_fifo/src_data_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_w_fifo/src_valid_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_w_fifo/src_ready_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_w_fifo/dst_clk_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_w_fifo/dst_rst_ni
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_w_fifo/dst_rst_n_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_w_fifo/dst_data_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_w_fifo/dst_valid_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_w_fifo/dst_ready_i
 endSubGroup "W CDC FIFO"
 addSubGroup "AR CDC FIFO" -e FALSE
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_ar_fifo/src_clk_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_ar_fifo/src_rst_ni
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_ar_fifo/src_rst_n_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_ar_fifo/src_data_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_ar_fifo/src_valid_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_ar_fifo/src_ready_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_ar_fifo/dst_clk_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_ar_fifo/dst_rst_ni
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_ar_fifo/dst_rst_n_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_ar_fifo/dst_data_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_ar_fifo/dst_valid_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_request_path/i_request_fifo/i_ar_fifo/dst_ready_i
@@ -267,24 +267,24 @@ addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering
 endSubGroup "R storage (R_ROB_EN=1)"
 addSubGroup "B CDC FIFO" -e FALSE
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/src_clk_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/src_rst_ni
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/src_rst_n_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/src_data_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/src_valid_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/src_ready_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/dst_clk_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/dst_rst_ni
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/dst_rst_n_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/dst_data_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/dst_valid_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/dst_ready_i
 endSubGroup "B CDC FIFO"
 addSubGroup "R CDC FIFO" -e FALSE
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_r_fifo/src_clk_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_r_fifo/src_rst_ni
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_r_fifo/src_rst_n_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_r_fifo/src_data_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_r_fifo/src_valid_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_r_fifo/src_ready_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_r_fifo/dst_clk_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_r_fifo/dst_rst_ni
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_r_fifo/dst_rst_n_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_r_fifo/dst_data_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_r_fifo/dst_valid_o
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_r_fifo/dst_ready_i

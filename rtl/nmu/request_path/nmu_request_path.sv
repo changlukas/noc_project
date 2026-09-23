@@ -31,9 +31,9 @@ module nmu_request_path #(
     parameter logic [ni_flit_pkg::SRC_PORT_ID_WIDTH-1:0] SRC_PORT_ID = '0
 ) (
     input  wire logic  axi_clk_i,
-    input  wire logic  axi_rst_ni,
+    input  wire logic  axi_rst_n_i,
     input  wire logic  noc_clk_i,
-    input  wire logic  noc_rst_ni,
+    input  wire logic  noc_rst_n_i,
     axi_if.wr_slv axi_wr_i,
     axi_if.rd_slv axi_rd_i,
     output wire ni_types_pkg::nmu_sam_aw_result_t                                         m_aw_o,
@@ -161,7 +161,7 @@ module nmu_request_path #(
         .mst_resp_t           (internal_resp_t       )
     ) i_id_remap (
         .clk_i      (axi_clk_i   ),
-        .rst_ni     (axi_rst_ni  ),
+        .rst_ni     (axi_rst_n_i ),
         .slv_req_i  (external_req),
         .slv_resp_o (external_rsp),
         .mst_req_o  (internal_req),
@@ -219,9 +219,9 @@ module nmu_request_path #(
         .ar_t           (ni_signals_pkg::axi_ar_t)
     ) i_request_fifo (
         .axi_clk_i    (axi_clk_i            ),
-        .axi_rst_ni   (axi_rst_ni           ),
+        .axi_rst_n_i  (axi_rst_n_i          ),
         .noc_clk_i    (noc_clk_i            ),
-        .noc_rst_ni   (noc_rst_ni           ),
+        .noc_rst_n_i  (noc_rst_n_i          ),
         .s_aw_valid_i (internal_req.aw_valid),
         .s_aw_ready_o (axi_aw_ready         ),
         .s_aw_data_i  (axi_aw               ),
@@ -253,7 +253,7 @@ module nmu_request_path #(
         .SAM             (SAM            )
     ) i_sam (
         .noc_clk_i    (noc_clk_i    ),
-        .noc_rst_ni   (noc_rst_ni   ),
+        .noc_rst_n_i  (noc_rst_n_i  ),
         .s_aw_valid_i (fifo_aw_valid),
         .s_aw_ready_o (fifo_aw_ready),
         .s_aw_i       (fifo_aw      ),
@@ -278,7 +278,7 @@ module nmu_request_path #(
         .SRC_PORT_ID (SRC_PORT_ID   )
     ) i_packetize (
         .clk_i         (noc_clk_i           ),
-        .rst_i         (!noc_rst_ni         ),
+        .rst_n_i       (noc_rst_n_i         ),
         .s_aw_i        (s_ordered_aw_i      ),
         .s_aw_valid_i  (s_ordered_aw_valid_i),
         .s_aw_ready_o  (s_ordered_aw_ready_o),
@@ -301,7 +301,7 @@ module nmu_request_path #(
         .ROUTER_VC_DEPTH (NOC_ROUTER_VC_DEPTH)
     ) i_channel_assign (
         .clk_i               (noc_clk_i        ),
-        .rst_i               (!noc_rst_ni      ),
+        .rst_n_i             (noc_rst_n_i      ),
         .s_req_i             (req_candidates   ),
         .s_req_valid_i       (req_valid        ),
         .s_req_ready_o       (req_ready        ),

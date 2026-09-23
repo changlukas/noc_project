@@ -11,9 +11,9 @@ module nmu_response_fifo #(
     parameter type         r_t            = ni_signals_pkg::axi_r_t
 ) (
     input  wire logic  noc_clk_i,
-    input  wire logic  noc_rst_ni,
+    input  wire logic  noc_rst_n_i,
     input  wire logic  axi_clk_i,
-    input  wire logic  axi_rst_ni,
+    input  wire logic  axi_rst_n_i,
     input  wire b_t    s_b_data_i,
     input  wire logic  s_b_valid_i,
     output wire logic  s_b_ready_o,
@@ -37,12 +37,12 @@ module nmu_response_fifo #(
         .data_t         (b_t           )
     ) i_b_fifo (
         .src_clk_i   (noc_clk_i  ),
-        .src_rst_ni  (noc_rst_ni ),
+        .src_rst_n_i (noc_rst_n_i),
         .src_valid_i (s_b_valid_i),
         .src_ready_o (s_b_ready_o),
         .src_data_i  (s_b_data_i ),
         .dst_clk_i   (axi_clk_i  ),
-        .dst_rst_ni  (axi_rst_ni ),
+        .dst_rst_n_i (axi_rst_n_i),
         .dst_valid_o (m_b_valid_o),
         .dst_ready_i (m_b_ready_i),
         .dst_data_o  (m_b_data_o )
@@ -53,12 +53,12 @@ module nmu_response_fifo #(
         .data_t         (r_t           )
     ) i_r_fifo (
         .src_clk_i   (noc_clk_i  ),
-        .src_rst_ni  (noc_rst_ni ),
+        .src_rst_n_i (noc_rst_n_i),
         .src_valid_i (s_r_valid_i),
         .src_ready_o (s_r_ready_o),
         .src_data_i  (s_r_data_i ),
         .dst_clk_i   (axi_clk_i  ),
-        .dst_rst_ni  (axi_rst_ni ),
+        .dst_rst_n_i (axi_rst_n_i),
         .dst_valid_o (m_r_valid_o),
         .dst_ready_i (m_r_ready_i),
         .dst_data_o  (m_r_data_o )

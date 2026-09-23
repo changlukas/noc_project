@@ -56,7 +56,7 @@ package ni_types_pkg;
     } nmu_sam_ar_result_t;
 
     typedef struct packed {
-        ni_signals_pkg::axi_aw_t axi;
+        ni_signals_pkg::axi_aw_t                                          axi;
         nmu_request_t                                                     meta;
         logic                           [ni_flit_pkg::AXI_USER_WIDTH-1:0] user;
         logic                      [ni_flit_pkg::COLLECTIVE_OP_WIDTH-1:0] collective_op;
@@ -99,17 +99,17 @@ package ni_types_pkg;
         logic complete;
         logic [$clog2(ni_params_pkg::AXI_DATA_WIDTH /
                       ni_flit_pkg::NOC_NARROW_DATA_WIDTH)-1:0] narrow_lane;
-        ni_signals_pkg::axi_r_t                                beat;
+        ni_signals_pkg::axi_r_t beat;
     } nmu_r_rob_entry_t;
 
     // Narrow-read address basis shared by enabled bypass and structural
     // R_ROB_EN=0 paths.  beat_index advances on each accepted R beat.
     typedef struct packed {
         logic [ni_params_pkg::AXI_ADDR_WIDTH-1:0] local_addr;
-        logic         [ni_flit_pkg::AXI_LEN_WIDTH-1:0] len;
-        logic        [ni_flit_pkg::AXI_SIZE_WIDTH-1:0] size;
-        logic       [ni_flit_pkg::AXI_BURST_WIDTH-1:0] burst;
-        logic         [ni_flit_pkg::AXI_LEN_WIDTH-1:0] beat_index;
+        logic    [ni_flit_pkg::AXI_LEN_WIDTH-1:0] len;
+        logic   [ni_flit_pkg::AXI_SIZE_WIDTH-1:0] size;
+        logic  [ni_flit_pkg::AXI_BURST_WIDTH-1:0] burst;
+        logic    [ni_flit_pkg::AXI_LEN_WIDTH-1:0] beat_index;
     } nmu_read_context_t;
 
     // NSU Response Queue transaction record.  Write entries zero the read
@@ -117,11 +117,11 @@ package ni_types_pkg;
     typedef struct packed {
         logic          [ni_flit_pkg::SRC_ID_WIDTH-1:0] src_id;
         logic     [ni_flit_pkg::SRC_PORT_ID_WIDTH-1:0] src_port_id;
-        logic   [ni_params_pkg::NOC_ID_WIDTH-1:0] noc_id;
+        logic        [ni_params_pkg::NOC_ID_WIDTH-1:0] noc_id;
         logic                                          ordering_req;
         logic    [ni_flit_pkg::ORDERING_TAG_WIDTH-1:0] ordering_tag;
         logic                                          is_data;
-        logic [ni_params_pkg::AXI_ADDR_WIDTH-1:0] local_addr;
+        logic      [ni_params_pkg::AXI_ADDR_WIDTH-1:0] local_addr;
         logic         [ni_flit_pkg::AXI_LEN_WIDTH-1:0] len;
         logic        [ni_flit_pkg::AXI_SIZE_WIDTH-1:0] size;
         logic       [ni_flit_pkg::AXI_BURST_WIDTH-1:0] burst;

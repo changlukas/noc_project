@@ -21,7 +21,7 @@ module idma_job_driver #(
     parameter int unsigned NUM_ENDPOINTS = 1
 ) (
     input  logic                       clk_i,
-    input  logic                       rst_ni,
+    input  logic                       rst_n_i,
     output idma_types_pkg::idma_req_t  req_o,
     output logic                       req_valid_o,
     input  logic                       req_ready_i,
@@ -52,14 +52,21 @@ module idma_job_driver #(
     int unsigned retired = 0;
     bit file_done = 0;
 
-    always_ff @(posedge clk_i) begin
-        if (!rst_ni) retired <= 0;
-        else if (rsp_valid_i) retired <= retired + 1;
-        // Registered out: Verilator does not reliably propagate a
-        // procedurally-assigned output-port variable to the instantiating scope.
-        jobs_issued_o  <= issued;
-        jobs_retired_o <= retired;
-        jobs_done_o <= file_done;
+    // Register output counters for reliable propagation through the simulator.
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
+            retired        <= 0;
+            jobs_issued_o  <= 0;
+            jobs_retired_o <= 0;
+            jobs_done_o    <= 1'b0;
+        end else begin
+            if (rsp_valid_i) begin
+                retired <= retired + 1;
+            end
+            jobs_issued_o  <= issued;
+            jobs_retired_o <= retired;
+            jobs_done_o    <= file_done;
+        end
     end
 
     // One decimal field. $fscanf leaves its target UNMODIFIED on a failed match,
@@ -79,7 +86,7 @@ module idma_job_driver #(
     function automatic longint unsigned read_hex(input int fd, input string field);
         string tok;
         longint unsigned v = 0;
-        byte c;
+        byte         c;
         int unsigned d;
         if ($fscanf(fd, "%s", tok) != 1)
             $fatal(1, "[dma_jobs] node%0d: %s: short or malformed job file %s",
@@ -134,18 +141,18 @@ module idma_job_driver #(
         int dependent_jobs;
         int user_fd = 0;
         int dma_job_users = 0;
-        longint unsigned job_user;
-        string user_path;
-        int code;
-        int unsigned dependency_node, dependency_count;
-        int dependency_length;
-        string dependency_path, extra_token;
+        longint unsigned           job_user;
+        string                     user_path;
+        int                        code;
+        int unsigned               dependency_node, dependency_count;
+        int                        dependency_length;
+        string                     dependency_path, extra_token;
         idma_types_pkg::idma_req_t r;
-        int unsigned length, src_protocol, dst_protocol, max_src_len, max_dst_len;
-        int unsigned aw_decoupled, rw_decoupled, num_errors, axi_id;
-        longint unsigned src_addr, dst_addr;
+        int unsigned               length, src_protocol, dst_protocol, max_src_len, max_dst_len;
+        int unsigned               aw_decoupled, rw_decoupled, num_errors, axi_id;
+        longint unsigned           src_addr, dst_addr;
 
-        dependency_fd = 0;
+        dependency_fd  = 0;
         dependent_jobs = 0;
 
         // Non-blocking throughout: one assignment style per variable.
@@ -154,14 +161,14 @@ module idma_job_driver #(
 
         void'($value$plusargs("stim_dir=%s", stim_dir));
         jobs_path = $sformatf("%s/node%0d/jobs.txt", stim_dir, NODE_ID);
-        fd = $fopen(jobs_path, "r");
+        fd        = $fopen(jobs_path, "r");
         if (fd == 0) $fatal(1, "[dma_jobs] node%0d: cannot open %s", NODE_ID, jobs_path);
         void'($value$plusargs("dependent_jobs=%d", dependent_jobs));
         if (dependent_jobs != 0 && dependent_jobs != 1)
             $fatal(1, "[dma_jobs] dependent_jobs must be 0 or 1");
         if (dependent_jobs) begin
             dependency_path = $sformatf("%s/node%0d/dependencies.txt", stim_dir, NODE_ID);
-            dependency_fd = $fopen(dependency_path, "r");
+            dependency_fd   = $fopen(dependency_path, "r");
             if (dependency_fd == 0)
                 $fatal(1, "[dma_jobs] node%0d: cannot open %s", NODE_ID, dependency_path);
         end
@@ -170,12 +177,12 @@ module idma_job_driver #(
             $fatal(1, "[dma_jobs] dma_job_users must be 0 or 1");
         if (dma_job_users) begin
             user_path = $sformatf("%s/node%0d/users.txt", stim_dir, NODE_ID);
-            user_fd = $fopen(user_path, "r");
+            user_fd   = $fopen(user_path, "r");
             if (user_fd == 0)
                 $fatal(1, "[dma_jobs] node%0d: cannot open %s", NODE_ID, user_path);
         end
 
-        @(posedge rst_ni);
+        @(posedge rst_n_i);
 
         forever begin
             // Only the first field of a record may be ABSENT: that is the end of
@@ -199,7 +206,7 @@ module idma_job_driver #(
             num_errors   = read_dec(fd, "num_errors");   // the error path is out of scope
             axi_id       = read_dec(fd, "axi_id");
 
-            r = '0;
+            r          = '0;
             r.length   = check_len(length, "length");
             r.src_addr = idma_types_pkg::addr_t'(src_addr);
             r.dst_addr = idma_types_pkg::addr_t'(dst_addr);
@@ -214,9 +221,9 @@ module idma_job_driver #(
             r.opt.src_protocol = idma_pkg::protocol_e'(src_protocol);
             r.opt.dst_protocol = idma_pkg::protocol_e'(dst_protocol);
             r.opt.axi_id       = idma_types_pkg::id_t'(axi_id);
-            r.opt.src = '{burst: axi_pkg::BURST_INCR, cache: '0, lock: 1'b0,
+            r.opt.src          = '{burst: axi_pkg::BURST_INCR, cache: '0, lock: 1'b0,
                           prot: '0, qos: '0, region: '0};
-            r.opt.dst = r.opt.src;
+            r.opt.dst             = r.opt.src;
             r.opt.beo.decouple_aw = aw_decoupled[0];
             r.opt.beo.decouple_rw = rw_decoupled[0];
             // *_max_llen only acts when the matching reduce_len bit is set

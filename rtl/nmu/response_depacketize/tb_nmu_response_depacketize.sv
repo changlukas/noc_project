@@ -8,14 +8,14 @@ module tb_nmu_response_depacketize #(
     import ni_flit_pkg::*;
     import ni_types_pkg::*;
     localparam int FIRST_VC = DAT_VC_MODE == 1 ? NUM_DAT_VC/2 : 0;
-    logic clk = 0, rst = 1;
+    logic clk = 0, rst_n_i = 0;
     always #5 clk = ~clk;
     rsp_flit_t rsp;
     dat_flit_t dat;
     logic rsp_valid = 0, rsp_ready, dat_valid = 0;
-    logic [NUM_DAT_VC-1:0] credit_return;
-    nmu_b_response_t b;
-    nmu_r_response_t r;
+    logic            [NUM_DAT_VC-1:0] credit_return;
+    nmu_b_response_t                  b;
+    nmu_r_response_t                  r;
     logic b_valid, r_valid, b_ready = 1, r_ready = 0;
     int wr_cnt [NUM_DAT_VC+1], rd_cnt [NUM_DAT_VC+1];
     int credit [NUM_DAT_VC];
@@ -27,25 +27,37 @@ module tb_nmu_response_depacketize #(
     initial void'($value$plusargs("fault=%d", fault));
 
     nmu_response_depacketize #(
-        .RSP_FIFO_DEPTH(2), .NUM_DAT_VC(NUM_DAT_VC), .DAT_VC_MODE(DAT_VC_MODE),
-        .DAT_RX_VC_DEPTH(DAT_RX_VC_DEPTH)
+        .RSP_FIFO_DEPTH  (2              ),
+        .NUM_DAT_VC      (NUM_DAT_VC     ),
+        .DAT_VC_MODE     (DAT_VC_MODE    ),
+        .DAT_RX_VC_DEPTH (DAT_RX_VC_DEPTH)
     ) dut (
-        .clk_i(clk), .rst_i(rst), .s_rsp_i(rsp), .s_rsp_valid_i(rsp_valid),
-        .s_rsp_ready_o(rsp_ready), .s_dat_i(dat), .s_dat_valid_i(dat_valid),
-        .dat_credit_return_o(credit_return), .m_b_o(b), .m_b_valid_o(b_valid),
-        .m_b_ready_i(b_ready), .m_r_o(r), .m_r_valid_o(r_valid), .m_r_ready_i(r_ready)
+        .clk_i               (clk          ),
+        .rst_n_i             (rst_n_i      ),
+        .s_rsp_i             (rsp          ),
+        .s_rsp_valid_i       (rsp_valid    ),
+        .s_rsp_ready_o       (rsp_ready    ),
+        .s_dat_i             (dat          ),
+        .s_dat_valid_i       (dat_valid    ),
+        .dat_credit_return_o (credit_return),
+        .m_b_o               (b            ),
+        .m_b_valid_o         (b_valid      ),
+        .m_b_ready_i         (b_ready      ),
+        .m_r_o               (r            ),
+        .m_r_valid_o         (r_valid      ),
+        .m_r_ready_i         (r_ready      )
     );
 
     function automatic nmu_r_response_t expected(input int vc, input int seq);
         nmu_r_response_t value;
-        value = '0;
-        value.axi.rid = DATA_R_RID_WIDTH'(vc);
+        value           = '0;
+        value.axi.rid   = DATA_R_RID_WIDTH'(vc);
         value.axi.rresp = 2'(seq % 3);
         value.axi.rlast = seq % 3 == 2;
         value.axi.rdata = '0;
         for (int lane = 0; lane < (vc == NUM_DAT_VC ? 2 : 16); lane++)
             value.axi.rdata[lane*32 +: 32] = 32'(seq + lane*1024 + vc*65536);
-        value.meta.is_data = vc != NUM_DAT_VC;
+        value.meta.is_data      = vc != NUM_DAT_VC;
         value.meta.ordering_req = 1;
         value.meta.ordering_tag = ORDERING_TAG_WIDTH'(seq);
         return value;
@@ -53,34 +65,34 @@ module tb_nmu_response_depacketize #(
 
     task automatic set_dat(input int vc);
         nmu_r_response_t value;
-        value = expected(vc, wr_cnt[vc]);
-        dat = '0;
-        dat.header[AXI_CH_LSB +: AXI_CH_WIDTH] = AXI_CH_WIDTH'(AXI_CH_DataR);
-        dat.header[VC_ID_LSB +: VC_ID_WIDTH] = VC_ID_WIDTH'(vc);
-        dat.header[FLIT_TAIL_LSB] = 1;
-        dat.header[ORDERING_REQ_LSB] = value.meta.ordering_req;
-        dat.header[ORDERING_TAG_LSB +: ORDERING_TAG_WIDTH] = value.meta.ordering_tag;
-        dat.payload[DATA_R_RID_LSB +: DATA_R_RID_WIDTH] = value.axi.rid;
+        value                                               = expected(vc, wr_cnt[vc]);
+        dat                                                 = '0;
+        dat.header[AXI_CH_LSB +: AXI_CH_WIDTH]              = AXI_CH_WIDTH'(AXI_CH_DataR);
+        dat.header[VC_ID_LSB +: VC_ID_WIDTH]                = VC_ID_WIDTH'(vc);
+        dat.header[FLIT_TAIL_LSB]                           = 1;
+        dat.header[ORDERING_REQ_LSB]                        = value.meta.ordering_req;
+        dat.header[ORDERING_TAG_LSB +: ORDERING_TAG_WIDTH]  = value.meta.ordering_tag;
+        dat.payload[DATA_R_RID_LSB +: DATA_R_RID_WIDTH]     = value.axi.rid;
         dat.payload[DATA_R_RRESP_LSB +: DATA_R_RRESP_WIDTH] = value.axi.rresp;
-        dat.payload[DATA_R_RLAST_LSB] = value.axi.rlast;
+        dat.payload[DATA_R_RLAST_LSB]                       = value.axi.rlast;
         dat.payload[DATA_R_RDATA_LSB +: DATA_R_RDATA_WIDTH] = value.axi.rdata;
-        dat_valid = 1;
+        dat_valid                                           = 1;
     endtask
 
     task automatic set_rsp(input bit read_rsp);
         nmu_r_response_t value;
-        value = expected(NUM_DAT_VC, wr_cnt[NUM_DAT_VC]);
-        rsp = '0;
-        rsp.header[AXI_CH_LSB +: AXI_CH_WIDTH] = AXI_CH_WIDTH'(read_rsp ? AXI_CH_NarrowR : AXI_CH_DataB);
-        rsp.header[ORDERING_REQ_LSB] = 1;
+        value                                              = expected(NUM_DAT_VC, wr_cnt[NUM_DAT_VC]);
+        rsp                                                = '0;
+        rsp.header[AXI_CH_LSB +: AXI_CH_WIDTH]             = AXI_CH_WIDTH'(read_rsp ? AXI_CH_NarrowR : AXI_CH_DataB);
+        rsp.header[ORDERING_REQ_LSB]                       = 1;
         rsp.header[ORDERING_TAG_LSB +: ORDERING_TAG_WIDTH] = value.meta.ordering_tag;
         if (read_rsp) begin
-            rsp.payload[NARROW_R_RID_LSB +: NARROW_R_RID_WIDTH] = value.axi.rid;
+            rsp.payload[NARROW_R_RID_LSB +: NARROW_R_RID_WIDTH]     = value.axi.rid;
             rsp.payload[NARROW_R_RRESP_LSB +: NARROW_R_RRESP_WIDTH] = value.axi.rresp;
-            rsp.payload[NARROW_R_RLAST_LSB] = value.axi.rlast;
+            rsp.payload[NARROW_R_RLAST_LSB]                         = value.axi.rlast;
             rsp.payload[NARROW_R_RDATA_LSB +: NARROW_R_RDATA_WIDTH] = value.axi.rdata[63:0];
         end else begin
-            rsp.payload[B_BID_LSB +: B_BID_WIDTH] = 3;
+            rsp.payload[B_BID_LSB +: B_BID_WIDTH]     = 3;
             rsp.payload[B_BRESP_LSB +: B_BRESP_WIDTH] = 2;
         end
         rsp_valid = 1;
@@ -88,8 +100,8 @@ module tb_nmu_response_depacketize #(
 
     always @(posedge clk) begin : check
         int vc;
-        if (rst) begin
-            held = 0;
+        if (~rst_n_i) begin
+            held            = 0;
             expected_credit = '0;
             for (int n = 0; n <= NUM_DAT_VC; n++) begin
                 wr_cnt[n] = 0; rd_cnt[n] = 0;
@@ -132,11 +144,19 @@ module tb_nmu_response_depacketize #(
         end
     end
 
+    always @(negedge rst_n_i) begin
+        #1ps;
+        if (dut.i_buffer.credit_return_reg !== '0 ||
+            dut.i_buffer.b_empty !== 1'b1 || dut.i_buffer.r_empty !== 1'b1 ||
+            dut.i_buffer.dat_empty !== '1)
+            $fatal(1, "Response FIFO/credit reset waited for a clock edge");
+    end
+
     initial begin : stimulus
         int sel, before_r;
         bit drained;
         rsp = '0; dat = '0;
-        repeat (3) @(negedge clk); rst = 0;
+        repeat (3) @(negedge clk); rst_n_i = 1;
         if (fault != 0) begin
             set_dat(FIRST_VC);
             if (fault == 1) dat.header[AXI_CH_LSB +: AXI_CH_WIDTH] = AXI_CH_WIDTH'(AXI_CH_DataW);
@@ -198,8 +218,8 @@ module tb_nmu_response_depacketize #(
         end
         // Flush occupied queues and a held arbitration decision, then reseed.
         r_ready = 0; set_dat(FIRST_VC); @(negedge clk); dat_valid = 0;
-        repeat (2) @(negedge clk); rst = 1;
-        repeat (2) @(negedge clk); rst = 0; r_ready = 1;
+        repeat (2) @(negedge clk); rst_n_i = 0;
+        repeat (2) @(negedge clk); rst_n_i = 1; r_ready = 1;
         if (r_valid) $fatal(1, "reset retained response");
         set_dat(FIRST_VC); @(negedge clk); dat_valid = 0;
         repeat (5) @(negedge clk);

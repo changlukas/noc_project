@@ -43,7 +43,7 @@
 // The longint unsigned ctx_i is created by tb_top (cmodel_router_create with x_coord);
 // this wrap only imports set_inputs/tick/get_outputs.
 //
-// Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
+// Reset: asynchronous active-low (rst_n_i). Output registers cleared on reset.
 
 `timescale 1ns/1ps
 
@@ -62,7 +62,7 @@ module router_wrap #(
     parameter int unsigned LINK_PORTS     = 5
 ) (
     input  logic                  clk_i,
-    input  logic                  rst_ni,
+    input  logic                  rst_n_i,
     input  longint unsigned       ctx_i,
 
     // REQ network (ready/valid, single VC): per-port.
@@ -155,24 +155,24 @@ module router_wrap #(
     // Output registers (registered one cycle behind DPI sample)
     // -------------------------------------------------------------------------
 
-    bit [LINK_PORTS-1:0]     tx_req_valid_q;
+    bit       [LINK_PORTS-1:0] tx_req_valid_q;
     logic [REQ_FLIT_WIDTH-1:0] tx_req_flit_q [LINK_PORTS];
-    logic [LINK_PORTS-1:0]     tx_req_model_ready;
-    bit [LINK_PORTS-1:0]     rx_req_ready_q;
-    bit [LINK_PORTS-1:0]     tx_rsp_valid_q;
+    logic     [LINK_PORTS-1:0] tx_req_model_ready;
+    bit       [LINK_PORTS-1:0] rx_req_ready_q;
+    bit       [LINK_PORTS-1:0] tx_rsp_valid_q;
     logic [RSP_FLIT_WIDTH-1:0] tx_rsp_flit_q [LINK_PORTS];
-    logic [LINK_PORTS-1:0]     tx_rsp_model_ready;
-    bit [LINK_PORTS-1:0]     rx_rsp_ready_q;
-    bit [LINK_PORTS-1:0]     tx_dat_valid_q;
+    logic     [LINK_PORTS-1:0] tx_rsp_model_ready;
+    bit       [LINK_PORTS-1:0] rx_rsp_ready_q;
+    bit       [LINK_PORTS-1:0] tx_dat_valid_q;
     logic [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q [LINK_PORTS];
-    logic [NUM_DAT_VC-1:0]     rx_dat_crdvalid_q [LINK_PORTS];
+    logic     [NUM_DAT_VC-1:0] rx_dat_crdvalid_q [LINK_PORTS];
 
     // -------------------------------------------------------------------------
-    // always_ff: sync-reset, 3-step DPI call, registered outputs
+    // always: async-reset outputs, 3-step DPI call, registered outputs
     // -------------------------------------------------------------------------
 
-    always_ff @(posedge clk_i) begin
-        if (!rst_ni) begin
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
             tx_req_valid_q <= '0;
             rx_req_ready_q <= '0;
             tx_rsp_valid_q <= '0;
@@ -197,7 +197,7 @@ module router_wrap #(
                 bit [REQ_FLIT_WIDTH-1:0] b_rx_req_flit [LINK_PORTS];
                 bit [RSP_FLIT_WIDTH-1:0] b_rx_rsp_flit [LINK_PORTS];
                 bit [DAT_FLIT_WIDTH-1:0] b_rx_dat_flit [LINK_PORTS];
-                bit [NUM_DAT_VC-1:0]     b_tx_dat_crdvalid [LINK_PORTS];
+                bit     [NUM_DAT_VC-1:0] b_tx_dat_crdvalid [LINK_PORTS];
                 for (int p = 0; p < LINK_PORTS; p++) begin
                     b_rx_req_flit[p]     = rx_req_flit[p];
                     b_rx_rsp_flit[p]     = rx_rsp_flit[p];
@@ -220,15 +220,15 @@ module router_wrap #(
             // safe; avoids BLKANDNBLK with the nonblocking reset path above).
             // One call per network.
             begin : get_outputs_blk
-                bit [LINK_PORTS-1:0]     t_tx_req_valid;
+                bit     [LINK_PORTS-1:0] t_tx_req_valid;
                 bit [REQ_FLIT_WIDTH-1:0] t_tx_req_flit [LINK_PORTS];
-                bit [LINK_PORTS-1:0]     t_rx_req_ready;
-                bit [LINK_PORTS-1:0]     t_tx_rsp_valid;
+                bit     [LINK_PORTS-1:0] t_rx_req_ready;
+                bit     [LINK_PORTS-1:0] t_tx_rsp_valid;
                 bit [RSP_FLIT_WIDTH-1:0] t_tx_rsp_flit [LINK_PORTS];
-                bit [LINK_PORTS-1:0]     t_rx_rsp_ready;
-                bit [LINK_PORTS-1:0]     t_tx_dat_valid;
+                bit     [LINK_PORTS-1:0] t_rx_rsp_ready;
+                bit     [LINK_PORTS-1:0] t_tx_dat_valid;
                 bit [DAT_FLIT_WIDTH-1:0] t_tx_dat_flit [LINK_PORTS];
-                bit [NUM_DAT_VC-1:0]     t_rx_dat_crdvalid [LINK_PORTS];
+                bit     [NUM_DAT_VC-1:0] t_rx_dat_crdvalid [LINK_PORTS];
                 cmodel_router_req_get_outputs(ctx_i, t_tx_req_valid, t_tx_req_flit, t_rx_req_ready);
                 cmodel_router_rsp_get_outputs(ctx_i, t_tx_rsp_valid, t_tx_rsp_flit, t_rx_rsp_ready);
                 cmodel_router_dat_get_outputs(ctx_i, t_tx_dat_valid, t_tx_dat_flit, t_rx_dat_crdvalid);
@@ -271,22 +271,22 @@ module router_wrap #(
     // Drive outputs from registered state
     // -------------------------------------------------------------------------
 
-    assign rx_req_ready    = rx_req_ready_q;
+    assign rx_req_ready = rx_req_ready_q;
 
-    assign rx_rsp_ready    = rx_rsp_ready_q;
+    assign rx_rsp_ready = rx_rsp_ready_q;
 
     for (genvar p = 0; p < LINK_PORTS; p++) begin : g_model_egress_hold
         // Each C++ router output is a one-cycle strobe; the hold register in
-        // the always_ff above owns the RTL-facing held-valid contract. The
+        // the always above owns the RTL-facing held-valid contract. The
         // model may pop when the register is empty OR its flit's handshake
         // completes this cycle (the free and the new load coincide on the
         // next edge), which keeps the link at full rate with a single stage.
         assign tx_req_model_ready[p] = !tx_req_valid_q[p] || tx_req_ready[p];
         assign tx_rsp_model_ready[p] = !tx_rsp_valid_q[p] || tx_rsp_ready[p];
-        assign tx_req_valid[p] = tx_req_valid_q[p];
-        assign tx_req_flit[p]  = tx_req_flit_q[p];
-        assign tx_rsp_valid[p] = tx_rsp_valid_q[p];
-        assign tx_rsp_flit[p]  = tx_rsp_flit_q[p];
+        assign tx_req_valid[p]       = tx_req_valid_q[p];
+        assign tx_req_flit[p]        = tx_req_flit_q[p];
+        assign tx_rsp_valid[p]       = tx_rsp_valid_q[p];
+        assign tx_rsp_flit[p]        = tx_rsp_flit_q[p];
 
         // Egress-hold checkers, written as explicit sampled-history registers
         // rather than SVA $stable: under Verilator the $stable in a |=>
@@ -295,20 +295,20 @@ module router_wrap #(
         // while the wire provably holds (clocked trace vs $past=0, 2026-08-21
         // hotspot mode-1 repro). The registers below sample at the same
         // preponed edge an SVA would, on both Verilator and VCS.
-        logic chk_req_v_q, chk_req_r_q, chk_rsp_v_q, chk_rsp_r_q;
+        logic                      chk_req_v_q, chk_req_r_q, chk_rsp_v_q, chk_rsp_r_q;
         logic [REQ_FLIT_WIDTH-1:0] chk_req_flit_q;
         logic [RSP_FLIT_WIDTH-1:0] chk_rsp_flit_q;
-        always_ff @(posedge clk_i) begin
-            chk_req_v_q    <= rst_ni && tx_req_valid[p];
+        always @(posedge clk_i) begin
+            chk_req_v_q    <= rst_n_i && tx_req_valid[p];
             chk_req_r_q    <= tx_req_ready[p];
             chk_req_flit_q <= tx_req_flit[p];
-            chk_rsp_v_q    <= rst_ni && tx_rsp_valid[p];
+            chk_rsp_v_q    <= rst_n_i && tx_rsp_valid[p];
             chk_rsp_r_q    <= tx_rsp_ready[p];
             chk_rsp_flit_q <= tx_rsp_flit[p];
-            if (rst_ni && chk_req_v_q && !chk_req_r_q &&
+            if (rst_n_i && chk_req_v_q && !chk_req_r_q &&
                 (!tx_req_valid[p] || tx_req_flit[p] !== chk_req_flit_q))
                 $error("router_wrap: REQ port %0d changed before handshake", p);
-            if (rst_ni && chk_rsp_v_q && !chk_rsp_r_q &&
+            if (rst_n_i && chk_rsp_v_q && !chk_rsp_r_q &&
                 (!tx_rsp_valid[p] || tx_rsp_flit[p] !== chk_rsp_flit_q))
                 $error("router_wrap: RSP port %0d changed before handshake", p);
         end

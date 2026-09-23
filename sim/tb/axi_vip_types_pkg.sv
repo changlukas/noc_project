@@ -32,7 +32,7 @@ package axi_vip_types_pkg;
 
     function automatic vip_req_t vip_req_from_flat(input ni_signals_pkg::axi_req_t f);
         vip_req_t r;
-        r = '0;
+        r           = '0;
         r.aw.id     = f.awid;     r.aw.addr  = f.awaddr;  r.aw.len   = f.awlen;
         r.aw.size   = f.awsize;   r.aw.burst = f.awburst; r.aw.lock  = f.awlock;
         r.aw.cache  = f.awcache;  r.aw.prot  = f.awprot;  r.aw.qos   = f.awqos;
@@ -48,7 +48,7 @@ package axi_vip_types_pkg;
 
     function automatic vip_resp_t vip_rsp_from_flat(input ni_signals_pkg::axi_rsp_t f);
         vip_resp_t r;
-        r = '0;
+        r          = '0;
         r.aw_ready = f.awready; r.w_ready = f.wready;
         r.b.id     = f.bid;     r.b.resp  = f.bresp;  r.b_valid = f.bvalid;
         r.ar_ready = f.arready;

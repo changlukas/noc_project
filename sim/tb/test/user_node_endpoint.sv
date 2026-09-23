@@ -77,7 +77,7 @@ module user_node_endpoint #(
     parameter int unsigned AWUSER_WIDTH = ni_params_pkg::AXI_AWUSER_WIDTH
 ) (
     input  logic                       clk_i,
-    input  logic                       rst_ni,
+    input  logic                       rst_n_i,
     output ni_signals_pkg::axi_req_t   master_axi_req_o,
     output logic [AWUSER_WIDTH-1:0]    master_awuser_o,
     input  ni_signals_pkg::axi_rsp_t   master_axi_rsp_i,
@@ -120,8 +120,10 @@ module user_node_endpoint #(
     // The master face is upstream of the crossbar and of the id remap, so its
     // id width is the tile initiator's, not the NI's.
     AXI_BUS_DV #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH),   .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(XBAR_SLV_ID_W),  .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH (ADDR_WIDTH   ),
+        .AXI_DATA_WIDTH (DATA_WIDTH   ),
+        .AXI_ID_WIDTH   (XBAR_SLV_ID_W),
+        .AXI_USER_WIDTH (AWUSER_WIDTH )
     ) master_dv (clk_i);
 
     // Consumer backpressure. The file master never stalls its R channel --
@@ -134,32 +136,36 @@ module user_node_endpoint #(
     // Response side only: stalling AW/W/AR here is injection-rate control,
     // which INJECTION_MODE owns.
     AXI_BUS #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH),   .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(XBAR_SLV_ID_W),  .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH (ADDR_WIDTH   ),
+        .AXI_DATA_WIDTH (DATA_WIDTH   ),
+        .AXI_ID_WIDTH   (XBAR_SLV_ID_W),
+        .AXI_USER_WIDTH (AWUSER_WIDTH )
     ) mst_pre_delay ();
 
     AXI_BUS #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH),   .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(XBAR_SLV_ID_W),  .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH (ADDR_WIDTH   ),
+        .AXI_DATA_WIDTH (DATA_WIDTH   ),
+        .AXI_ID_WIDTH   (XBAR_SLV_ID_W),
+        .AXI_USER_WIDTH (AWUSER_WIDTH )
     ) mst_post_delay ();
 
     `AXI_ASSIGN(mst_pre_delay, master_dv)
 
     axi_delayer_intf #(
-        .AXI_ID_WIDTH(XBAR_SLV_ID_W),
-        .AXI_ADDR_WIDTH(ADDR_WIDTH),
-        .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_USER_WIDTH(AWUSER_WIDTH),
-        .STALL_RANDOM_INPUT(1'b0),
-        .STALL_RANDOM_OUTPUT(MST_STALL_RANDOM_OUTPUT),
-        .FIXED_DELAY_INPUT(0),
-        .FIXED_DELAY_OUTPUT(MST_FIXED_DELAY_OUTPUT)
+        .AXI_ID_WIDTH        (XBAR_SLV_ID_W          ),
+        .AXI_ADDR_WIDTH      (ADDR_WIDTH             ),
+        .AXI_DATA_WIDTH      (DATA_WIDTH             ),
+        .AXI_USER_WIDTH      (AWUSER_WIDTH           ),
+        .STALL_RANDOM_INPUT  (1'b0                   ),
+        .STALL_RANDOM_OUTPUT (MST_STALL_RANDOM_OUTPUT),
+        .FIXED_DELAY_INPUT   (0                      ),
+        .FIXED_DELAY_OUTPUT  (MST_FIXED_DELAY_OUTPUT )
     ) i_mst_backpressure (
-        .clk_i(clk_i),
-        .rst_ni(rst_ni),
-        .bypass_i(channel_compare_mode),
-        .slv(mst_pre_delay),
-        .mst(mst_post_delay)
+        .clk_i    (clk_i               ),
+        .rst_ni   (rst_n_i             ),
+        .bypass_i (channel_compare_mode),
+        .slv      (mst_pre_delay       ),
+        .mst      (mst_post_delay      )
     );
 
     // Evidence the knob acts, reported once per node at $finish. Counts cycles
@@ -168,10 +174,14 @@ module user_node_endpoint #(
     // that reports zero under "random" means the backpressure never engaged and
     // the run proves nothing about a stalling consumer.
     int unsigned mst_r_stall_cycles = 0;
-    always_ff @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) mst_r_stall_cycles <= 0;
-        else if (master_axi_rsp_i.rvalid && !master_axi_req_o.rready)
-            mst_r_stall_cycles <= mst_r_stall_cycles + 1;
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
+            mst_r_stall_cycles <= 0;
+        end else begin
+            if (master_axi_rsp_i.rvalid && !master_axi_req_o.rready) begin
+                mst_r_stall_cycles <= mst_r_stall_cycles + 1;
+            end
+        end
     end
     final $display("[mst_bp] node%0d: R backpressure held %0d cycles",
                    NODE_ID, mst_r_stall_cycles);
@@ -181,9 +191,9 @@ module user_node_endpoint #(
     // view. It is NOT the NoC-bound port: a request this node addresses to its
     // own tile is answered by the crossbar and never leaves (see g_tile_xbar),
     // so master_axi_req_o below carries only the share that goes on the NoC.
-    ni_signals_pkg::axi_req_t mst_flat_req;
-    ni_signals_pkg::axi_rsp_t mst_flat_rsp;
-    logic [AWUSER_WIDTH-1:0]  mst_flat_awuser;
+    ni_signals_pkg::axi_req_t                    mst_flat_req;
+    ni_signals_pkg::axi_rsp_t                    mst_flat_rsp;
+    logic                     [AWUSER_WIDTH-1:0] mst_flat_awuser;
     // The flat structs are NoC-bound NI types, so their id fields are
     // NOC_ID_WIDTH wide. The external master face's four ids
     // therefore ride BESIDE the structs at XBAR_SLV_ID_W and the corresponding
@@ -195,7 +205,7 @@ module user_node_endpoint #(
     assign mst_arid = mst_post_delay.ar_id;
 
     always_comb begin
-        mst_flat_req = '0;
+        mst_flat_req          = '0;
         mst_flat_req.awaddr   = mst_post_delay.aw_addr;
         mst_flat_req.awlen    = mst_post_delay.aw_len;
         mst_flat_req.awsize   = mst_post_delay.aw_size;
@@ -225,7 +235,7 @@ module user_node_endpoint #(
     end
     // AWUSER sideband (58 b, collective op + address mask): the file_master's
     // stimulus user field. It rides the crossbar to reach the NMU.
-    assign mst_flat_awuser = mst_post_delay.aw_user;
+    assign mst_flat_awuser         = mst_post_delay.aw_user;
     assign mst_post_delay.aw_ready = mst_flat_rsp.awready;
     assign mst_post_delay.w_ready  = mst_flat_rsp.wready;
     assign mst_post_delay.b_id     = mst_bid;
@@ -284,13 +294,17 @@ module user_node_endpoint #(
     // array port element-by-element in declared order, so an ascending [N]
     // instance array binds port 1 to element 0 -- silently transposing them.
     AXI_BUS #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH),  .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(XBAR_SLV_ID_W), .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH (ADDR_WIDTH   ),
+        .AXI_DATA_WIDTH (DATA_WIDTH   ),
+        .AXI_ID_WIDTH   (XBAR_SLV_ID_W),
+        .AXI_USER_WIDTH (AWUSER_WIDTH )
     ) tile_axi [XBAR_SLV_PORTS-1:0] ();
 
     AXI_BUS #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH),  .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH (ADDR_WIDTH   ),
+        .AXI_DATA_WIDTH (DATA_WIDTH   ),
+        .AXI_ID_WIDTH   (XBAR_MST_ID_W),
+        .AXI_USER_WIDTH (AWUSER_WIDTH )
     ) tile_mst [XBAR_MST_PORTS-1:0] ();
 
     // m2 after the id remap: the NoC-facing face of the tile, at the NI's id
@@ -304,8 +318,10 @@ module user_node_endpoint #(
     // axi_id_serialize it never puts two distinct upstream ids on one
     // downstream id, so per-id ordering survives the fold.
     AXI_BUS #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(NOC_ID_WIDTH), .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH (ADDR_WIDTH  ),
+        .AXI_DATA_WIDTH (DATA_WIDTH  ),
+        .AXI_ID_WIDTH   (NOC_ID_WIDTH),
+        .AXI_USER_WIDTH (AWUSER_WIDTH)
     ) noc_mst ();
 
     // Fault injection for the DECERR gate (standing red-test rule, same shape
@@ -325,9 +341,9 @@ module user_node_endpoint #(
     initial void'($value$plusargs("decerr_fault_wr=%d", decerr_fault_wr));
 
     // s0: the file_master's own traffic.
-    assign tile_axi[0].aw_id     = mst_awid;
+    assign tile_axi[0].aw_id = mst_awid;
     // COLLECTIVE_OP_UNICAST is 0 (ni_flit_pkg), so any non-zero op is a collective.
-    assign tile_axi[0].aw_addr   = mst_flat_req.awaddr
+    assign tile_axi[0].aw_addr = mst_flat_req.awaddr
                                    + ((mst_flat_awuser[9:8] != 2'd0) ? NOC_EGRESS_BASE
                                                                     : ADDR_WIDTH'(0));
     assign tile_axi[0].aw_len    = mst_flat_req.awlen;
@@ -361,7 +377,7 @@ module user_node_endpoint #(
     assign tile_axi[0].ar_user   = '0;
     assign tile_axi[0].r_ready   = mst_flat_req.rready;
     always_comb begin
-        mst_flat_rsp = '0;
+        mst_flat_rsp         = '0;
         mst_flat_rsp.awready = tile_axi[0].aw_ready;
         mst_flat_rsp.wready  = tile_axi[0].w_ready;
         mst_flat_rsp.bresp   = tile_axi[0].b_resp;
@@ -412,7 +428,7 @@ module user_node_endpoint #(
     assign tile_axi[1].ar_user   = '0;
     assign tile_axi[1].r_ready   = slave_axi_req_i.rready;
     always_comb begin
-        slave_axi_rsp_o = '0;
+        slave_axi_rsp_o         = '0;
         slave_axi_rsp_o.awready = tile_axi[1].aw_ready;
         slave_axi_rsp_o.wready  = tile_axi[1].w_ready;
         slave_axi_rsp_o.bid     = tile_axi[1].b_id;
@@ -464,9 +480,9 @@ module user_node_endpoint #(
     // Own rule_t rather than axi_pkg::xbar_rule_64_t: the address fields have to
     // follow ADDR_WIDTH, not a fixed 64.
     typedef struct packed {
-        int unsigned           idx;
-        logic [ADDR_WIDTH-1:0] start_addr;
-        logic [ADDR_WIDTH-1:0] end_addr;
+        int unsigned                  idx;
+        logic        [ADDR_WIDTH-1:0] start_addr;
+        logic        [ADDR_WIDTH-1:0] end_addr;
     } tile_rule_t;
 
     // One rule per memory target, end exclusive. Sizes are exact: axi_xbar
@@ -494,27 +510,27 @@ module user_node_endpoint #(
 
     // s0 falls through to the NMU, s1 does not fall through at all.
     localparam int unsigned MST_IDX_W = cf_math_pkg::idx_width(XBAR_MST_PORTS);
-    logic [XBAR_SLV_PORTS-1:0]                tile_en_default;
+    logic [XBAR_SLV_PORTS-1:0] tile_en_default;
     logic [XBAR_SLV_PORTS-1:0][MST_IDX_W-1:0] tile_default_mst;
     assign tile_en_default     = 2'b01;
     assign tile_default_mst[0] = MST_IDX_W'(NMU_TARGET);
     assign tile_default_mst[1] = '0;  // unused, s1's default is disabled
 
     axi_xbar_intf #(
-        .AXI_USER_WIDTH(AWUSER_WIDTH),
-        .Cfg(TileXbarCfg),
-        .ATOPS(1'b0),
-        .CONNECTIVITY(TileConnectivity),
-        .rule_t(tile_rule_t)
+        .AXI_USER_WIDTH (AWUSER_WIDTH    ),
+        .Cfg            (TileXbarCfg     ),
+        .ATOPS          (1'b0            ),
+        .CONNECTIVITY   (TileConnectivity),
+        .rule_t         (tile_rule_t     )
     ) u_tile_xbar (
-        .clk_i,
-        .rst_ni,
-        .test_i(1'b0),
-        .slv_ports(tile_axi),
-        .mst_ports(tile_mst),
-        .addr_map_i(tile_addr_map),
-        .en_default_mst_port_i(tile_en_default),
-        .default_mst_port_i(tile_default_mst)
+        .clk_i                 (clk_i           ),
+        .rst_ni                (rst_n_i         ),
+        .test_i                (1'b0            ),
+        .slv_ports             (tile_axi        ),
+        .mst_ports             (tile_mst        ),
+        .addr_map_i            (tile_addr_map   ),
+        .en_default_mst_port_i (tile_en_default ),
+        .default_mst_port_i    (tile_default_mst)
     );
 
     // m0 / m1 -> the two tile memories, each behind its own delayer. Storage and
@@ -529,15 +545,17 @@ module user_node_endpoint #(
     // than X, since axi_sim_mem creates no entry for a byte nothing wrote. The
     // directed run never reads one either way.
     AXI_BUS #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH (ADDR_WIDTH   ),
+        .AXI_DATA_WIDTH (DATA_WIDTH   ),
+        .AXI_ID_WIDTH   (XBAR_MST_ID_W),
+        .AXI_USER_WIDTH (AWUSER_WIDTH )
     ) tile_mem [TILE_TARGETS-1:0] ();
 
     for (genvar t = 0; t < TILE_TARGETS; t++) begin : g_tile_mem
         // Observe committed bytes, after the memory's acquisition time.
         always @(posedge clk_i) begin
             #(TestTime + 1ps);
-            if (rst_ni && i_mem.i_sim_mem.mon_w[0].valid &&
+            if (rst_n_i && i_mem.i_sim_mem.mon_w[0].valid &&
                 ($test$plusargs("control_sequence") ||
                  ($test$plusargs("kv_overlap") && t == 0 && control_expected.size() != 0))) begin
                 automatic logic [ADDR_WIDTH-1:0] address = i_mem.i_sim_mem.mon_w[0].addr;
@@ -549,7 +567,7 @@ module user_node_endpoint #(
                 end
                 control_receive(address, value);
             end
-            if (rst_ni && $test$plusargs("kv_overlap") && t == KV_MEMORY_TARGET &&
+            if (rst_n_i && $test$plusargs("kv_overlap") && t == KV_MEMORY_TARGET &&
                 kv_sink_ranges.size() != 0 && i_mem.i_sim_mem.mon_w[0].valid) begin
                 automatic logic [ADDR_WIDTH-1:0] address = i_mem.i_sim_mem.mon_w[0].addr;
                 automatic bit found = 1'b0;
@@ -566,50 +584,70 @@ module user_node_endpoint #(
             end
         end
         axi_delayer_intf #(
-            .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_ADDR_WIDTH(ADDR_WIDTH),
-            .AXI_DATA_WIDTH(DATA_WIDTH),  .AXI_USER_WIDTH(AWUSER_WIDTH),
-            .STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),
-            .STALL_RANDOM_OUTPUT(MEM_STALL_RANDOM_OUTPUT),
-            .FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),
-            .FIXED_DELAY_OUTPUT(MEM_FIXED_DELAY_OUTPUT)
-        ) i_delayer (
-            .clk_i(clk_i), .rst_ni(rst_ni), .bypass_i(channel_compare_mode),
-            .slv(tile_mst[t]), .mst(tile_mem[t])
-        );
+        .AXI_ID_WIDTH        (XBAR_MST_ID_W          ),
+        .AXI_ADDR_WIDTH      (ADDR_WIDTH             ),
+        .AXI_DATA_WIDTH      (DATA_WIDTH             ),
+        .AXI_USER_WIDTH      (AWUSER_WIDTH           ),
+        .STALL_RANDOM_INPUT  (MEM_STALL_RANDOM_INPUT ),
+        .STALL_RANDOM_OUTPUT (MEM_STALL_RANDOM_OUTPUT),
+        .FIXED_DELAY_INPUT   (MEM_FIXED_DELAY_INPUT  ),
+        .FIXED_DELAY_OUTPUT  (MEM_FIXED_DELAY_OUTPUT )
+    ) i_delayer (
+        .clk_i    (clk_i               ),
+        .rst_ni   (rst_n_i             ),
+        .bypass_i (channel_compare_mode),
+        .slv      (tile_mst[t]         ),
+        .mst      (tile_mem[t]         )
+    );
 
         axi_sim_mem_intf #(
-            .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-            .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_USER_WIDTH(AWUSER_WIDTH),
-            .WARN_UNINITIALIZED(1'b0), .UNINITIALIZED_DATA("undefined"),
-            .APPL_DELAY(ApplTime), .ACQ_DELAY(TestTime)
+            .AXI_ADDR_WIDTH     (ADDR_WIDTH   ),
+            .AXI_DATA_WIDTH     (DATA_WIDTH   ),
+            .AXI_ID_WIDTH       (XBAR_MST_ID_W),
+            .AXI_USER_WIDTH     (AWUSER_WIDTH ),
+            .WARN_UNINITIALIZED (1'b0         ),
+            .UNINITIALIZED_DATA ("undefined"  ),
+            .APPL_DELAY         (ApplTime     ),
+            .ACQ_DELAY          (TestTime     )
         ) i_mem (
-            .clk_i(clk_i), .rst_ni(rst_ni),
-            .axi_slv(tile_mem[t]),
-            .mon_w_valid_o(), .mon_w_addr_o(), .mon_w_data_o(),
-            .mon_w_id_o(), .mon_w_user_o(), .mon_w_beat_count_o(), .mon_w_last_o(),
-            .mon_r_valid_o(), .mon_r_addr_o(), .mon_r_data_o(),
-            .mon_r_id_o(), .mon_r_user_o(), .mon_r_beat_count_o(), .mon_r_last_o()
+            .clk_i              (clk_i      ),
+            .rst_ni             (rst_n_i    ),
+            .axi_slv            (tile_mem[t]),
+            .mon_w_valid_o      (           ),
+            .mon_w_addr_o       (           ),
+            .mon_w_data_o       (           ),
+            .mon_w_id_o         (           ),
+            .mon_w_user_o       (           ),
+            .mon_w_beat_count_o (           ),
+            .mon_w_last_o       (           ),
+            .mon_r_valid_o      (           ),
+            .mon_r_addr_o       (           ),
+            .mon_r_data_o       (           ),
+            .mon_r_id_o         (           ),
+            .mon_r_user_o       (           ),
+            .mon_r_beat_count_o (           ),
+            .mon_r_last_o       (           )
         );
     end
 
     // m2 -> the NMU: this node's share of the traffic that goes on the NoC,
     // through the id remap that converts the tile's id space into the NI's.
     axi_id_remap_intf #(
-        .AXI_SLV_PORT_ID_WIDTH(XBAR_MST_ID_W),
-        .AXI_SLV_PORT_MAX_UNIQ_IDS(NOC_MAX_UNIQ_IDS),
-        .AXI_MAX_TXNS_PER_ID(ni_params_pkg::NMU_MAX_OUTSTANDING_PER_ID),
-        .AXI_MST_PORT_ID_WIDTH(NOC_ID_WIDTH),
-        .AXI_ADDR_WIDTH(ADDR_WIDTH),
-        .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_SLV_PORT_ID_WIDTH     (XBAR_MST_ID_W                            ),
+        .AXI_SLV_PORT_MAX_UNIQ_IDS (NOC_MAX_UNIQ_IDS                         ),
+        .AXI_MAX_TXNS_PER_ID       (ni_params_pkg::NMU_MAX_OUTSTANDING_PER_ID),
+        .AXI_MST_PORT_ID_WIDTH     (NOC_ID_WIDTH                             ),
+        .AXI_ADDR_WIDTH            (ADDR_WIDTH                               ),
+        .AXI_DATA_WIDTH            (DATA_WIDTH                               ),
+        .AXI_USER_WIDTH            (AWUSER_WIDTH                             )
     ) i_noc_id_remap (
-        .clk_i(clk_i),
-        .rst_ni(rst_ni),
-        .slv(tile_mst[NMU_TARGET]),
-        .mst(noc_mst)
+        .clk_i  (clk_i               ),
+        .rst_ni (rst_n_i             ),
+        .slv    (tile_mst[NMU_TARGET]),
+        .mst    (noc_mst             )
     );
 
-    assign master_axi_req_o.awid     = noc_mst.aw_id;
+    assign master_axi_req_o.awid = noc_mst.aw_id;
     // Stateless restore: no real region reaches NOC_EGRESS_BASE, so an address
     // at or above it can only be one this endpoint offset on the way in.
     assign master_axi_req_o.awaddr   =
@@ -644,29 +682,37 @@ module user_node_endpoint #(
     assign master_axi_req_o.arvalid  = noc_mst.ar_valid;
     assign master_axi_req_o.rready   = noc_mst.r_ready;
 
-    assign noc_mst.aw_ready  = master_axi_rsp_i.awready;
-    assign noc_mst.w_ready   = master_axi_rsp_i.wready;
-    assign noc_mst.b_id      = master_axi_rsp_i.bid;
-    assign noc_mst.b_resp    = master_axi_rsp_i.bresp;
-    assign noc_mst.b_valid   = master_axi_rsp_i.bvalid;
-    assign noc_mst.ar_ready  = master_axi_rsp_i.arready;
-    assign noc_mst.r_id      = master_axi_rsp_i.rid;
-    assign noc_mst.r_data    = master_axi_rsp_i.rdata;
-    assign noc_mst.r_resp    = master_axi_rsp_i.rresp;
-    assign noc_mst.r_last    = master_axi_rsp_i.rlast;
-    assign noc_mst.r_valid   = master_axi_rsp_i.rvalid;
-    assign noc_mst.b_user    = '0;
-    assign noc_mst.r_user    = '0;
+    assign noc_mst.aw_ready = master_axi_rsp_i.awready;
+    assign noc_mst.w_ready  = master_axi_rsp_i.wready;
+    assign noc_mst.b_id     = master_axi_rsp_i.bid;
+    assign noc_mst.b_resp   = master_axi_rsp_i.bresp;
+    assign noc_mst.b_valid  = master_axi_rsp_i.bvalid;
+    assign noc_mst.ar_ready = master_axi_rsp_i.arready;
+    assign noc_mst.r_id     = master_axi_rsp_i.rid;
+    assign noc_mst.r_data   = master_axi_rsp_i.rdata;
+    assign noc_mst.r_resp   = master_axi_rsp_i.rresp;
+    assign noc_mst.r_last   = master_axi_rsp_i.rlast;
+    assign noc_mst.r_valid  = master_axi_rsp_i.rvalid;
+    assign noc_mst.b_user   = '0;
+    assign noc_mst.r_user   = '0;
 
     // ------------------------------------------------------------------
     // VIP classes
     // ------------------------------------------------------------------
     typedef axi_test::axi_file_master #(
-        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(XBAR_SLV_ID_W), .UW(AWUSER_WIDTH),
-        .TA(ApplTime), .TT(TestTime)
+        .AW (ADDR_WIDTH   ),
+        .DW (DATA_WIDTH   ),
+        .IW (XBAR_SLV_ID_W),
+        .UW (AWUSER_WIDTH ),
+        .TA (ApplTime     ),
+        .TT (TestTime     )
     ) file_master_t;
     typedef axi_test::axi_scoreboard #(
-        .IW(XBAR_SLV_ID_W), .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .UW(AWUSER_WIDTH), .TT(TestTime)
+        .IW (XBAR_SLV_ID_W),
+        .AW (ADDR_WIDTH   ),
+        .DW (DATA_WIDTH   ),
+        .UW (AWUSER_WIDTH ),
+        .TT (TestTime     )
     ) scoreboard_t;
 
     // Preload-capable scoreboard: a multicast replica is written by a REMOTE
@@ -680,8 +726,10 @@ module user_node_endpoint #(
     class mcast_preload_scoreboard extends scoreboard_t;
         function new(
             virtual AXI_BUS_DV #(
-                .AXI_ADDR_WIDTH(ADDR_WIDTH),   .AXI_DATA_WIDTH(DATA_WIDTH),
-                .AXI_ID_WIDTH(XBAR_SLV_ID_W),  .AXI_USER_WIDTH(AWUSER_WIDTH)
+                .AXI_ADDR_WIDTH (ADDR_WIDTH   ),
+                .AXI_DATA_WIDTH (DATA_WIDTH   ),
+                .AXI_ID_WIDTH   (XBAR_SLV_ID_W),
+                .AXI_USER_WIDTH (AWUSER_WIDTH )
             ) axi
         );
             super.new(axi);
@@ -708,31 +756,34 @@ module user_node_endpoint #(
 
     initial void'($value$plusargs("channel_compare_fault=%d", channel_compare_fault));
 
-    always_ff @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) end_of_sim_o <= 1'b0;
-        else end_of_sim_o <= run_done;
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
+            end_of_sim_o <= 1'b0;
+        end else begin
+            end_of_sim_o <= run_done;
+        end
     end
 
     file_master_t file_master;
     typedef struct {
-        logic [ADDR_WIDTH-1:0] address;
-        logic [63:0] value;
-        int bit_index;
-        string stage;
-        int source;
+        logic  [ADDR_WIDTH-1:0] address;
+        logic            [63:0] value;
+        int                     bit_index;
+        string                  stage;
+        int                     source;
     } control_receive_t;
     control_receive_t control_expected[$];
     logic [63:0] control_received_reg = '0;
 
     typedef struct {
-        logic [ADDR_WIDTH-1:0] address, next_addr;
-        int unsigned length;
+        logic        [ADDR_WIDTH-1:0] address, next_addr;
+        int unsigned                  length;
     } kv_sink_range_t;
     kv_sink_range_t kv_sink_ranges[$];
     longint unsigned kv_sink_received_bytes = 0;
 
     task automatic load_kv_memory();
-        int fd, code;
+        int             fd, code;
         kv_sink_range_t entry;
         preload_read_memory();
         preload_read_scoreboard();
@@ -761,7 +812,7 @@ module user_node_endpoint #(
         $fclose(fd);
         if (!$value$plusargs("control_offset=%d", control_offset))
             $fatal(1, "missing control readiness offset");
-        epoch = cycle_cnt;
+        epoch       = cycle_cnt;
         bulk_writes = file_master.aw_queue.size() - control_count;
         foreach (kv_sink_ranges[i]) expected_sink_bytes += kv_sink_ranges[i].length;
         foreach (control_expected[i]) final_mask[control_expected[i].bit_index] = 1'b1;
@@ -787,8 +838,8 @@ module user_node_endpoint #(
                     @(posedge clk_i);
                     if (control_count != 0 && !control_ready && bulk_writes == 0) continue;
                     is_control = control_count != 0 && control_ready;
-                    index = is_control ? 0 : control_count;
-                    beats = int'(file_master.aw_queue[index].ax_len) + 1;
+                    index      = is_control ? 0 : control_count;
+                    beats      = int'(file_master.aw_queue[index].ax_len) + 1;
                     $display("[kv_issue] node=%0d flow=%s address=%h cycle=%0d",
                              NODE_ID, is_control ? "control" : "kv",
                              file_master.aw_queue[index].ax_addr, cycle_cnt);
@@ -864,7 +915,7 @@ module user_node_endpoint #(
     endtask
 
     task automatic load_control_receives();
-        int fd, code;
+        int               fd, code;
         control_receive_t entry;
         fd = $fopen($sformatf("%s/node%0d/control_receives.txt", stim_dir, NODE_ID), "r");
         if (!fd) $fatal(1, "missing control receive file");
@@ -882,7 +933,7 @@ module user_node_endpoint #(
     task automatic run_control_sequence();
         int fd, job = 0;
         logic [63:0] wait_mask, final_mask = '0;
-        string stage, extra;
+        string                  stage, extra;
         file_master_t::b_beat_t response;
         fd = $fopen($sformatf("%s/node%0d/control_waits.txt", stim_dir, NODE_ID), "r");
         if (!fd || file_master.num_reads != 0) $fatal(1, "invalid control stimulus");
@@ -935,16 +986,18 @@ module user_node_endpoint #(
 
     initial channel_compare_mode = get_injection_mode() == 3;
 
-    always_ff @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) begin
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
             compare_data_beats <= 0;
-        end else if (compare_started) begin
-            if (compare_is_background && !compare_is_read &&
-                mst_flat_req.wvalid && mst_flat_rsp.wready)
-                compare_data_beats <= compare_data_beats + 1;
-            if (compare_is_background && compare_is_read &&
-                mst_flat_rsp.rvalid && mst_flat_req.rready)
-                compare_data_beats <= compare_data_beats + 1;
+        end else begin
+            if (compare_started) begin
+                if (compare_is_background && !compare_is_read &&
+                    mst_flat_req.wvalid && mst_flat_rsp.wready)
+                    compare_data_beats <= compare_data_beats + 1;
+                if (compare_is_background && compare_is_read &&
+                    mst_flat_rsp.rvalid && mst_flat_req.rready)
+                    compare_data_beats <= compare_data_beats + 1;
+            end
         end
     end
 
@@ -961,7 +1014,7 @@ module user_node_endpoint #(
         scoreboard = new(master_dv);
         scoreboard.reset();
         scoreboard_ready = 1'b1;
-        @(posedge rst_ni);
+        @(posedge rst_n_i);
         // Mode 1 interleaves reads and writes with no pairing, so a read may
         // precede the write to its address and the scoreboard's
         // write-before-read precondition fails. Modes 0 and 2 order every read
@@ -998,31 +1051,34 @@ module user_node_endpoint #(
     // silently doubled it: int'(0.005 * 100.0) is 1, one percent. The floor is
     // where percent breaks outright, int'(0.001 * 100.0) being 0. Basis points
     // carry both cases.
-    real injection_rate;
+    real          injection_rate;
     int  unsigned injection_rate_bp;
 
     // Free-running cycle counter. Read in the Active region (before the
     // nonblocking update lands) both by the slot producer and by the send
     // tasks resuming from @(posedge clk_i), so the two share one numbering.
     longint unsigned cycle_cnt;
-    always_ff @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) cycle_cnt <= '0;
-        else         cycle_cnt <= cycle_cnt + 1;
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
+            cycle_cnt <= '0;
+        end else begin
+            cycle_cnt <= cycle_cnt + 1;
+        end
     end
 
     // Set by the paced task that owns each channel, so a mode that does not
     // pace a channel (mode 2 gates AR on the paired B, not on a rate) produces
     // no slots for it and reports N: 0.
-    bit pacing_aw, pacing_ar;
-    longint unsigned aw_slots[$], ar_slots[$];
-    longint unsigned srcq_w_sum, srcq_r_sum;
+    bit               pacing_aw, pacing_ar;
+    longint unsigned  aw_slots[$], ar_slots[$];
+    longint unsigned  srcq_w_sum, srcq_r_sum;
     int      unsigned srcq_w_n,  srcq_r_n;
 
     // Windowed sources have no open-loop slots. Count address-channel wait
     // cycles at the driver's interface, avoiding Active/NBA timestamp races
     // when the common start is asserted by a nonblocking assignment.
     always @(posedge clk_i) begin
-        if (rst_ni && (get_injection_mode() == 3 || get_injection_mode() == 4)) begin
+        if (rst_n_i && (get_injection_mode() == 3 || get_injection_mode() == 4)) begin
             if (master_dv.aw_valid) begin
                 if (master_dv.aw_ready) srcq_w_n++;
                 else srcq_w_sum++;
@@ -1034,8 +1090,8 @@ module user_node_endpoint #(
         end
     end
 
-    always_ff @(posedge clk_i) begin
-        if (rst_ni) begin
+    always @(posedge clk_i) begin
+        if (rst_n_i) begin
             // cycle_cnt + 1 names the cycle beginning at this edge, the first
             // one in which the slot can be issued: a send that starts right
             // away drives AxVALID after this edge and is sampled at the next,
@@ -1132,14 +1188,14 @@ module user_node_endpoint #(
                  source_b_returned + 1 >= expected_txn_cnt_o);
     end
 
-    always_ff @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) begin
-            b_returned <= '{default: '0};
-            source_aw_accepted <= 0;
-            source_b_returned <= 0;
-            source_ar_accepted <= 0;
-            source_r_completed <= 0;
-            source_outstanding_hwm <= 0;
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
+            b_returned                  <= '{default: '0};
+            source_aw_accepted          <= 0;
+            source_b_returned           <= 0;
+            source_ar_accepted          <= 0;
+            source_r_completed          <= 0;
+            source_outstanding_hwm      <= 0;
             source_read_outstanding_hwm <= 0;
         end else begin
             if (mst_flat_req.awvalid && mst_flat_rsp.awready) begin
@@ -1149,7 +1205,7 @@ module user_node_endpoint #(
                     source_outstanding_hwm <= source_aw_accepted + 1 - source_b_returned;
             end
             if (mst_flat_rsp.bvalid && mst_flat_req.bready) begin
-                source_b_returned <= source_b_returned + 1;
+                source_b_returned   <= source_b_returned + 1;
                 b_returned[mst_bid] <= b_returned[mst_bid] + 1;
                 // axi_sim_mem answers every mapped access OKAY, so any error
                 // response here is a fabric bug (e.g. a corrupted merged B), or a
@@ -1256,14 +1312,14 @@ module user_node_endpoint #(
     endfunction
 
     task automatic preload_read_memory();
-        string path;
-        int fd;
-        int parsed;
-        logic [ADDR_WIDTH-1:0] addr;
-        int unsigned n_bytes;
+        string                        path;
+        int                           fd;
+        int                           parsed;
+        logic        [ADDR_WIDTH-1:0] addr;
+        int unsigned                  n_bytes;
         bit fault_applied = 1'b0;
         path = $sformatf("%s/node%0d/memory_init.txt", stim_dir, NODE_ID);
-        fd = $fopen(path, "r");
+        fd   = $fopen(path, "r");
         if (!fd)
             $fatal(1, "Mode 4 Read memory prefill file %s not found", path);
         while (!$feof(fd)) begin
@@ -1292,11 +1348,11 @@ module user_node_endpoint #(
     endtask
 
     task automatic preload_read_scoreboard();
-        logic [ADDR_WIDTH-1:0] addr;
-        int unsigned n_bytes;
+        logic        [ADDR_WIDTH-1:0] addr;
+        int unsigned                  n_bytes;
         wait (scoreboard_ready);
         foreach (file_master.ar_queue[i]) begin
-            addr = file_master.ar_queue[i].ax_addr;
+            addr    = file_master.ar_queue[i].ax_addr;
             n_bytes = (int'(file_master.ar_queue[i].ax_len) + 1)
                       << file_master.ar_queue[i].ax_size;
             for (int unsigned k = 0; k < n_bytes; k++)
@@ -1323,8 +1379,8 @@ module user_node_endpoint #(
     // entry falls into the NEXT entry, routes to a different node's config RAM,
     // rebases to a legal offset there, and also agrees; that one is held off
     // upstream by gen_test_patterns' probe-window guard.
-    always_ff @(posedge clk_i) begin
-        if (rst_ni && mst_flat_rsp.rvalid && mst_flat_req.rready &&
+    always @(posedge clk_i) begin
+        if (rst_n_i && mst_flat_rsp.rvalid && mst_flat_req.rready &&
                 !resp_ok(mst_flat_rsp.rresp))
             $fatal(1, "[tile_decode] node%0d: RRESP=%0h on id=%0h, expected OKAY (address outside every tile window?)",
                    NODE_ID, mst_flat_rsp.rresp, mst_rid);
@@ -1340,9 +1396,9 @@ module user_node_endpoint #(
         if ($value$plusargs("hs_trace_node=%d", hs_trace_node) && hs_trace_node == NODE_ID)
             hs_fd = $fopen($sformatf("hs_trace_node%0d.log", NODE_ID), "w");
     end
-    always_ff @(posedge clk_i) begin
+    always @(posedge clk_i) begin
         hs_cyc <= hs_cyc + 1;
-        if (hs_fd != 0 && rst_ni)
+        if (hs_fd != 0 && rst_n_i)
             $fdisplay(hs_fd, "%0d %b%b %b%b %b%b", hs_cyc,
                       mst_flat_req.awvalid, mst_flat_rsp.awready,
                       mst_flat_req.wvalid,  mst_flat_rsp.wready,
@@ -1366,8 +1422,8 @@ module user_node_endpoint #(
 
     typedef struct {
         logic [ADDR_WIDTH-1:0] addr;
-        logic [7:0]            len;
-        logic [2:0]            size;
+        logic            [7:0] len;
+        logic            [2:0] size;
         longint unsigned       mask;  // AWUSER address mask; 0 = unicast
     } mcast_txn_t;
 
@@ -1389,7 +1445,7 @@ module user_node_endpoint #(
     // Plain always + blocking assignments: this is testbench bookkeeping
     // (queues + associative array), not registered hardware state.
     always @(posedge clk_i) begin
-        if (rst_ni) begin
+        if (rst_n_i) begin
             // AW: descriptor capture (unicast too -- the W association below
             // must walk every burst in AW order).
             if (mst_flat_req.awvalid && mst_flat_rsp.awready) begin
@@ -1522,28 +1578,28 @@ module user_node_endpoint #(
     // consumed and the pass terminates cleanly.
     initial begin
         string channel_case;
-        expected_txn_cnt_o = 0;
-        expected_write_cnt_o = 0;
+        expected_txn_cnt_o     = 0;
+        expected_write_cnt_o   = 0;
         stimulus_start_cycle_o = 0;
-        stimulus_done_cycle_o = 0;
-        source_aw_admitted = 0;
-        source_w_started = 0;
-        source_ar_admitted = 0;
+        stimulus_done_cycle_o  = 0;
+        source_aw_admitted     = 0;
+        source_w_started       = 0;
+        source_ar_admitted     = 0;
         void'($value$plusargs("stim_dir=%s", stim_dir));
-        write_path = $sformatf("%s/node%0d/write.txt", stim_dir, NODE_ID);
-        read_path  = $sformatf("%s/node%0d/read.txt",  stim_dir, NODE_ID);
+        write_path  = $sformatf("%s/node%0d/write.txt", stim_dir, NODE_ID);
+        read_path   = $sformatf("%s/node%0d/read.txt",  stim_dir, NODE_ID);
         file_master = new(master_dv);
         file_master.load_files(read_path, write_path);
         if ($test$plusargs("control_sequence") || $test$plusargs("kv_overlap")) load_control_receives();
         if ($test$plusargs("kv_overlap")) load_kv_memory();
-        expected_txn_cnt_o = int'(file_master.num_writes + file_master.num_reads);
+        expected_txn_cnt_o   = int'(file_master.num_writes + file_master.num_reads);
         expected_write_cnt_o = int'(file_master.num_writes);
-        injection_rate = 1.0;
+        injection_rate       = 1.0;
         void'($value$plusargs("injection_rate=%f", injection_rate));
-        injection_rate_bp = int'(injection_rate * 10000.0);
-        compare_ready_o = 1'b0;
-        compare_work_done_o = 1'b0;
-        compare_done_o = 1'b0;
+        injection_rate_bp    = int'(injection_rate * 10000.0);
+        compare_ready_o      = 1'b0;
+        compare_work_done_o  = 1'b0;
+        compare_done_o       = 1'b0;
         compare_background_o = 1'b0;
         if (get_injection_mode() == 3) begin
             if (!$value$plusargs("source_outstanding_depth=%d", source_outstanding_depth) ||
@@ -1555,12 +1611,12 @@ module user_node_endpoint #(
             if (!$value$plusargs("channel_rounds=%d", channel_rounds) ||
                 channel_rounds == 0)
                 $fatal(1, "injection_mode=3 requires +channel_rounds=<positive integer>");
-            compare_is_read = channel_case == "read";
+            compare_is_read         = channel_case == "read";
             compare_expected_bursts = (compare_is_read ?
                                        file_master.ar_queue.size() :
                                        file_master.aw_queue.size());
             compare_is_background = NODE_ID != 0 && compare_expected_bursts > 0;
-            compare_background_o = compare_is_background;
+            compare_background_o  = compare_is_background;
             if (compare_expected_bursts > 0 &&
                 compare_expected_bursts % channel_rounds != 0)
                 $fatal(1, "injection_mode=3 loaded transaction count is not divisible by channel_rounds");
@@ -1583,7 +1639,7 @@ module user_node_endpoint #(
                         file_master.aw_queue[$].ax_len != 8'd255 ||
                         file_master.w_queue.size() != compare_expected_beats)
                         $fatal(1, "[ChannelCompare] write fault requires loaded 256-beat AW/W bursts");
-                    file_master.aw_queue[$].ax_len = 8'd254;
+                    file_master.aw_queue[$].ax_len  = 8'd254;
                     file_master.w_queue[$-1].w_last = 1'b1;
                     void'(file_master.w_queue.pop_back());
                 end
@@ -1612,7 +1668,7 @@ module user_node_endpoint #(
             end
             compare_ready_o = 1'b1;
         end
-        @(posedge rst_ni);
+        @(posedge rst_n_i);
         if (get_injection_mode() != 3 && get_injection_mode() != 4)
             stimulus_start_cycle_o = cycle_cnt;
         case (get_injection_mode())
@@ -1657,7 +1713,7 @@ module user_node_endpoint #(
             end
             3: begin
                 if (compare_expected_bursts == 0) begin
-                    compare_ready_o = 1'b1;
+                    compare_ready_o     = 1'b1;
                     compare_work_done_o = 1'b1;
                     wait (compare_finish_i === 1'b1);
                     compare_done_o = 1'b1;
@@ -1798,19 +1854,24 @@ module user_node_endpoint #(
     assign mon_mst_rsp = axi_vip_types_pkg::vip_rsp_from_flat(master_axi_rsp_i);
 
     axi_bw_monitor #(
-        .req_t(axi_vip_types_pkg::vip_req_t),
-        .rsp_t(axi_vip_types_pkg::vip_resp_t),
-        .AxiIdWidth(NOC_ID_WIDTH),
-        .Name($sformatf("node%0d.master", NODE_ID))
+        .req_t      (axi_vip_types_pkg::vip_req_t        ),
+        .rsp_t      (axi_vip_types_pkg::vip_resp_t       ),
+        .AxiIdWidth (NOC_ID_WIDTH                        ),
+        .Name       ($sformatf("node%0d.master", NODE_ID))
     ) u_bw_mst (
-        .clk_i(clk_i), .en_i(rst_ni), .end_of_sim_i(end_of_sim_o),
-        .req_i(mon_mst_req), .rsp_i(mon_mst_rsp),
-        .ar_in_flight_o(), .aw_in_flight_o()
+        .clk_i          (clk_i       ),
+        .en_i           (rst_n_i     ),
+        .end_of_sim_i   (end_of_sim_o),
+        .req_i          (mon_mst_req ),
+        .rsp_i          (mon_mst_rsp ),
+        .ar_in_flight_o (            ),
+        .aw_in_flight_o (            )
     );
 
-    always_ff @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) txn_cnt_o <= 0;
-        else begin
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
+            txn_cnt_o <= 0;
+        end else begin
             txn_cnt_o <= txn_cnt_o
                 + 32'(mst_flat_req.awvalid && mst_flat_rsp.awready)
                 + 32'(mst_flat_req.arvalid && mst_flat_rsp.arready);

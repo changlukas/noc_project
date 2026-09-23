@@ -55,7 +55,7 @@ module noc_fabric #(
     parameter logic [N_PERIPH_MAX-1:0][7:0] PERIPH_PORT = '0
 ) (
     input  logic clk_i,
-    input  logic rst_ni,
+    input  logic rst_n_i,
     input  logic measure_en,
     // Per-node DPI ctx handle arrays (chandle-substitute longint unsigned).
     // router_ctx is per NODE; the rest are per ENDPOINT.
@@ -108,23 +108,23 @@ module noc_fabric #(
     endfunction
 
     // Per-network per-node per-port arrays (LOCAL + N/E/S/W uniformly).
-    logic [LINK_PORTS-1:0]        tx_req_valid [NUM_NODES];
+    logic [LINK_PORTS-1:0] tx_req_valid [NUM_NODES];
     logic [REQ_FLIT_WIDTH-1:0]    tx_req_flit  [NUM_NODES][LINK_PORTS];
-    logic [LINK_PORTS-1:0]        rx_req_valid [NUM_NODES];
+    logic [LINK_PORTS-1:0] rx_req_valid [NUM_NODES];
     logic [REQ_FLIT_WIDTH-1:0]    rx_req_flit  [NUM_NODES][LINK_PORTS];
     logic [LINK_PORTS-1:0]        tx_req_ready [NUM_NODES];  // input to router_wrap
     logic [LINK_PORTS-1:0]        rx_req_ready [NUM_NODES];  // output of router_wrap
 
-    logic [LINK_PORTS-1:0]        tx_rsp_valid [NUM_NODES];
+    logic [LINK_PORTS-1:0] tx_rsp_valid [NUM_NODES];
     logic [RSP_FLIT_WIDTH-1:0]    tx_rsp_flit  [NUM_NODES][LINK_PORTS];
-    logic [LINK_PORTS-1:0]        rx_rsp_valid [NUM_NODES];
+    logic [LINK_PORTS-1:0] rx_rsp_valid [NUM_NODES];
     logic [RSP_FLIT_WIDTH-1:0]    rx_rsp_flit  [NUM_NODES][LINK_PORTS];
     logic [LINK_PORTS-1:0]        tx_rsp_ready [NUM_NODES];  // input to router_wrap
     logic [LINK_PORTS-1:0]        rx_rsp_ready [NUM_NODES];  // output of router_wrap
 
-    logic [LINK_PORTS-1:0]        tx_dat_valid [NUM_NODES];
+    logic [LINK_PORTS-1:0] tx_dat_valid [NUM_NODES];
     logic [DAT_FLIT_WIDTH-1:0]    tx_dat_flit  [NUM_NODES][LINK_PORTS];
-    logic [LINK_PORTS-1:0]        rx_dat_valid [NUM_NODES];
+    logic [LINK_PORTS-1:0] rx_dat_valid [NUM_NODES];
     logic [DAT_FLIT_WIDTH-1:0]    rx_dat_flit  [NUM_NODES][LINK_PORTS];
     logic [NUM_DAT_VC-1:0]        tx_dat_crdvalid [NUM_NODES][LINK_PORTS];  // input
     logic [NUM_DAT_VC-1:0]        rx_dat_crdvalid [NUM_NODES][LINK_PORTS];  // output
@@ -139,15 +139,15 @@ module noc_fabric #(
     // always_comb reads them at a runtime p, and a hierarchical name through a
     // generate block cannot take a non-constant index. The link INPUTS read the
     // host router's own outputs, which needs no intermediary.
-    logic                        periph_tx_req_valid    [N_PERIPH_MAX];
-    logic [REQ_FLIT_WIDTH-1:0]   periph_tx_req_flit     [N_PERIPH_MAX];
-    logic                        periph_rx_req_ready    [N_PERIPH_MAX];
-    logic                        periph_tx_rsp_valid    [N_PERIPH_MAX];
-    logic [RSP_FLIT_WIDTH-1:0]   periph_tx_rsp_flit     [N_PERIPH_MAX];
-    logic                        periph_rx_rsp_ready    [N_PERIPH_MAX];
-    logic                        periph_tx_dat_valid    [N_PERIPH_MAX];
-    logic [DAT_FLIT_WIDTH-1:0]   periph_tx_dat_flit     [N_PERIPH_MAX];
-    logic [NUM_DAT_VC-1:0]       periph_rx_dat_crdvalid [N_PERIPH_MAX];
+    logic                      periph_tx_req_valid    [N_PERIPH_MAX];
+    logic [REQ_FLIT_WIDTH-1:0] periph_tx_req_flit     [N_PERIPH_MAX];
+    logic                      periph_rx_req_ready    [N_PERIPH_MAX];
+    logic                      periph_tx_rsp_valid    [N_PERIPH_MAX];
+    logic [RSP_FLIT_WIDTH-1:0] periph_tx_rsp_flit     [N_PERIPH_MAX];
+    logic                      periph_rx_rsp_ready    [N_PERIPH_MAX];
+    logic                      periph_tx_dat_valid    [N_PERIPH_MAX];
+    logic [DAT_FLIT_WIDTH-1:0] periph_tx_dat_flit     [N_PERIPH_MAX];
+    logic     [NUM_DAT_VC-1:0] periph_rx_dat_crdvalid [N_PERIPH_MAX];
 
     for (genvar p = 0; p < N_PERIPH; p++) begin : g_periph
         localparam int unsigned EP   = NUM_NODES + p;      // endpoint index
@@ -155,36 +155,42 @@ module noc_fabric #(
         localparam int unsigned DIR  = periph_rp(p);       // its boundary port
 
         ni_wrap #(
-            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
-            .NUM_DAT_VC(NUM_DAT_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),
-            .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH)
+            .ID_WIDTH       (ID_WIDTH      ),
+            .ADDR_WIDTH     (ADDR_WIDTH    ),
+            .DATA_WIDTH     (DATA_WIDTH    ),
+            .NUM_DAT_VC     (NUM_DAT_VC    ),
+            .REQ_FLIT_WIDTH (REQ_FLIT_WIDTH),
+            .RSP_FLIT_WIDTH (RSP_FLIT_WIDTH),
+            .DAT_FLIT_WIDTH (DAT_FLIT_WIDTH)
         ) u_ni (
-            .clk_i(clk_i), .rst_ni(rst_ni),
-            .nmu_ctx_i(nmu_ctx[EP]), .nsu_ctx_i(nsu_ctx[EP]),
-            .dat_merge_ctx_i(dat_merge_ctx[EP]),
-            .master_axi_req_i(master_axi_req[EP]),
-            .master_awuser_i(master_awuser[EP]),
-            .master_axi_rsp_o(master_axi_rsp[EP]),
-            .slave_axi_req_o(slave_axi_req[EP]),
-            .slave_axi_rsp_i(slave_axi_rsp[EP]),
-            .tx_req_valid_o(periph_tx_req_valid[p]),
-            .tx_req_flit_o(periph_tx_req_flit[p]),
-            .tx_req_ready_i(rx_req_ready[HOST][DIR]),
-            .rx_req_valid_i(tx_req_valid[HOST][DIR]),
-            .rx_req_flit_i(tx_req_flit[HOST][DIR]),
-            .rx_req_ready_o(periph_rx_req_ready[p]),
-            .tx_rsp_valid_o(periph_tx_rsp_valid[p]),
-            .tx_rsp_flit_o(periph_tx_rsp_flit[p]),
-            .tx_rsp_ready_i(rx_rsp_ready[HOST][DIR]),
-            .rx_rsp_valid_i(tx_rsp_valid[HOST][DIR]),
-            .rx_rsp_flit_i(tx_rsp_flit[HOST][DIR]),
-            .rx_rsp_ready_o(periph_rx_rsp_ready[p]),
-            .tx_dat_valid_o(periph_tx_dat_valid[p]),
-            .tx_dat_flit_o(periph_tx_dat_flit[p]),
-            .tx_dat_crdvalid_i(rx_dat_crdvalid[HOST][DIR]),
-            .rx_dat_valid_i(tx_dat_valid[HOST][DIR]),
-            .rx_dat_flit_i(tx_dat_flit[HOST][DIR]),
-            .rx_dat_crdvalid_o(periph_rx_dat_crdvalid[p])
+            .clk_i             (clk_i                     ),
+            .rst_n_i           (rst_n_i                   ),
+            .nmu_ctx_i         (nmu_ctx[EP]               ),
+            .nsu_ctx_i         (nsu_ctx[EP]               ),
+            .dat_merge_ctx_i   (dat_merge_ctx[EP]         ),
+            .master_axi_req_i  (master_axi_req[EP]        ),
+            .master_awuser_i   (master_awuser[EP]         ),
+            .master_axi_rsp_o  (master_axi_rsp[EP]        ),
+            .slave_axi_req_o   (slave_axi_req[EP]         ),
+            .slave_axi_rsp_i   (slave_axi_rsp[EP]         ),
+            .tx_req_valid_o    (periph_tx_req_valid[p]    ),
+            .tx_req_flit_o     (periph_tx_req_flit[p]     ),
+            .tx_req_ready_i    (rx_req_ready[HOST][DIR]   ),
+            .rx_req_valid_i    (tx_req_valid[HOST][DIR]   ),
+            .rx_req_flit_i     (tx_req_flit[HOST][DIR]    ),
+            .rx_req_ready_o    (periph_rx_req_ready[p]    ),
+            .tx_rsp_valid_o    (periph_tx_rsp_valid[p]    ),
+            .tx_rsp_flit_o     (periph_tx_rsp_flit[p]     ),
+            .tx_rsp_ready_i    (rx_rsp_ready[HOST][DIR]   ),
+            .rx_rsp_valid_i    (tx_rsp_valid[HOST][DIR]   ),
+            .rx_rsp_flit_i     (tx_rsp_flit[HOST][DIR]    ),
+            .rx_rsp_ready_o    (periph_rx_rsp_ready[p]    ),
+            .tx_dat_valid_o    (periph_tx_dat_valid[p]    ),
+            .tx_dat_flit_o     (periph_tx_dat_flit[p]     ),
+            .tx_dat_crdvalid_i (rx_dat_crdvalid[HOST][DIR]),
+            .rx_dat_valid_i    (tx_dat_valid[HOST][DIR]   ),
+            .rx_dat_flit_i     (tx_dat_flit[HOST][DIR]    ),
+            .rx_dat_crdvalid_o (periph_rx_dat_crdvalid[p] )
         );
 
         // Link perf monitors on the host router's boundary port, one per
@@ -205,76 +211,94 @@ module noc_fabric #(
         localparam string FACE = (PERIPH_PORT[p] == 8'd1) ? "x" : "y";
 
         link_perf_monitor #(
-            .LINK_NAME($sformatf("req_node%0d.router_to_node%0d.%s", HOST, HOST, FACE)),
-            .FLOW("ready_valid"),
-            .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .LINK_NAME    ($sformatf("req_node%0d.router_to_node%0d.%s", HOST, HOST, FACE)),
+            .FLOW         ("ready_valid"                                                  ),
+            .BUFFER_DEPTH (ROUTER_VC_DEPTH                                                ),
+            .NUM_VC       (NUM_DAT_VC                                                     ),
+            .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH                                       )
         ) u_perf_req (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-            .valid(tx_req_valid[HOST][DIR]),
-            .ready(tx_req_ready[HOST][DIR]),
-            .vc_id('0),
-            .credit_pulse('0)
+            .clk_i        (clk_i                  ),
+            .rst_n_i      (rst_n_i                ),
+            .measure_en   (measure_en             ),
+            .valid        (tx_req_valid[HOST][DIR]),
+            .ready        (tx_req_ready[HOST][DIR]),
+            .vc_id        ('0                     ),
+            .credit_pulse ('0                     )
         );
         link_perf_monitor #(
-            .LINK_NAME($sformatf("req_node%0d.%s_to_node%0d.router", HOST, FACE, HOST)),
-            .FLOW("ready_valid"),
-            .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .LINK_NAME    ($sformatf("req_node%0d.%s_to_node%0d.router", HOST, FACE, HOST)),
+            .FLOW         ("ready_valid"                                                  ),
+            .BUFFER_DEPTH (ROUTER_VC_DEPTH                                                ),
+            .NUM_VC       (NUM_DAT_VC                                                     ),
+            .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH                                       )
         ) u_perf_req_out (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-            .valid(periph_tx_req_valid[p]),
-            .ready(rx_req_ready[HOST][DIR]),
-            .vc_id('0),
-            .credit_pulse('0)
+            .clk_i        (clk_i                  ),
+            .rst_n_i      (rst_n_i                ),
+            .measure_en   (measure_en             ),
+            .valid        (periph_tx_req_valid[p] ),
+            .ready        (rx_req_ready[HOST][DIR]),
+            .vc_id        ('0                     ),
+            .credit_pulse ('0                     )
         );
         link_perf_monitor #(
-            .LINK_NAME($sformatf("rsp_node%0d.router_to_node%0d.%s", HOST, HOST, FACE)),
-            .FLOW("ready_valid"),
-            .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .LINK_NAME    ($sformatf("rsp_node%0d.router_to_node%0d.%s", HOST, HOST, FACE)),
+            .FLOW         ("ready_valid"                                                  ),
+            .BUFFER_DEPTH (ROUTER_VC_DEPTH                                                ),
+            .NUM_VC       (NUM_DAT_VC                                                     ),
+            .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH                                       )
         ) u_perf_rsp (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-            .valid(tx_rsp_valid[HOST][DIR]),
-            .ready(tx_rsp_ready[HOST][DIR]),
-            .vc_id('0),
-            .credit_pulse('0)
+            .clk_i        (clk_i                  ),
+            .rst_n_i      (rst_n_i                ),
+            .measure_en   (measure_en             ),
+            .valid        (tx_rsp_valid[HOST][DIR]),
+            .ready        (tx_rsp_ready[HOST][DIR]),
+            .vc_id        ('0                     ),
+            .credit_pulse ('0                     )
         );
         link_perf_monitor #(
-            .LINK_NAME($sformatf("rsp_node%0d.%s_to_node%0d.router", HOST, FACE, HOST)),
-            .FLOW("ready_valid"),
-            .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .LINK_NAME    ($sformatf("rsp_node%0d.%s_to_node%0d.router", HOST, FACE, HOST)),
+            .FLOW         ("ready_valid"                                                  ),
+            .BUFFER_DEPTH (ROUTER_VC_DEPTH                                                ),
+            .NUM_VC       (NUM_DAT_VC                                                     ),
+            .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH                                       )
         ) u_perf_rsp_out (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-            .valid(periph_tx_rsp_valid[p]),
-            .ready(rx_rsp_ready[HOST][DIR]),
-            .vc_id('0),
-            .credit_pulse('0)
+            .clk_i        (clk_i                  ),
+            .rst_n_i      (rst_n_i                ),
+            .measure_en   (measure_en             ),
+            .valid        (periph_tx_rsp_valid[p] ),
+            .ready        (rx_rsp_ready[HOST][DIR]),
+            .vc_id        ('0                     ),
+            .credit_pulse ('0                     )
         );
         link_perf_monitor #(
-            .LINK_NAME($sformatf("dat_node%0d.router_to_node%0d.%s", HOST, HOST, FACE)),
-            .FLOW("credit"),
-            .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .LINK_NAME    ($sformatf("dat_node%0d.router_to_node%0d.%s", HOST, HOST, FACE)),
+            .FLOW         ("credit"                                                       ),
+            .BUFFER_DEPTH (ROUTER_VC_DEPTH                                                ),
+            .NUM_VC       (NUM_DAT_VC                                                     ),
+            .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH                                       )
         ) u_perf_dat (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-            .valid(tx_dat_valid[HOST][DIR]),
-            .ready(1'b0),
-            .vc_id(tx_dat_flit[HOST][DIR][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
-            .credit_pulse(tx_dat_crdvalid[HOST][DIR])
+            .clk_i        (clk_i                                                                ),
+            .rst_n_i      (rst_n_i                                                              ),
+            .measure_en   (measure_en                                                           ),
+            .valid        (tx_dat_valid[HOST][DIR]                                              ),
+            .ready        (1'b0                                                                 ),
+            .vc_id        (tx_dat_flit[HOST][DIR][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
+            .credit_pulse (tx_dat_crdvalid[HOST][DIR]                                           )
         );
         link_perf_monitor #(
-            .LINK_NAME($sformatf("dat_node%0d.%s_to_node%0d.router", HOST, FACE, HOST)),
-            .FLOW("credit"),
-            .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .LINK_NAME    ($sformatf("dat_node%0d.%s_to_node%0d.router", HOST, FACE, HOST)),
+            .FLOW         ("credit"                                                       ),
+            .BUFFER_DEPTH (ROUTER_VC_DEPTH                                                ),
+            .NUM_VC       (NUM_DAT_VC                                                     ),
+            .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH                                       )
         ) u_perf_dat_out (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-            .valid(periph_tx_dat_valid[p]),
-            .ready(1'b0),
-            .vc_id(periph_tx_dat_flit[p][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
-            .credit_pulse(rx_dat_crdvalid[HOST][DIR])
+            .clk_i        (clk_i                                                               ),
+            .rst_n_i      (rst_n_i                                                             ),
+            .measure_en   (measure_en                                                          ),
+            .valid        (periph_tx_dat_valid[p]                                              ),
+            .ready        (1'b0                                                                ),
+            .vc_id        (periph_tx_dat_flit[p][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
+            .credit_pulse (rx_dat_crdvalid[HOST][DIR]                                          )
         );
     end : g_periph
 
@@ -295,120 +319,172 @@ module noc_fabric #(
         localparam int unsigned PEER_W = i - 1;
 
         ni_wrap #(
-            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
-            .NUM_DAT_VC(NUM_DAT_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),
-            .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH)
+            .ID_WIDTH       (ID_WIDTH      ),
+            .ADDR_WIDTH     (ADDR_WIDTH    ),
+            .DATA_WIDTH     (DATA_WIDTH    ),
+            .NUM_DAT_VC     (NUM_DAT_VC    ),
+            .REQ_FLIT_WIDTH (REQ_FLIT_WIDTH),
+            .RSP_FLIT_WIDTH (RSP_FLIT_WIDTH),
+            .DAT_FLIT_WIDTH (DAT_FLIT_WIDTH)
         ) u_ni (
-            .clk_i(clk_i), .rst_ni(rst_ni),
-            .nmu_ctx_i(nmu_ctx[i]), .nsu_ctx_i(nsu_ctx[i]),
-            .dat_merge_ctx_i(dat_merge_ctx[i]),
-            .master_axi_req_i(master_axi_req[i]), .master_awuser_i(master_awuser[i]),
-            .master_axi_rsp_o(master_axi_rsp[i]),
-            .slave_axi_req_o(slave_axi_req[i]),   .slave_axi_rsp_i(slave_axi_rsp[i]),
-            .tx_req_valid_o(rx_req_valid[i][RP_LOCAL]),
-            .tx_req_flit_o(rx_req_flit[i][RP_LOCAL]),
-            .tx_req_ready_i(rx_req_ready[i][RP_LOCAL]),
-            .rx_req_valid_i(tx_req_valid[i][RP_LOCAL]),
-            .rx_req_flit_i(tx_req_flit[i][RP_LOCAL]),
-            .rx_req_ready_o(tx_req_ready[i][RP_LOCAL]),
-            .tx_rsp_valid_o(rx_rsp_valid[i][RP_LOCAL]),
-            .tx_rsp_flit_o(rx_rsp_flit[i][RP_LOCAL]),
-            .tx_rsp_ready_i(rx_rsp_ready[i][RP_LOCAL]),
-            .rx_rsp_valid_i(tx_rsp_valid[i][RP_LOCAL]),
-            .rx_rsp_flit_i(tx_rsp_flit[i][RP_LOCAL]),
-            .rx_rsp_ready_o(tx_rsp_ready[i][RP_LOCAL]),
-            .tx_dat_valid_o(rx_dat_valid[i][RP_LOCAL]),
-            .tx_dat_flit_o(rx_dat_flit[i][RP_LOCAL]),
-            .tx_dat_crdvalid_i(rx_dat_crdvalid[i][RP_LOCAL]),
-            .rx_dat_valid_i(tx_dat_valid[i][RP_LOCAL]),
-            .rx_dat_flit_i(tx_dat_flit[i][RP_LOCAL]),
-            .rx_dat_crdvalid_o(tx_dat_crdvalid[i][RP_LOCAL])
+            .clk_i             (clk_i                       ),
+            .rst_n_i           (rst_n_i                     ),
+            .nmu_ctx_i         (nmu_ctx[i]                  ),
+            .nsu_ctx_i         (nsu_ctx[i]                  ),
+            .dat_merge_ctx_i   (dat_merge_ctx[i]            ),
+            .master_axi_req_i  (master_axi_req[i]           ),
+            .master_awuser_i   (master_awuser[i]            ),
+            .master_axi_rsp_o  (master_axi_rsp[i]           ),
+            .slave_axi_req_o   (slave_axi_req[i]            ),
+            .slave_axi_rsp_i   (slave_axi_rsp[i]            ),
+            .tx_req_valid_o    (rx_req_valid[i][RP_LOCAL]   ),
+            .tx_req_flit_o     (rx_req_flit[i][RP_LOCAL]    ),
+            .tx_req_ready_i    (rx_req_ready[i][RP_LOCAL]   ),
+            .rx_req_valid_i    (tx_req_valid[i][RP_LOCAL]   ),
+            .rx_req_flit_i     (tx_req_flit[i][RP_LOCAL]    ),
+            .rx_req_ready_o    (tx_req_ready[i][RP_LOCAL]   ),
+            .tx_rsp_valid_o    (rx_rsp_valid[i][RP_LOCAL]   ),
+            .tx_rsp_flit_o     (rx_rsp_flit[i][RP_LOCAL]    ),
+            .tx_rsp_ready_i    (rx_rsp_ready[i][RP_LOCAL]   ),
+            .rx_rsp_valid_i    (tx_rsp_valid[i][RP_LOCAL]   ),
+            .rx_rsp_flit_i     (tx_rsp_flit[i][RP_LOCAL]    ),
+            .rx_rsp_ready_o    (tx_rsp_ready[i][RP_LOCAL]   ),
+            .tx_dat_valid_o    (rx_dat_valid[i][RP_LOCAL]   ),
+            .tx_dat_flit_o     (rx_dat_flit[i][RP_LOCAL]    ),
+            .tx_dat_crdvalid_i (rx_dat_crdvalid[i][RP_LOCAL]),
+            .rx_dat_valid_i    (tx_dat_valid[i][RP_LOCAL]   ),
+            .rx_dat_flit_i     (tx_dat_flit[i][RP_LOCAL]    ),
+            .rx_dat_crdvalid_o (tx_dat_crdvalid[i][RP_LOCAL])
         );
 
         router_wrap #(
-            .NUM_DAT_VC(NUM_DAT_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),
-            .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH),
-            .LINK_PORTS(LINK_PORTS)
+            .NUM_DAT_VC     (NUM_DAT_VC    ),
+            .REQ_FLIT_WIDTH (REQ_FLIT_WIDTH),
+            .RSP_FLIT_WIDTH (RSP_FLIT_WIDTH),
+            .DAT_FLIT_WIDTH (DAT_FLIT_WIDTH),
+            .LINK_PORTS     (LINK_PORTS    )
         ) u_router (
-            .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(router_ctx[i]),
-            .tx_req_valid(tx_req_valid[i]), .tx_req_flit(tx_req_flit[i]),
-            .tx_req_ready(tx_req_ready[i]),
-            .rx_req_valid(rx_req_valid[i]), .rx_req_flit(rx_req_flit[i]),
-            .rx_req_ready(rx_req_ready[i]),
-            .tx_rsp_valid(tx_rsp_valid[i]), .tx_rsp_flit(tx_rsp_flit[i]),
-            .tx_rsp_ready(tx_rsp_ready[i]),
-            .rx_rsp_valid(rx_rsp_valid[i]), .rx_rsp_flit(rx_rsp_flit[i]),
-            .rx_rsp_ready(rx_rsp_ready[i]),
-            .tx_dat_valid(tx_dat_valid[i]), .tx_dat_flit(tx_dat_flit[i]),
-            .tx_dat_crdvalid(tx_dat_crdvalid[i]),
-            .rx_dat_valid(rx_dat_valid[i]), .rx_dat_flit(rx_dat_flit[i]),
-            .rx_dat_crdvalid(rx_dat_crdvalid[i])
+            .clk_i           (clk_i             ),
+            .rst_n_i         (rst_n_i           ),
+            .ctx_i           (router_ctx[i]     ),
+            .tx_req_valid    (tx_req_valid[i]   ),
+            .tx_req_flit     (tx_req_flit[i]    ),
+            .tx_req_ready    (tx_req_ready[i]   ),
+            .rx_req_valid    (rx_req_valid[i]   ),
+            .rx_req_flit     (rx_req_flit[i]    ),
+            .rx_req_ready    (rx_req_ready[i]   ),
+            .tx_rsp_valid    (tx_rsp_valid[i]   ),
+            .tx_rsp_flit     (tx_rsp_flit[i]    ),
+            .tx_rsp_ready    (tx_rsp_ready[i]   ),
+            .rx_rsp_valid    (rx_rsp_valid[i]   ),
+            .rx_rsp_flit     (rx_rsp_flit[i]    ),
+            .rx_rsp_ready    (rx_rsp_ready[i]   ),
+            .tx_dat_valid    (tx_dat_valid[i]   ),
+            .tx_dat_flit     (tx_dat_flit[i]    ),
+            .tx_dat_crdvalid (tx_dat_crdvalid[i]),
+            .rx_dat_valid    (rx_dat_valid[i]   ),
+            .rx_dat_flit     (rx_dat_flit[i]    ),
+            .rx_dat_crdvalid (rx_dat_crdvalid[i])
         );
 
         // LOCAL port accounting uses the same names as pattern_metrics.py.
         // rx_* is NI -> Router (injection); tx_* is Router -> NI (ejection).
         link_perf_monitor #(
-            .LINK_NAME($sformatf("req_inject_%0d", i)),
-            .FLOW("ready_valid"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .LINK_NAME    ($sformatf("req_inject_%0d", i)),
+            .FLOW         ("ready_valid"                 ),
+            .BUFFER_DEPTH (ROUTER_VC_DEPTH               ),
+            .NUM_VC       (NUM_DAT_VC                    ),
+            .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH      )
         ) u_perf_local_req_inject (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-            .valid(rx_req_valid[i][RP_LOCAL]), .ready(rx_req_ready[i][RP_LOCAL]),
-            .vc_id('0), .credit_pulse('0)
+            .clk_i        (clk_i                    ),
+            .rst_n_i      (rst_n_i                  ),
+            .measure_en   (measure_en               ),
+            .valid        (rx_req_valid[i][RP_LOCAL]),
+            .ready        (rx_req_ready[i][RP_LOCAL]),
+            .vc_id        ('0                       ),
+            .credit_pulse ('0                       )
         );
         link_perf_monitor #(
-            .LINK_NAME($sformatf("rsp_inject_%0d", i)),
-            .FLOW("ready_valid"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .LINK_NAME    ($sformatf("rsp_inject_%0d", i)),
+            .FLOW         ("ready_valid"                 ),
+            .BUFFER_DEPTH (ROUTER_VC_DEPTH               ),
+            .NUM_VC       (NUM_DAT_VC                    ),
+            .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH      )
         ) u_perf_local_rsp_inject (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-            .valid(rx_rsp_valid[i][RP_LOCAL]), .ready(rx_rsp_ready[i][RP_LOCAL]),
-            .vc_id('0), .credit_pulse('0)
+            .clk_i        (clk_i                    ),
+            .rst_n_i      (rst_n_i                  ),
+            .measure_en   (measure_en               ),
+            .valid        (rx_rsp_valid[i][RP_LOCAL]),
+            .ready        (rx_rsp_ready[i][RP_LOCAL]),
+            .vc_id        ('0                       ),
+            .credit_pulse ('0                       )
         );
         link_perf_monitor #(
-            .LINK_NAME($sformatf("dat_inject_%0d", i)),
-            .FLOW("credit"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .LINK_NAME    ($sformatf("dat_inject_%0d", i)),
+            .FLOW         ("credit"                      ),
+            .BUFFER_DEPTH (ROUTER_VC_DEPTH               ),
+            .NUM_VC       (NUM_DAT_VC                    ),
+            .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH      )
         ) u_perf_local_dat_inject (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-            .valid(rx_dat_valid[i][RP_LOCAL]), .ready(1'b0),
-            .vc_id(rx_dat_flit[i][RP_LOCAL][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
-            .credit_pulse(rx_dat_crdvalid[i][RP_LOCAL])
+            .clk_i        (clk_i                                                                  ),
+            .rst_n_i      (rst_n_i                                                                ),
+            .measure_en   (measure_en                                                             ),
+            .valid        (rx_dat_valid[i][RP_LOCAL]                                              ),
+            .ready        (1'b0                                                                   ),
+            .vc_id        (rx_dat_flit[i][RP_LOCAL][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
+            .credit_pulse (rx_dat_crdvalid[i][RP_LOCAL]                                           )
         );
         link_perf_monitor #(
-            .LINK_NAME($sformatf("req_eject_%0d", i)),
-            .FLOW("ready_valid"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .LINK_NAME    ($sformatf("req_eject_%0d", i)),
+            .FLOW         ("ready_valid"                ),
+            .BUFFER_DEPTH (ROUTER_VC_DEPTH              ),
+            .NUM_VC       (NUM_DAT_VC                   ),
+            .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH     )
         ) u_perf_local_req_eject (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-            .valid(tx_req_valid[i][RP_LOCAL]), .ready(tx_req_ready[i][RP_LOCAL]),
-            .vc_id('0), .credit_pulse('0)
+            .clk_i        (clk_i                    ),
+            .rst_n_i      (rst_n_i                  ),
+            .measure_en   (measure_en               ),
+            .valid        (tx_req_valid[i][RP_LOCAL]),
+            .ready        (tx_req_ready[i][RP_LOCAL]),
+            .vc_id        ('0                       ),
+            .credit_pulse ('0                       )
         );
         link_perf_monitor #(
-            .LINK_NAME($sformatf("rsp_eject_%0d", i)),
-            .FLOW("ready_valid"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .LINK_NAME    ($sformatf("rsp_eject_%0d", i)),
+            .FLOW         ("ready_valid"                ),
+            .BUFFER_DEPTH (ROUTER_VC_DEPTH              ),
+            .NUM_VC       (NUM_DAT_VC                   ),
+            .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH     )
         ) u_perf_local_rsp_eject (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-            .valid(tx_rsp_valid[i][RP_LOCAL]), .ready(tx_rsp_ready[i][RP_LOCAL]),
-            .vc_id('0), .credit_pulse('0)
+            .clk_i        (clk_i                    ),
+            .rst_n_i      (rst_n_i                  ),
+            .measure_en   (measure_en               ),
+            .valid        (tx_rsp_valid[i][RP_LOCAL]),
+            .ready        (tx_rsp_ready[i][RP_LOCAL]),
+            .vc_id        ('0                       ),
+            .credit_pulse ('0                       )
         );
         link_perf_monitor #(
-            .LINK_NAME($sformatf("dat_eject_%0d", i)),
-            .FLOW("credit"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .LINK_NAME    ($sformatf("dat_eject_%0d", i)),
+            .FLOW         ("credit"                     ),
+            .BUFFER_DEPTH (ROUTER_VC_DEPTH              ),
+            .NUM_VC       (NUM_DAT_VC                   ),
+            .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH     )
         ) u_perf_local_dat_eject (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-            .valid(tx_dat_valid[i][RP_LOCAL]), .ready(1'b0),
-            .vc_id(tx_dat_flit[i][RP_LOCAL][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
-            .credit_pulse(tx_dat_crdvalid[i][RP_LOCAL])
+            .clk_i        (clk_i                                                                  ),
+            .rst_n_i      (rst_n_i                                                                ),
+            .measure_en   (measure_en                                                             ),
+            .valid        (tx_dat_valid[i][RP_LOCAL]                                              ),
+            .ready        (1'b0                                                                   ),
+            .vc_id        (tx_dat_flit[i][RP_LOCAL][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
+            .credit_pulse (tx_dat_crdvalid[i][RP_LOCAL]                                           )
         );
 
         always_comb begin : link_req_in
             for (int p = 1; p < LINK_PORTS; p++) begin
-                rx_req_valid[i][p]  = 1'b0;
-                rx_req_flit[i][p]   = '0;
-                tx_req_ready[i][p]  = '0;
+                rx_req_valid[i][p] = 1'b0;
+                rx_req_flit[i][p]  = '0;
+                tx_req_ready[i][p] = '0;
             end
             if (HAS_N) begin  // NORTH: <- peer SOUTH OUT
                 rx_req_valid[i][RP_NORTH] = tx_req_valid[PEER_N][RP_SOUTH];
@@ -443,9 +519,9 @@ module noc_fabric #(
 
         always_comb begin : link_rsp_in
             for (int p = 1; p < LINK_PORTS; p++) begin
-                rx_rsp_valid[i][p]  = 1'b0;
-                rx_rsp_flit[i][p]   = '0;
-                tx_rsp_ready[i][p]  = '0;
+                rx_rsp_valid[i][p] = 1'b0;
+                rx_rsp_flit[i][p]  = '0;
+                tx_rsp_ready[i][p] = '0;
             end
             if (HAS_N) begin  // NORTH: <- peer SOUTH OUT
                 rx_rsp_valid[i][RP_NORTH] = tx_rsp_valid[PEER_N][RP_SOUTH];
@@ -477,28 +553,28 @@ module noc_fabric #(
 
         always_comb begin : link_dat_in
             for (int p = 1; p < LINK_PORTS; p++) begin
-                rx_dat_valid[i][p]  = 1'b0;
-                rx_dat_flit[i][p]   = '0;
-                tx_dat_crdvalid[i][p]  = '0;
+                rx_dat_valid[i][p]    = 1'b0;
+                rx_dat_flit[i][p]     = '0;
+                tx_dat_crdvalid[i][p] = '0;
             end
             if (HAS_N) begin  // NORTH: <- peer SOUTH OUT
-                rx_dat_valid[i][RP_NORTH] = tx_dat_valid[PEER_N][RP_SOUTH];
-                rx_dat_flit[i][RP_NORTH]  = tx_dat_flit[PEER_N][RP_SOUTH];
+                rx_dat_valid[i][RP_NORTH]    = tx_dat_valid[PEER_N][RP_SOUTH];
+                rx_dat_flit[i][RP_NORTH]     = tx_dat_flit[PEER_N][RP_SOUTH];
                 tx_dat_crdvalid[i][RP_NORTH] = rx_dat_crdvalid[PEER_N][RP_SOUTH];
             end
             if (HAS_E) begin  // EAST: <- peer WEST OUT
-                rx_dat_valid[i][RP_EAST] = tx_dat_valid[PEER_E][RP_WEST];
-                rx_dat_flit[i][RP_EAST]  = tx_dat_flit[PEER_E][RP_WEST];
+                rx_dat_valid[i][RP_EAST]    = tx_dat_valid[PEER_E][RP_WEST];
+                rx_dat_flit[i][RP_EAST]     = tx_dat_flit[PEER_E][RP_WEST];
                 tx_dat_crdvalid[i][RP_EAST] = rx_dat_crdvalid[PEER_E][RP_WEST];
             end
             if (HAS_S) begin  // SOUTH: <- peer NORTH OUT
-                rx_dat_valid[i][RP_SOUTH] = tx_dat_valid[PEER_S][RP_NORTH];
-                rx_dat_flit[i][RP_SOUTH]  = tx_dat_flit[PEER_S][RP_NORTH];
+                rx_dat_valid[i][RP_SOUTH]    = tx_dat_valid[PEER_S][RP_NORTH];
+                rx_dat_flit[i][RP_SOUTH]     = tx_dat_flit[PEER_S][RP_NORTH];
                 tx_dat_crdvalid[i][RP_SOUTH] = rx_dat_crdvalid[PEER_S][RP_NORTH];
             end
             if (HAS_W) begin  // WEST: <- peer EAST OUT
-                rx_dat_valid[i][RP_WEST] = tx_dat_valid[PEER_W][RP_EAST];
-                rx_dat_flit[i][RP_WEST]  = tx_dat_flit[PEER_W][RP_EAST];
+                rx_dat_valid[i][RP_WEST]    = tx_dat_valid[PEER_W][RP_EAST];
+                rx_dat_flit[i][RP_WEST]     = tx_dat_flit[PEER_W][RP_EAST];
                 tx_dat_crdvalid[i][RP_WEST] = rx_dat_crdvalid[PEER_W][RP_EAST];
             end
             for (int unsigned p = 0; p < N_PERIPH; p++)
@@ -513,8 +589,8 @@ module noc_fabric #(
         // peripheral) must never drive OUT valid. Fires on a fabric wiring
         // mistake; the C++ route leak (dst outside mesh) is caught upstream by
         // route_compute's abort.
-        always_ff @(posedge clk_i) begin
-            if (rst_ni) begin
+        always @(posedge clk_i) begin
+            if (rst_n_i) begin
                 if (!HAS_N && !periph_on(i, RP_NORTH) && tx_req_valid[i][RP_NORTH])
                     $fatal(1, "noc_fabric: node%0d drove a flit on tied-off NORTH (req) - fabric link wiring mistake", i);
                 if (!HAS_N && !periph_on(i, RP_NORTH) && tx_rsp_valid[i][RP_NORTH])
@@ -547,154 +623,190 @@ module noc_fabric #(
         // from ni_flit_pkg; DAT credit_pulse is per-VC (not OR-collapsed).
         if (HAS_N) begin : g_perf_north
             link_perf_monitor #(
-                .LINK_NAME($sformatf("req_%0dto%0d", i, PEER_N)),
-                .FLOW("ready_valid"),
-                .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .LINK_NAME    ($sformatf("req_%0dto%0d", i, PEER_N)),
+                .FLOW         ("ready_valid"                       ),
+                .BUFFER_DEPTH (ROUTER_VC_DEPTH                     ),
+                .NUM_VC       (NUM_DAT_VC                          ),
+                .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH            )
             ) u_perf_link_req (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-                .valid(tx_req_valid[i][RP_NORTH]),
-                .ready(tx_req_ready[i][RP_NORTH]),
-                .vc_id('0),
-                .credit_pulse('0)
+            .clk_i      (clk_i     ),
+            .rst_n_i    (rst_n_i   ),
+            .measure_en (measure_en),
+                .valid        (tx_req_valid[i][RP_NORTH]),
+                .ready        (tx_req_ready[i][RP_NORTH]),
+                .vc_id        ('0                       ),
+                .credit_pulse ('0                       )
             );
             link_perf_monitor #(
-                .LINK_NAME($sformatf("rsp_%0dto%0d", i, PEER_N)),
-                .FLOW("ready_valid"),
-                .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .LINK_NAME    ($sformatf("rsp_%0dto%0d", i, PEER_N)),
+                .FLOW         ("ready_valid"                       ),
+                .BUFFER_DEPTH (ROUTER_VC_DEPTH                     ),
+                .NUM_VC       (NUM_DAT_VC                          ),
+                .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH            )
             ) u_perf_link_rsp (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-                .valid(tx_rsp_valid[i][RP_NORTH]),
-                .ready(tx_rsp_ready[i][RP_NORTH]),
-                .vc_id('0),
-                .credit_pulse('0)
+            .clk_i      (clk_i     ),
+            .rst_n_i    (rst_n_i   ),
+            .measure_en (measure_en),
+                .valid        (tx_rsp_valid[i][RP_NORTH]),
+                .ready        (tx_rsp_ready[i][RP_NORTH]),
+                .vc_id        ('0                       ),
+                .credit_pulse ('0                       )
             );
             link_perf_monitor #(
-                .LINK_NAME($sformatf("dat_%0dto%0d", i, PEER_N)),
-                .FLOW("credit"),
-                .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .LINK_NAME    ($sformatf("dat_%0dto%0d", i, PEER_N)),
+                .FLOW         ("credit"                            ),
+                .BUFFER_DEPTH (ROUTER_VC_DEPTH                     ),
+                .NUM_VC       (NUM_DAT_VC                          ),
+                .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH            )
             ) u_perf_link_dat (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-                .valid(tx_dat_valid[i][RP_NORTH]),
-                .ready(1'b0),
-                .vc_id(tx_dat_flit[i][RP_NORTH][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
-                .credit_pulse(tx_dat_crdvalid[i][RP_NORTH])
+            .clk_i      (clk_i     ),
+            .rst_n_i    (rst_n_i   ),
+            .measure_en (measure_en),
+                .valid        (tx_dat_valid[i][RP_NORTH]                                              ),
+                .ready        (1'b0                                                                   ),
+                .vc_id        (tx_dat_flit[i][RP_NORTH][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
+                .credit_pulse (tx_dat_crdvalid[i][RP_NORTH]                                           )
             );
         end
         if (HAS_E) begin : g_perf_east
             link_perf_monitor #(
-                .LINK_NAME($sformatf("req_%0dto%0d", i, PEER_E)),
-                .FLOW("ready_valid"),
-                .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .LINK_NAME    ($sformatf("req_%0dto%0d", i, PEER_E)),
+                .FLOW         ("ready_valid"                       ),
+                .BUFFER_DEPTH (ROUTER_VC_DEPTH                     ),
+                .NUM_VC       (NUM_DAT_VC                          ),
+                .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH            )
             ) u_perf_link_req (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-                .valid(tx_req_valid[i][RP_EAST]),
-                .ready(tx_req_ready[i][RP_EAST]),
-                .vc_id('0),
-                .credit_pulse('0)
+            .clk_i      (clk_i     ),
+            .rst_n_i    (rst_n_i   ),
+            .measure_en (measure_en),
+                .valid        (tx_req_valid[i][RP_EAST]),
+                .ready        (tx_req_ready[i][RP_EAST]),
+                .vc_id        ('0                      ),
+                .credit_pulse ('0                      )
             );
             link_perf_monitor #(
-                .LINK_NAME($sformatf("rsp_%0dto%0d", i, PEER_E)),
-                .FLOW("ready_valid"),
-                .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .LINK_NAME    ($sformatf("rsp_%0dto%0d", i, PEER_E)),
+                .FLOW         ("ready_valid"                       ),
+                .BUFFER_DEPTH (ROUTER_VC_DEPTH                     ),
+                .NUM_VC       (NUM_DAT_VC                          ),
+                .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH            )
             ) u_perf_link_rsp (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-                .valid(tx_rsp_valid[i][RP_EAST]),
-                .ready(tx_rsp_ready[i][RP_EAST]),
-                .vc_id('0),
-                .credit_pulse('0)
+            .clk_i      (clk_i     ),
+            .rst_n_i    (rst_n_i   ),
+            .measure_en (measure_en),
+                .valid        (tx_rsp_valid[i][RP_EAST]),
+                .ready        (tx_rsp_ready[i][RP_EAST]),
+                .vc_id        ('0                      ),
+                .credit_pulse ('0                      )
             );
             link_perf_monitor #(
-                .LINK_NAME($sformatf("dat_%0dto%0d", i, PEER_E)),
-                .FLOW("credit"),
-                .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .LINK_NAME    ($sformatf("dat_%0dto%0d", i, PEER_E)),
+                .FLOW         ("credit"                            ),
+                .BUFFER_DEPTH (ROUTER_VC_DEPTH                     ),
+                .NUM_VC       (NUM_DAT_VC                          ),
+                .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH            )
             ) u_perf_link_dat (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-                .valid(tx_dat_valid[i][RP_EAST]),
-                .ready(1'b0),
-                .vc_id(tx_dat_flit[i][RP_EAST][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
-                .credit_pulse(tx_dat_crdvalid[i][RP_EAST])
+            .clk_i      (clk_i     ),
+            .rst_n_i    (rst_n_i   ),
+            .measure_en (measure_en),
+                .valid        (tx_dat_valid[i][RP_EAST]                                              ),
+                .ready        (1'b0                                                                  ),
+                .vc_id        (tx_dat_flit[i][RP_EAST][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
+                .credit_pulse (tx_dat_crdvalid[i][RP_EAST]                                           )
             );
         end
         if (HAS_S) begin : g_perf_south
             link_perf_monitor #(
-                .LINK_NAME($sformatf("req_%0dto%0d", i, PEER_S)),
-                .FLOW("ready_valid"),
-                .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .LINK_NAME    ($sformatf("req_%0dto%0d", i, PEER_S)),
+                .FLOW         ("ready_valid"                       ),
+                .BUFFER_DEPTH (ROUTER_VC_DEPTH                     ),
+                .NUM_VC       (NUM_DAT_VC                          ),
+                .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH            )
             ) u_perf_link_req (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-                .valid(tx_req_valid[i][RP_SOUTH]),
-                .ready(tx_req_ready[i][RP_SOUTH]),
-                .vc_id('0),
-                .credit_pulse('0)
+            .clk_i      (clk_i     ),
+            .rst_n_i    (rst_n_i   ),
+            .measure_en (measure_en),
+                .valid        (tx_req_valid[i][RP_SOUTH]),
+                .ready        (tx_req_ready[i][RP_SOUTH]),
+                .vc_id        ('0                       ),
+                .credit_pulse ('0                       )
             );
             link_perf_monitor #(
-                .LINK_NAME($sformatf("rsp_%0dto%0d", i, PEER_S)),
-                .FLOW("ready_valid"),
-                .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .LINK_NAME    ($sformatf("rsp_%0dto%0d", i, PEER_S)),
+                .FLOW         ("ready_valid"                       ),
+                .BUFFER_DEPTH (ROUTER_VC_DEPTH                     ),
+                .NUM_VC       (NUM_DAT_VC                          ),
+                .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH            )
             ) u_perf_link_rsp (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-                .valid(tx_rsp_valid[i][RP_SOUTH]),
-                .ready(tx_rsp_ready[i][RP_SOUTH]),
-                .vc_id('0),
-                .credit_pulse('0)
+            .clk_i      (clk_i     ),
+            .rst_n_i    (rst_n_i   ),
+            .measure_en (measure_en),
+                .valid        (tx_rsp_valid[i][RP_SOUTH]),
+                .ready        (tx_rsp_ready[i][RP_SOUTH]),
+                .vc_id        ('0                       ),
+                .credit_pulse ('0                       )
             );
             link_perf_monitor #(
-                .LINK_NAME($sformatf("dat_%0dto%0d", i, PEER_S)),
-                .FLOW("credit"),
-                .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .LINK_NAME    ($sformatf("dat_%0dto%0d", i, PEER_S)),
+                .FLOW         ("credit"                            ),
+                .BUFFER_DEPTH (ROUTER_VC_DEPTH                     ),
+                .NUM_VC       (NUM_DAT_VC                          ),
+                .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH            )
             ) u_perf_link_dat (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-                .valid(tx_dat_valid[i][RP_SOUTH]),
-                .ready(1'b0),
-                .vc_id(tx_dat_flit[i][RP_SOUTH][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
-                .credit_pulse(tx_dat_crdvalid[i][RP_SOUTH])
+            .clk_i      (clk_i     ),
+            .rst_n_i    (rst_n_i   ),
+            .measure_en (measure_en),
+                .valid        (tx_dat_valid[i][RP_SOUTH]                                              ),
+                .ready        (1'b0                                                                   ),
+                .vc_id        (tx_dat_flit[i][RP_SOUTH][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
+                .credit_pulse (tx_dat_crdvalid[i][RP_SOUTH]                                           )
             );
         end
         if (HAS_W) begin : g_perf_west
             link_perf_monitor #(
-                .LINK_NAME($sformatf("req_%0dto%0d", i, PEER_W)),
-                .FLOW("ready_valid"),
-                .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .LINK_NAME    ($sformatf("req_%0dto%0d", i, PEER_W)),
+                .FLOW         ("ready_valid"                       ),
+                .BUFFER_DEPTH (ROUTER_VC_DEPTH                     ),
+                .NUM_VC       (NUM_DAT_VC                          ),
+                .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH            )
             ) u_perf_link_req (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-                .valid(tx_req_valid[i][RP_WEST]),
-                .ready(tx_req_ready[i][RP_WEST]),
-                .vc_id('0),
-                .credit_pulse('0)
+            .clk_i      (clk_i     ),
+            .rst_n_i    (rst_n_i   ),
+            .measure_en (measure_en),
+                .valid        (tx_req_valid[i][RP_WEST]),
+                .ready        (tx_req_ready[i][RP_WEST]),
+                .vc_id        ('0                      ),
+                .credit_pulse ('0                      )
             );
             link_perf_monitor #(
-                .LINK_NAME($sformatf("rsp_%0dto%0d", i, PEER_W)),
-                .FLOW("ready_valid"),
-                .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .LINK_NAME    ($sformatf("rsp_%0dto%0d", i, PEER_W)),
+                .FLOW         ("ready_valid"                       ),
+                .BUFFER_DEPTH (ROUTER_VC_DEPTH                     ),
+                .NUM_VC       (NUM_DAT_VC                          ),
+                .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH            )
             ) u_perf_link_rsp (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-                .valid(tx_rsp_valid[i][RP_WEST]),
-                .ready(tx_rsp_ready[i][RP_WEST]),
-                .vc_id('0),
-                .credit_pulse('0)
+            .clk_i      (clk_i     ),
+            .rst_n_i    (rst_n_i   ),
+            .measure_en (measure_en),
+                .valid        (tx_rsp_valid[i][RP_WEST]),
+                .ready        (tx_rsp_ready[i][RP_WEST]),
+                .vc_id        ('0                      ),
+                .credit_pulse ('0                      )
             );
             link_perf_monitor #(
-                .LINK_NAME($sformatf("dat_%0dto%0d", i, PEER_W)),
-                .FLOW("credit"),
-                .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .LINK_NAME    ($sformatf("dat_%0dto%0d", i, PEER_W)),
+                .FLOW         ("credit"                            ),
+                .BUFFER_DEPTH (ROUTER_VC_DEPTH                     ),
+                .NUM_VC       (NUM_DAT_VC                          ),
+                .VC_ID_WIDTH  (ni_flit_pkg::VC_ID_WIDTH            )
             ) u_perf_link_dat (
-            .clk_i, .rst_ni, .measure_en(measure_en),
-                .valid(tx_dat_valid[i][RP_WEST]),
-                .ready(1'b0),
-                .vc_id(tx_dat_flit[i][RP_WEST][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
-                .credit_pulse(tx_dat_crdvalid[i][RP_WEST])
+            .clk_i      (clk_i     ),
+            .rst_n_i    (rst_n_i   ),
+            .measure_en (measure_en),
+                .valid        (tx_dat_valid[i][RP_WEST]                                              ),
+                .ready        (1'b0                                                                  ),
+                .vc_id        (tx_dat_flit[i][RP_WEST][ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]),
+                .credit_pulse (tx_dat_crdvalid[i][RP_WEST]                                           )
             );
         end
     end : g_node

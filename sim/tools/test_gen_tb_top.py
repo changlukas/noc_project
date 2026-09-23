@@ -1,4 +1,5 @@
 import gen_tb_top as g
+import re
 from pathlib import Path
 
 
@@ -13,8 +14,8 @@ def test_user_endpoint_exports_loaded_stimulus_count():
     assert "output int unsigned                expected_write_cnt_o" in endpoint
     assert "output longint unsigned            stimulus_start_cycle_o" in endpoint
     assert "output longint unsigned            stimulus_done_cycle_o" in endpoint
-    assert "expected_txn_cnt_o = int'(file_master.num_writes + file_master.num_reads);" in endpoint
-    assert "expected_write_cnt_o = int'(file_master.num_writes);" in endpoint
+    assert "expected_txn_cnt_o = int'(file_master.num_writes + file_master.num_reads);" in re.sub(r" +", " ", endpoint)
+    assert "expected_write_cnt_o = int'(file_master.num_writes);" in re.sub(r" +", " ", endpoint)
     assert "int unsigned expected_txn_cnt [16];" in generated
     assert "int unsigned expected_write_cnt [16];" in generated
     assert ".expected_txn_cnt_o(expected_txn_cnt[i])" in generated

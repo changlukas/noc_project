@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -7,7 +8,7 @@ TOP = ROOT / "sim" / "tb" / "noc_tb_top.sv"
 
 
 def test_channel_compare_fault_shortens_only_mode3_data_burst():
-    source = ENDPOINT.read_text(encoding="utf-8")
+    source = re.sub(r" +", " ", ENDPOINT.read_text(encoding="utf-8"))
 
     assert '$value$plusargs("channel_compare_fault=%d", channel_compare_fault)' in source
     assert "if (get_injection_mode() == 3) begin" in source
@@ -19,7 +20,7 @@ def test_channel_compare_fault_shortens_only_mode3_data_burst():
 
 
 def test_mode3_derives_background_counts_from_loaded_stimulus():
-    source = ENDPOINT.read_text(encoding="utf-8")
+    source = re.sub(r" +", " ", ENDPOINT.read_text(encoding="utf-8"))
 
     assert "compare_expected_bursts" in source
     assert "compare_expected_beats" in source
@@ -32,8 +33,8 @@ def test_mode3_derives_background_counts_from_loaded_stimulus():
 
 
 def test_mode3_marks_and_proves_every_background_contains_control_interval():
-    endpoint = ENDPOINT.read_text(encoding="utf-8")
-    top = TOP.read_text(encoding="utf-8")
+    endpoint = re.sub(r" +", " ", ENDPOINT.read_text(encoding="utf-8"))
+    top = re.sub(r" +", " ", TOP.read_text(encoding="utf-8"))
 
     assert "compare_background_o" in endpoint
     assert "compare_work_done_o" in endpoint
@@ -51,8 +52,8 @@ def test_mode3_marks_and_proves_every_background_contains_control_interval():
 
 
 def test_mode3_interval_ends_at_real_response_before_lifetime_barrier():
-    endpoint = ENDPOINT.read_text(encoding="utf-8")
-    top = TOP.read_text(encoding="utf-8")
+    endpoint = re.sub(r" +", " ", ENDPOINT.read_text(encoding="utf-8"))
+    top = re.sub(r" +", " ", TOP.read_text(encoding="utf-8"))
 
     mode3 = endpoint.rsplit("3: begin", 1)[1].split("4: begin", 1)[0]
     assert mode3.rindex("stimulus_done_cycle_o = cycle_cnt;") < mode3.rindex(
@@ -63,7 +64,7 @@ def test_mode3_interval_ends_at_real_response_before_lifetime_barrier():
 
 
 def test_mode3_background_issues_loaded_transactions_in_real_rounds():
-    endpoint = ENDPOINT.read_text(encoding="utf-8")
+    endpoint = re.sub(r" +", " ", ENDPOINT.read_text(encoding="utf-8"))
 
     assert '$value$plusargs("channel_rounds=%d", channel_rounds)' in endpoint
     assert "compare_expected_bursts % channel_rounds" in endpoint
@@ -75,14 +76,14 @@ def test_mode3_background_issues_loaded_transactions_in_real_rounds():
 
 
 def test_mode3_control_records_valid_to_ready_wait_for_read_and_write():
-    endpoint = ENDPOINT.read_text(encoding="utf-8")
+    endpoint = re.sub(r" +", " ", ENDPOINT.read_text(encoding="utf-8"))
     aw = endpoint.split("task automatic run_aw_outstanding();", 1)[1].split(
         "endtask", 1)[0]
     ar = endpoint.split("task automatic run_ar_outstanding();", 1)[1].split(
         "endtask", 1)[0]
 
     monitor = endpoint.split("// Windowed sources have no open-loop slots.", 1)[1].split(
-        "always_ff", 1)[0]
+        "always @(posedge clk_i or negedge rst_n_i)", 1)[0]
     assert "always @(posedge clk_i)" in monitor
     assert "get_injection_mode() == 3 || get_injection_mode() == 4" in monitor
     assert "if (master_dv.aw_valid) begin" in monitor

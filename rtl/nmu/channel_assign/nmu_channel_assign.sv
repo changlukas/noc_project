@@ -10,7 +10,7 @@ module nmu_channel_assign #(
     parameter int unsigned ROUTER_VC_DEPTH = ni_params_pkg::NOC_ROUTER_VC_DEPTH
 ) (
     input  wire logic                                                      clk_i,
-    input  wire logic                                                      rst_i,
+    input  wire logic                                                      rst_n_i,
     input  wire ni_flit_pkg::req_flit_t [ni_types_pkg::NUM_NMU_REQ_CH-1:0] s_req_i,
     input  wire logic                   [ni_types_pkg::NUM_NMU_REQ_CH-1:0] s_req_valid_i,
     output wire logic                   [ni_types_pkg::NUM_NMU_REQ_CH-1:0] s_req_ready_o,
@@ -47,19 +47,19 @@ module nmu_channel_assign #(
     logic                    dat_write_lock_reg, dat_write_lock_next;
     logic                    req_rr_reg, req_rr_next;
     logic                    req_hold_reg, req_hold_next, req_hold_aw_reg, req_hold_aw_next;
-    logic        [VC_IDX_W-1:0] dat_active_vc_reg, dat_active_vc_next;
-    logic        [VC_IDX_W-1:0] dat_vc_rr_reg, dat_vc_rr_next;
-    logic  [NUM_IDS-1:0] fixed_vc_valid_reg, fixed_vc_valid_next;
+    logic     [VC_IDX_W-1:0] dat_active_vc_reg, dat_active_vc_next;
+    logic     [VC_IDX_W-1:0] dat_vc_rr_reg, dat_vc_rr_next;
+    logic      [NUM_IDS-1:0] fixed_vc_valid_reg, fixed_vc_valid_next;
     logic [DST_ID_WIDTH-1:0] fixed_vc_dst_reg [NUM_IDS], fixed_vc_dst_next [NUM_IDS];
-    logic        [VC_IDX_W-1:0] fixed_vc_id_reg [NUM_IDS], fixed_vc_id_next [NUM_IDS];
+    logic     [VC_IDX_W-1:0] fixed_vc_id_reg [NUM_IDS], fixed_vc_id_next [NUM_IDS];
     wire    [NUM_DAT_VC-1:0] dat_credit_left;
     wire [AW_AWID_WIDTH-1:0] aw_id = s_dat_i[NMU_DAT_AW_IDX].payload[AW_AWID_LSB +: AW_AWID_WIDTH];
     wire [DST_ID_WIDTH-1:0] aw_dst = s_dat_i[NMU_DAT_AW_IDX].header[DST_ID_LSB +: DST_ID_WIDTH];
     wire aw_reorder = s_dat_i[NMU_DAT_AW_IDX].header[ORDERING_REQ_LSB];
-    logic                                req_sel_aw, dat_vc_available;
-    logic [VC_IDX_W-1:0]                    dat_sel_vc;
+    logic                                   req_sel_aw, dat_vc_available;
+    logic                    [VC_IDX_W-1:0] dat_sel_vc;
     logic                   [REQ_SEL_W-1:0] req_sel;
-    ni_flit_pkg::dat_flit_t              dat_flit;
+    ni_flit_pkg::dat_flit_t                 dat_flit;
     wire [VC_IDX_W-1:0] dat_vc = dat_write_lock_reg ? dat_active_vc_reg : dat_sel_vc;
     wire req_transfer = m_req_valid_o && m_req_ready_i;
     wire dat_transfer = m_dat_valid_o;
@@ -69,10 +69,10 @@ module nmu_channel_assign #(
             .NumCredits (ROUTER_VC_DEPTH)
         ) i_credit (
             .clk_i         (clk_i                                  ),
-            .rst_ni        (1'b1                                   ),
-            .clr_i         (rst_i                                  ),
+            .rst_ni        (rst_n_i                                ),
+            .clr_i         (1'b0                                   ),
             .credit_o      (                                       ),
-            .credit_give_i (!rst_i && dat_credit_return_i[vc]      ),
+            .credit_give_i (rst_n_i && dat_credit_return_i[vc]     ),
             .credit_take_i (dat_transfer && dat_vc == VC_IDX_W'(vc)),
             .credit_left_o (dat_credit_left[vc]                    ),
             .credit_crit_o (                                       ),
@@ -86,7 +86,7 @@ module nmu_channel_assign #(
             req_sel_aw = s_req_valid_i[NMU_REQ_AW_IDX] && s_req_valid_i[NMU_REQ_W_IDX] && (!s_req_valid_i[NMU_REQ_AR_IDX] || !req_rr_reg);
         req_sel = req_write_lock_reg ? REQ_SEL_W'(NMU_REQ_W_IDX) : req_sel_aw ? REQ_SEL_W'(NMU_REQ_AW_IDX) : REQ_SEL_W'(NMU_REQ_AR_IDX);
     end
-    assign m_req_valid_o = !rst_i && s_req_valid_i[req_sel];
+    assign m_req_valid_o = rst_n_i && s_req_valid_i[req_sel];
     assign m_req_o       = m_req_valid_o ? s_req_i[req_sel] : '0;
     assign s_req_ready_o = req_transfer ? (NUM_NMU_REQ_CH'(1) << req_sel) : '0;
 
@@ -108,7 +108,7 @@ module nmu_channel_assign #(
             end
         end
     end
-    assign m_dat_valid_o = !rst_i && (dat_write_lock_reg ?
+    assign m_dat_valid_o = rst_n_i && (dat_write_lock_reg ?
         (s_dat_valid_i[NMU_DAT_W_IDX] && (dat_credit_left[dat_active_vc_reg] || dat_credit_return_i[dat_active_vc_reg])) :
         (s_dat_valid_i[NMU_DAT_AW_IDX] && s_dat_valid_i[NMU_DAT_W_IDX] && dat_vc_available));
     assign s_dat_ready_o = m_dat_valid_o ? (NUM_NMU_DAT_CH'(1) << (dat_write_lock_reg ? NMU_DAT_W_IDX : NMU_DAT_AW_IDX)) : '0;
@@ -155,8 +155,8 @@ module nmu_channel_assign #(
             end
         end
     end
-    always_ff @(posedge clk_i) begin
-        if (rst_i) begin
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
             req_write_lock_reg <= '0;
             dat_write_lock_reg <= '0;
             req_rr_reg         <= '0;

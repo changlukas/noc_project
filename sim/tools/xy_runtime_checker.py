@@ -124,22 +124,24 @@ __XY_PUSH_CASES__
         if (count!=xy_expected_total) $fatal(1,"job oracle count mismatch");
         xy_loaded=1;
     end
-    always_ff @(posedge clk_i) begin
-        if (!rst_ni) begin
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
             operation_started_reg<=0;
             operation_done_reg<=0;
             operation_start_reg<=0;
             operation_end_reg<=0;
             operation_retired_reg<=0;
-        end else if (xy_loaded) begin
-            if (!operation_started_reg && |operation_job_valid) begin
-                operation_started_reg<=1;
-                operation_start_reg<=live_cyc;
-            end
-            operation_retired_reg<=operation_retired_reg+$countones(operation_response_valid);
-            if (!operation_done_reg && operation_retired_reg+$countones(operation_response_valid)==xy_expected_total) begin
-                operation_done_reg<=1;
-                operation_end_reg<=live_cyc;
+        end else begin
+            if (xy_loaded) begin
+                if (!operation_started_reg && |operation_job_valid) begin
+                    operation_started_reg<=1;
+                    operation_start_reg<=live_cyc;
+                end
+                operation_retired_reg<=operation_retired_reg+$countones(operation_response_valid);
+                if (!operation_done_reg && operation_retired_reg+$countones(operation_response_valid)==xy_expected_total) begin
+                    operation_done_reg<=1;
+                    operation_end_reg<=live_cyc;
+                end
             end
         end
     end
@@ -151,27 +153,30 @@ __XY_PUSH_CASES__
         endpoint=f"g_endpoint[{n}].u_endpoint"
         lines += [f"    assign operation_job_valid[{n}]={endpoint}.dma_job_req_valid;",
                   f"    assign operation_response_valid[{n}]={endpoint}.dma_job_rsp_valid;",
-                  "    always @(posedge clk_i) begin",
-                  f"        if (!rst_ni) begin xy_checked[{n}]=0; xy_retired[{n}]=0; end",
-                  "        else if (xy_loaded) begin",
-                  f"            if ({endpoint}.dma_job_req_valid && {endpoint}.dma_job_req_ready) begin",
-                  f'                if (xy_checked[{n}]>=EXPECTED_JOBS[{n}]) $fatal(1,"unexpected job");',
-                  f"                for (int p=0;p<NUM_ENDPOINTS;p++)",
-                  f"                    if (jobs_retired[p]<xy_jobs[{n}][xy_checked[{n}]].waits[p])",
-                  '                        $fatal(1,"dependency violation");',
-                  f"                if ({endpoint}.dma_job_req.src_addr!=xy_jobs[{n}][xy_checked[{n}]].source ||",
-                  f"                    {endpoint}.dma_job_req.dst_addr!=xy_jobs[{n}][xy_checked[{n}]].destination ||",
-                  f"                    {endpoint}.dma_job_req.length!=xy_jobs[{n}][xy_checked[{n}]].length ||",
-                  f"                    {endpoint}.dma_job_req.user!=xy_jobs[{n}][xy_checked[{n}]].user_value)",
-                  f'                    $fatal(1,"request mismatch node{n} job%0d actual=%h/%h/%0d/%h expected=%h/%h/%0d/%h",xy_checked[{n}],{endpoint}.dma_job_req.src_addr,{endpoint}.dma_job_req.dst_addr,{endpoint}.dma_job_req.length,{endpoint}.dma_job_req.user,xy_jobs[{n}][xy_checked[{n}]].source,xy_jobs[{n}][xy_checked[{n}]].destination,xy_jobs[{n}][xy_checked[{n}]].length,xy_jobs[{n}][xy_checked[{n}]].user_value);',
-                  f'                $display("[dma_phase] node={n} job=%0d phase=%s event=issue cycle=%0d",xy_checked[{n}],xy_jobs[{n}][xy_checked[{n}]].phase,live_cyc);',
-                  f"                xy_checked[{n}]++;",
-                  "            end",
-                  f"            if ({endpoint}.dma_job_rsp_valid) begin",
-                  f'                if (xy_retired[{n}]>=EXPECTED_JOBS[{n}]) $fatal(1,"unexpected response");',
-                  f'                $display("[dma_phase] node={n} job=%0d phase=%s event=retire cycle=%0d",xy_retired[{n}],xy_jobs[{n}][xy_retired[{n}]].phase,live_cyc);',
-                  f"                xy_retired[{n}]++;",
-                  "            end","        end","    end"]
+                  "    always @(posedge clk_i or negedge rst_n_i) begin",
+                  "        if (~rst_n_i) begin",
+                  f"            xy_checked[{n}] = 0;",
+                  f"            xy_retired[{n}] = 0;",
+                  "        end else begin",
+                  "            if (xy_loaded) begin",
+                  f"                if ({endpoint}.dma_job_req_valid && {endpoint}.dma_job_req_ready) begin",
+                  f'                    if (xy_checked[{n}]>=EXPECTED_JOBS[{n}]) $fatal(1,"unexpected job");',
+                  f"                    for (int p=0;p<NUM_ENDPOINTS;p++)",
+                  f"                        if (jobs_retired[p]<xy_jobs[{n}][xy_checked[{n}]].waits[p])",
+                  '                            $fatal(1,"dependency violation");',
+                  f"                    if ({endpoint}.dma_job_req.src_addr!=xy_jobs[{n}][xy_checked[{n}]].source ||",
+                  f"                        {endpoint}.dma_job_req.dst_addr!=xy_jobs[{n}][xy_checked[{n}]].destination ||",
+                  f"                        {endpoint}.dma_job_req.length!=xy_jobs[{n}][xy_checked[{n}]].length ||",
+                  f"                        {endpoint}.dma_job_req.user!=xy_jobs[{n}][xy_checked[{n}]].user_value)",
+                  f'                        $fatal(1,"request mismatch node{n} job%0d actual=%h/%h/%0d/%h expected=%h/%h/%0d/%h",xy_checked[{n}],{endpoint}.dma_job_req.src_addr,{endpoint}.dma_job_req.dst_addr,{endpoint}.dma_job_req.length,{endpoint}.dma_job_req.user,xy_jobs[{n}][xy_checked[{n}]].source,xy_jobs[{n}][xy_checked[{n}]].destination,xy_jobs[{n}][xy_checked[{n}]].length,xy_jobs[{n}][xy_checked[{n}]].user_value);',
+                  f'                    $display("[dma_phase] node={n} job=%0d phase=%s event=issue cycle=%0d",xy_checked[{n}],xy_jobs[{n}][xy_checked[{n}]].phase,live_cyc);',
+                  f"                    xy_checked[{n}]++;",
+                  "                end",
+                  f"                if ({endpoint}.dma_job_rsp_valid) begin",
+                  f'                    if (xy_retired[{n}]>=EXPECTED_JOBS[{n}]) $fatal(1,"unexpected response");',
+                  f'                    $display("[dma_phase] node={n} job=%0d phase=%s event=retire cycle=%0d",xy_retired[{n}],xy_jobs[{n}][xy_retired[{n}]].phase,live_cyc);',
+                  f"                    xy_retired[{n}]++;",
+                  "                end","            end","        end","    end"]
     lines.extend(r'''    initial begin
         bit complete;
         longint unsigned checked_bytes;
@@ -180,7 +185,7 @@ __XY_PUSH_CASES__
         checked_bytes=0;
         do begin
             @(posedge clk_i);
-            complete=rst_ni && xy_loaded && operation_done_reg;
+            complete=rst_n_i && xy_loaded && operation_done_reg;
             for (int node=0;node<NUM_ENDPOINTS;node++) begin
                 if (jobs_issued[node]>EXPECTED_JOBS[node]) $fatal(1,"extra DMA job");
                 complete &= jobs_done[node] && jobs_retired[node]==EXPECTED_JOBS[node];

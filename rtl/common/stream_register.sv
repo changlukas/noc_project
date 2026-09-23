@@ -11,7 +11,7 @@ module stream_register #(
     parameter type         data_t   = logic
 ) (
     input  wire logic   clk_i,
-    input  wire logic   rst_ni,
+    input  wire logic   rst_n_i,
     input  wire logic   s_valid_i,
     output wire logic   s_ready_o,
     input  wire data_t  s_data_i,
@@ -27,13 +27,13 @@ module stream_register #(
     if (REG_TYPE == 0) begin : gen_bypass
         assign s_ready_o = m_ready_i;
         assign m_valid_o = s_valid_i;
-        assign m_data_o = s_data_i;
+        assign m_data_o  = s_data_i;
     end else if (REG_TYPE == 1) begin : gen_simple
         cc_stream_register #(
             .data_t (data_t)
         ) i_cc_stream_register (
-            .clk_i,
-            .rst_ni,
+            .clk_i   (clk_i    ),
+            .rst_ni  (rst_n_i  ),
             .clr_i   (1'b0     ),
             .valid_i (s_valid_i),
             .ready_o (s_ready_o),
@@ -46,8 +46,8 @@ module stream_register #(
         cc_spill_register #(
             .data_t (data_t)
         ) i_cc_spill_register (
-            .clk_i,
-            .rst_ni,
+            .clk_i   (clk_i    ),
+            .rst_ni  (rst_n_i  ),
             .clr_i   (1'b0     ),
             .valid_i (s_valid_i),
             .ready_o (s_ready_o),

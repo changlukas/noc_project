@@ -14,9 +14,9 @@ module nmu_request_fifo #(
     parameter type         ar_t         = logic [AXI_ID_WIDTH-1:0]
 ) (
     input  wire logic  axi_clk_i,
-    input  wire logic  axi_rst_ni,
+    input  wire logic  axi_rst_n_i,
     input  wire logic  noc_clk_i,
-    input  wire logic  noc_rst_ni,
+    input  wire logic  noc_rst_n_i,
 
     input  wire logic  s_aw_valid_i,
     output wire logic  s_aw_ready_o,
@@ -53,12 +53,12 @@ module nmu_request_fifo #(
         .data_t         (aw_t          )
     ) i_aw_fifo (
         .src_clk_i   (axi_clk_i   ),
-        .src_rst_ni  (axi_rst_ni  ),
+        .src_rst_n_i (axi_rst_n_i ),
         .src_valid_i (s_aw_valid_i),
         .src_ready_o (s_aw_ready_o),
         .src_data_i  (s_aw_data_i ),
         .dst_clk_i   (noc_clk_i   ),
-        .dst_rst_ni  (noc_rst_ni  ),
+        .dst_rst_n_i (noc_rst_n_i ),
         .dst_valid_o (m_aw_valid_o),
         .dst_ready_i (m_aw_ready_i),
         .dst_data_o  (m_aw_data_o )
@@ -69,12 +69,12 @@ module nmu_request_fifo #(
         .data_t         (w_t           )
     ) i_w_fifo (
         .src_clk_i   (axi_clk_i  ),
-        .src_rst_ni  (axi_rst_ni ),
+        .src_rst_n_i (axi_rst_n_i),
         .src_valid_i (s_w_valid_i),
         .src_ready_o (s_w_ready_o),
         .src_data_i  (s_w_data_i ),
         .dst_clk_i   (noc_clk_i  ),
-        .dst_rst_ni  (noc_rst_ni ),
+        .dst_rst_n_i (noc_rst_n_i),
         .dst_valid_o (m_w_valid_o),
         .dst_ready_i (m_w_ready_i),
         .dst_data_o  (m_w_data_o )
@@ -85,12 +85,12 @@ module nmu_request_fifo #(
         .data_t         (ar_t          )
     ) i_ar_fifo (
         .src_clk_i   (axi_clk_i   ),
-        .src_rst_ni  (axi_rst_ni  ),
+        .src_rst_n_i (axi_rst_n_i ),
         .src_valid_i (s_ar_valid_i),
         .src_ready_o (s_ar_ready_o),
         .src_data_i  (s_ar_data_i ),
         .dst_clk_i   (noc_clk_i   ),
-        .dst_rst_ni  (noc_rst_ni  ),
+        .dst_rst_n_i (noc_rst_n_i ),
         .dst_valid_o (m_ar_valid_o),
         .dst_ready_i (m_ar_ready_i),
         .dst_data_o  (m_ar_data_o )

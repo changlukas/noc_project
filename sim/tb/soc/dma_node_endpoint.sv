@@ -61,7 +61,7 @@ module dma_node_endpoint #(
     parameter int unsigned AWUSER_WIDTH = ni_params_pkg::AXI_AWUSER_WIDTH
 ) (
     input  logic                       clk_i,
-    input  logic                       rst_ni,
+    input  logic                       rst_n_i,
     input  int unsigned                peer_jobs_retired_i [NUM_ENDPOINTS],
     output ni_signals_pkg::axi_req_t   master_axi_req_o,
     output logic [AWUSER_WIDTH-1:0]    master_awuser_o,
@@ -98,74 +98,80 @@ module dma_node_endpoint #(
     idma_pkg::idma_busy_t      dma_busy;
 
     int unsigned jobs_issued, jobs_retired;
-    logic jobs_done;
+    logic        jobs_done;
 
     idma_job_driver #(
-        .NODE_ID(NODE_ID),
-        .NUM_ENDPOINTS(NUM_ENDPOINTS)
+        .NODE_ID       (NODE_ID      ),
+        .NUM_ENDPOINTS (NUM_ENDPOINTS)
     ) i_job_driver (
-        .clk_i, .rst_ni,
-        .req_o          ( dma_job_req       ),
-        .req_valid_o    ( dma_job_req_valid ),
-        .req_ready_i    ( dma_job_req_ready ),
-        .rsp_valid_i    ( dma_job_rsp_valid ),
-        .peer_jobs_retired_i,
-        .jobs_issued_o  ( jobs_issued       ),
-        .jobs_retired_o ( jobs_retired      ),
-        .jobs_done_o    ( jobs_done         )
+        .clk_i               (clk_i              ),
+        .rst_n_i             (rst_n_i            ),
+        .req_o               (dma_job_req        ),
+        .req_valid_o         (dma_job_req_valid  ),
+        .req_ready_i         (dma_job_req_ready  ),
+        .rsp_valid_i         (dma_job_rsp_valid  ),
+        .peer_jobs_retired_i (peer_jobs_retired_i),
+        .jobs_issued_o       (jobs_issued        ),
+        .jobs_retired_o      (jobs_retired       ),
+        .jobs_done_o         (jobs_done          )
     );
 
     idma_backend_rw_axi #(
-        .DataWidth            ( idma_types_pkg::DATA_WIDTH   ),
-        .AddrWidth            ( idma_types_pkg::ADDR_WIDTH   ),
-        .UserWidth            ( idma_types_pkg::USER_WIDTH   ),
-        .AxiIdWidth           ( idma_types_pkg::AXI_ID_WIDTH ),
+        .DataWidth  (idma_types_pkg::DATA_WIDTH  ),
+        .AddrWidth  (idma_types_pkg::ADDR_WIDTH  ),
+        .UserWidth  (idma_types_pkg::USER_WIDTH  ),
+        .AxiIdWidth (idma_types_pkg::AXI_ID_WIDTH),
         .NumAxInFlight        ( 32'd64 ),   // MaxMstTrans, what the crossbar allows one initiator
         .BufferDepth          ( 32'd3  ),   // iDMA's own recommendation for misaligned transfers
-        .TFLenWidth           ( idma_types_pkg::TF_LEN_WIDTH ),
+        .TFLenWidth (idma_types_pkg::TF_LEN_WIDTH),
         .MemSysDepth          ( 32'd0  ),   // no round-trip constant exists here yet
-        .RAWCouplingAvail     ( 1'b1   ),
-        .MaskInvalidData      ( 1'b1   ),
-        .HardwareLegalizer    ( 1'b1   ),
-        .RejectZeroTransfers  ( 1'b1   ),
-        .ErrorCap             ( idma_pkg::NO_ERROR_HANDLING ),
-        .idma_req_t           ( idma_types_pkg::idma_req_t  ),
-        .idma_rsp_t           ( idma_types_pkg::idma_rsp_t  ),
-        .idma_eh_req_t        ( idma_pkg::idma_eh_req_t ),
-        .idma_busy_t          ( idma_pkg::idma_busy_t   ),
-        .axi_req_t            ( idma_types_pkg::axi_req_t  ),
-        .axi_rsp_t            ( idma_types_pkg::axi_resp_t ),
-        .read_meta_channel_t  ( idma_types_pkg::read_meta_channel_t  ),
-        .write_meta_channel_t ( idma_types_pkg::write_meta_channel_t )
+        .RAWCouplingAvail     (1'b1                                ),
+        .MaskInvalidData      (1'b1                                ),
+        .HardwareLegalizer    (1'b1                                ),
+        .RejectZeroTransfers  (1'b1                                ),
+        .ErrorCap             (idma_pkg::NO_ERROR_HANDLING         ),
+        .idma_req_t           (idma_types_pkg::idma_req_t          ),
+        .idma_rsp_t           (idma_types_pkg::idma_rsp_t          ),
+        .idma_eh_req_t        (idma_pkg::idma_eh_req_t             ),
+        .idma_busy_t          (idma_pkg::idma_busy_t               ),
+        .axi_req_t            (idma_types_pkg::axi_req_t           ),
+        .axi_rsp_t            (idma_types_pkg::axi_resp_t          ),
+        .read_meta_channel_t  (idma_types_pkg::read_meta_channel_t ),
+        .write_meta_channel_t (idma_types_pkg::write_meta_channel_t)
     ) i_dma (
-        .clk_i, .rst_ni,
-        .testmode_i      ( 1'b0              ),
-        .idma_req_i      ( dma_job_req       ),
-        .req_valid_i     ( dma_job_req_valid ),
-        .req_ready_o     ( dma_job_req_ready ),
-        .idma_rsp_o      ( dma_job_rsp       ),
-        .rsp_valid_o     ( dma_job_rsp_valid ),
-        .rsp_ready_i     ( 1'b1              ),
+        .clk_i       (clk_i            ),
+        .rst_ni      (rst_n_i          ),
+        .testmode_i  (1'b0             ),
+        .idma_req_i  (dma_job_req      ),
+        .req_valid_i (dma_job_req_valid),
+        .req_ready_o (dma_job_req_ready),
+        .idma_rsp_o  (dma_job_rsp      ),
+        .rsp_valid_o (dma_job_rsp_valid),
+        .rsp_ready_i (1'b1             ),
         .idma_eh_req_i   ( '0                ),   // ErrorCap is NO_ERROR_HANDLING
-        .eh_req_valid_i  ( 1'b0              ),
-        .eh_req_ready_o  (                   ),
-        .axi_read_req_o  ( dma_read_req      ),
-        .axi_read_rsp_i  ( dma_read_rsp      ),
-        .axi_write_req_o ( dma_write_req     ),
-        .axi_write_rsp_i ( dma_write_rsp     ),
-        .busy_o          ( dma_busy          )
+        .eh_req_valid_i  (1'b0         ),
+        .eh_req_ready_o  (             ),
+        .axi_read_req_o  (dma_read_req ),
+        .axi_read_rsp_i  (dma_read_rsp ),
+        .axi_write_req_o (dma_write_req),
+        .axi_write_rsp_i (dma_write_rsp),
+        .busy_o          (dma_busy     )
     );
 
     // The backend keeps read and write on separate AXI ports; the tile crossbar
     // has one slave port per initiator, so the two rejoin here.
     axi_rw_join #(
-        .axi_req_t  ( idma_types_pkg::axi_req_t  ),
-        .axi_resp_t ( idma_types_pkg::axi_resp_t )
+        .axi_req_t  (idma_types_pkg::axi_req_t ),
+        .axi_resp_t (idma_types_pkg::axi_resp_t)
     ) i_rw_join (
-        .clk_i, .rst_ni,
-        .slv_read_req_i   ( dma_read_req  ), .slv_read_resp_o  ( dma_read_rsp  ),
-        .slv_write_req_i  ( dma_write_req ), .slv_write_resp_o ( dma_write_rsp ),
-        .mst_req_o        ( dma_req       ), .mst_resp_i       ( dma_rsp       )
+        .clk_i            (clk_i        ),
+        .rst_ni           (rst_n_i      ),
+        .slv_read_req_i   (dma_read_req ),
+        .slv_read_resp_o  (dma_read_rsp ),
+        .slv_write_req_i  (dma_write_req),
+        .slv_write_resp_o (dma_write_rsp),
+        .mst_req_o        (dma_req      ),
+        .mst_resp_i       (dma_rsp      )
     );
 
     // ------------------------------------------------------------------
@@ -174,42 +180,50 @@ module dma_node_endpoint #(
     // Response side only: stalling AW/W/AR here would be injection-rate
     // control, and a DMA sets its own injection rate.
     AXI_BUS #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH),   .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(XBAR_SLV_ID_W),  .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH (ADDR_WIDTH   ),
+        .AXI_DATA_WIDTH (DATA_WIDTH   ),
+        .AXI_ID_WIDTH   (XBAR_SLV_ID_W),
+        .AXI_USER_WIDTH (AWUSER_WIDTH )
     ) mst_pre_delay ();
 
     AXI_BUS #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH),   .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(XBAR_SLV_ID_W),  .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH (ADDR_WIDTH   ),
+        .AXI_DATA_WIDTH (DATA_WIDTH   ),
+        .AXI_ID_WIDTH   (XBAR_SLV_ID_W),
+        .AXI_USER_WIDTH (AWUSER_WIDTH )
     ) mst_post_delay ();
 
     `AXI_ASSIGN_FROM_REQ(mst_pre_delay, dma_req)
     `AXI_ASSIGN_TO_RESP(dma_rsp, mst_pre_delay)
 
     axi_delayer_intf #(
-        .AXI_ID_WIDTH(XBAR_SLV_ID_W),
-        .AXI_ADDR_WIDTH(ADDR_WIDTH),
-        .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_USER_WIDTH(AWUSER_WIDTH),
-        .STALL_RANDOM_INPUT(1'b0),
-        .STALL_RANDOM_OUTPUT(MST_STALL_RANDOM_OUTPUT),
-        .FIXED_DELAY_INPUT(0),
-        .FIXED_DELAY_OUTPUT(MST_FIXED_DELAY_OUTPUT)
+        .AXI_ID_WIDTH        (XBAR_SLV_ID_W          ),
+        .AXI_ADDR_WIDTH      (ADDR_WIDTH             ),
+        .AXI_DATA_WIDTH      (DATA_WIDTH             ),
+        .AXI_USER_WIDTH      (AWUSER_WIDTH           ),
+        .STALL_RANDOM_INPUT  (1'b0                   ),
+        .STALL_RANDOM_OUTPUT (MST_STALL_RANDOM_OUTPUT),
+        .FIXED_DELAY_INPUT   (0                      ),
+        .FIXED_DELAY_OUTPUT  (MST_FIXED_DELAY_OUTPUT )
     ) i_mst_backpressure (
-        .clk_i(clk_i),
-        .rst_ni(rst_ni),
-        .bypass_i(1'b0),
-        .slv(mst_pre_delay),
-        .mst(mst_post_delay)
+        .clk_i    (clk_i         ),
+        .rst_ni   (rst_n_i       ),
+        .bypass_i (1'b0          ),
+        .slv      (mst_pre_delay ),
+        .mst      (mst_post_delay)
     );
 
     // Evidence the knob acts, reported once per node at $finish. Zero by
     // construction under the "ideal" profile, where the delayer is wires.
     int unsigned mst_r_stall_cycles = 0;
-    always_ff @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) mst_r_stall_cycles <= 0;
-        else if (master_axi_rsp_i.rvalid && !master_axi_req_o.rready)
-            mst_r_stall_cycles <= mst_r_stall_cycles + 1;
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
+            mst_r_stall_cycles <= 0;
+        end else begin
+            if (master_axi_rsp_i.rvalid && !master_axi_req_o.rready) begin
+                mst_r_stall_cycles <= mst_r_stall_cycles + 1;
+            end
+        end
     end
     final $display("[mst_bp] node%0d: R backpressure held %0d cycles",
                    NODE_ID, mst_r_stall_cycles);
@@ -238,13 +252,17 @@ module dma_node_endpoint #(
     // [NoSlvPorts-1:0] / [NoMstPorts-1:0] and SystemVerilog binds an interface
     // array port element-by-element in declared order.
     AXI_BUS #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH),  .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(XBAR_SLV_ID_W), .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH (ADDR_WIDTH   ),
+        .AXI_DATA_WIDTH (DATA_WIDTH   ),
+        .AXI_ID_WIDTH   (XBAR_SLV_ID_W),
+        .AXI_USER_WIDTH (AWUSER_WIDTH )
     ) tile_axi [XBAR_SLV_PORTS-1:0] ();
 
     AXI_BUS #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH),  .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH (ADDR_WIDTH   ),
+        .AXI_DATA_WIDTH (DATA_WIDTH   ),
+        .AXI_ID_WIDTH   (XBAR_MST_ID_W),
+        .AXI_USER_WIDTH (AWUSER_WIDTH )
     ) tile_mst [XBAR_MST_PORTS-1:0] ();
 
     // m2 after the id remap: the NoC-facing face of the tile, at the NI's id
@@ -252,8 +270,10 @@ module dma_node_endpoint #(
     // than erroring, and never puts two distinct upstream ids on one downstream
     // id, so per-id ordering survives the fold.
     AXI_BUS #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(NOC_ID_WIDTH), .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH (ADDR_WIDTH  ),
+        .AXI_DATA_WIDTH (DATA_WIDTH  ),
+        .AXI_ID_WIDTH   (NOC_ID_WIDTH),
+        .AXI_USER_WIDTH (AWUSER_WIDTH)
     ) noc_mst ();
 
     // s0: the DMA's own traffic.
@@ -308,7 +328,7 @@ module dma_node_endpoint #(
     assign tile_axi[1].ar_user   = '0;
     assign tile_axi[1].r_ready   = slave_axi_req_i.rready;
     always_comb begin
-        slave_axi_rsp_o = '0;
+        slave_axi_rsp_o         = '0;
         slave_axi_rsp_o.awready = tile_axi[1].aw_ready;
         slave_axi_rsp_o.wready  = tile_axi[1].w_ready;
         slave_axi_rsp_o.bid     = tile_axi[1].b_id;
@@ -345,9 +365,9 @@ module dma_node_endpoint #(
     // Own rule_t rather than axi_pkg::xbar_rule_64_t: the address fields have to
     // follow ADDR_WIDTH, not a fixed 64.
     typedef struct packed {
-        int unsigned           idx;
-        logic [ADDR_WIDTH-1:0] start_addr;
-        logic [ADDR_WIDTH-1:0] end_addr;
+        int unsigned                  idx;
+        logic        [ADDR_WIDTH-1:0] start_addr;
+        logic        [ADDR_WIDTH-1:0] end_addr;
     } tile_rule_t;
 
     // One rule per memory target, end exclusive. Sizes are exact: axi_xbar
@@ -372,27 +392,27 @@ module dma_node_endpoint #(
 
     // s0 falls through to the NMU, s1 does not fall through at all.
     localparam int unsigned MST_IDX_W = cf_math_pkg::idx_width(XBAR_MST_PORTS);
-    logic [XBAR_SLV_PORTS-1:0]                tile_en_default;
+    logic [XBAR_SLV_PORTS-1:0] tile_en_default;
     logic [XBAR_SLV_PORTS-1:0][MST_IDX_W-1:0] tile_default_mst;
     assign tile_en_default     = 2'b01;
     assign tile_default_mst[0] = MST_IDX_W'(NMU_TARGET);
     assign tile_default_mst[1] = '0;  // unused, s1's default is disabled
 
     axi_xbar_intf #(
-        .AXI_USER_WIDTH(AWUSER_WIDTH),
-        .Cfg(TileXbarCfg),
-        .ATOPS(1'b0),
-        .CONNECTIVITY(TileConnectivity),
-        .rule_t(tile_rule_t)
+        .AXI_USER_WIDTH (AWUSER_WIDTH    ),
+        .Cfg            (TileXbarCfg     ),
+        .ATOPS          (1'b0            ),
+        .CONNECTIVITY   (TileConnectivity),
+        .rule_t         (tile_rule_t     )
     ) u_tile_xbar (
-        .clk_i,
-        .rst_ni,
-        .test_i(1'b0),
-        .slv_ports(tile_axi),
-        .mst_ports(tile_mst),
-        .addr_map_i(tile_addr_map),
-        .en_default_mst_port_i(tile_en_default),
-        .default_mst_port_i(tile_default_mst)
+        .clk_i                 (clk_i           ),
+        .rst_ni                (rst_n_i         ),
+        .test_i                (1'b0            ),
+        .slv_ports             (tile_axi        ),
+        .mst_ports             (tile_mst        ),
+        .addr_map_i            (tile_addr_map   ),
+        .en_default_mst_port_i (tile_en_default ),
+        .default_mst_port_i    (tile_default_mst)
     );
 
     // m0 / m1 -> the two tile memories, each behind its own delayer. Storage and
@@ -404,8 +424,10 @@ module dma_node_endpoint #(
     // and a backdoor read of it returns the type default, which this simulator
     // renders 0 and not X (gen_tb_top.py, compare_region).
     AXI_BUS #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH (ADDR_WIDTH   ),
+        .AXI_DATA_WIDTH (DATA_WIDTH   ),
+        .AXI_ID_WIDTH   (XBAR_MST_ID_W),
+        .AXI_USER_WIDTH (AWUSER_WIDTH )
     ) tile_mem [TILE_TARGETS-1:0] ();
 
     for (genvar t = 0; t < TILE_TARGETS; t++) begin : g_tile_mem
@@ -413,68 +435,90 @@ module dma_node_endpoint #(
         longint unsigned read_requests_reg = 0;
         longint unsigned read_requested_bytes_reg = 0;
         longint unsigned read_response_beats_reg = 0;
-        always_ff @(posedge clk_i) begin
-            if (tile_mem[t].ar_valid && tile_mem[t].ar_ready) begin
-                read_requests_reg <= read_requests_reg + 1;
-                read_requested_bytes_reg <= read_requested_bytes_reg +
-                    ((64'(tile_mem[t].ar_len) + 1) << tile_mem[t].ar_size);
-            end
-            if (tile_mem[t].r_valid && tile_mem[t].r_ready)
-                read_response_beats_reg <= read_response_beats_reg + 1;
-            if (!rst_ni) begin
-                read_requests_reg <= 0;
+        always @(posedge clk_i or negedge rst_n_i) begin
+            if (~rst_n_i) begin
+                read_requests_reg        <= 0;
                 read_requested_bytes_reg <= 0;
-                read_response_beats_reg <= 0;
+                read_response_beats_reg  <= 0;
+            end else begin
+                if (tile_mem[t].ar_valid && tile_mem[t].ar_ready) begin
+                    read_requests_reg        <= read_requests_reg + 1;
+                    read_requested_bytes_reg <= read_requested_bytes_reg +
+                        ((64'(tile_mem[t].ar_len) + 1) << tile_mem[t].ar_size);
+                end
+                if (tile_mem[t].r_valid && tile_mem[t].r_ready) begin
+                    read_response_beats_reg <= read_response_beats_reg + 1;
+                end
             end
         end
+
         final begin
             $display("[memory_reads] node%0d target%0d: requests=%0d requested_bytes=%0d response_beats=%0d",
                      NODE_ID, t, read_requests_reg, read_requested_bytes_reg,
                      read_response_beats_reg);
         end
         axi_delayer_intf #(
-            .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_ADDR_WIDTH(ADDR_WIDTH),
-            .AXI_DATA_WIDTH(DATA_WIDTH),  .AXI_USER_WIDTH(AWUSER_WIDTH),
-            .STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),
-            .STALL_RANDOM_OUTPUT(MEM_STALL_RANDOM_OUTPUT),
-            .FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),
-            .FIXED_DELAY_OUTPUT(MEM_FIXED_DELAY_OUTPUT)
-        ) i_delayer (
-            .clk_i(clk_i), .rst_ni(rst_ni), .bypass_i(1'b0),
-            .slv(tile_mst[t]), .mst(tile_mem[t])
-        );
+        .AXI_ID_WIDTH        (XBAR_MST_ID_W          ),
+        .AXI_ADDR_WIDTH      (ADDR_WIDTH             ),
+        .AXI_DATA_WIDTH      (DATA_WIDTH             ),
+        .AXI_USER_WIDTH      (AWUSER_WIDTH           ),
+        .STALL_RANDOM_INPUT  (MEM_STALL_RANDOM_INPUT ),
+        .STALL_RANDOM_OUTPUT (MEM_STALL_RANDOM_OUTPUT),
+        .FIXED_DELAY_INPUT   (MEM_FIXED_DELAY_INPUT  ),
+        .FIXED_DELAY_OUTPUT  (MEM_FIXED_DELAY_OUTPUT )
+    ) i_delayer (
+        .clk_i    (clk_i      ),
+        .rst_ni   (rst_n_i    ),
+        .bypass_i (1'b0       ),
+        .slv      (tile_mst[t]),
+        .mst      (tile_mem[t])
+    );
 
         axi_sim_mem_intf #(
-            .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-            .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_USER_WIDTH(AWUSER_WIDTH),
-            .WARN_UNINITIALIZED(1'b0), .UNINITIALIZED_DATA("undefined"),
-            .APPL_DELAY(ApplTime), .ACQ_DELAY(TestTime)
+            .AXI_ADDR_WIDTH     (ADDR_WIDTH   ),
+            .AXI_DATA_WIDTH     (DATA_WIDTH   ),
+            .AXI_ID_WIDTH       (XBAR_MST_ID_W),
+            .AXI_USER_WIDTH     (AWUSER_WIDTH ),
+            .WARN_UNINITIALIZED (1'b0         ),
+            .UNINITIALIZED_DATA ("undefined"  ),
+            .APPL_DELAY         (ApplTime     ),
+            .ACQ_DELAY          (TestTime     )
         ) i_mem (
-            .clk_i(clk_i), .rst_ni(rst_ni),
-            .axi_slv(tile_mem[t]),
-            .mon_w_valid_o(), .mon_w_addr_o(), .mon_w_data_o(),
-            .mon_w_id_o(), .mon_w_user_o(), .mon_w_beat_count_o(),
-            .mon_w_last_o(),
-            .mon_r_valid_o(), .mon_r_addr_o(), .mon_r_data_o(),
-            .mon_r_id_o(), .mon_r_user_o(), .mon_r_beat_count_o(), .mon_r_last_o()
+            .clk_i              (clk_i      ),
+            .rst_ni             (rst_n_i    ),
+            .axi_slv            (tile_mem[t]),
+            .mon_w_valid_o      (           ),
+            .mon_w_addr_o       (           ),
+            .mon_w_data_o       (           ),
+            .mon_w_id_o         (           ),
+            .mon_w_user_o       (           ),
+            .mon_w_beat_count_o (           ),
+            .mon_w_last_o       (           ),
+            .mon_r_valid_o      (           ),
+            .mon_r_addr_o       (           ),
+            .mon_r_data_o       (           ),
+            .mon_r_id_o         (           ),
+            .mon_r_user_o       (           ),
+            .mon_r_beat_count_o (           ),
+            .mon_r_last_o       (           )
         );
     end
 
     // m2 -> the NMU: this node's share of the traffic that goes on the NoC,
     // through the id remap that converts the tile's id space into the NI's.
     axi_id_remap_intf #(
-        .AXI_SLV_PORT_ID_WIDTH(XBAR_MST_ID_W),
-        .AXI_SLV_PORT_MAX_UNIQ_IDS(NOC_MAX_UNIQ_IDS),
-        .AXI_MAX_TXNS_PER_ID(ni_params_pkg::NMU_MAX_OUTSTANDING_PER_ID),
-        .AXI_MST_PORT_ID_WIDTH(NOC_ID_WIDTH),
-        .AXI_ADDR_WIDTH(ADDR_WIDTH),
-        .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_SLV_PORT_ID_WIDTH     (XBAR_MST_ID_W                            ),
+        .AXI_SLV_PORT_MAX_UNIQ_IDS (NOC_MAX_UNIQ_IDS                         ),
+        .AXI_MAX_TXNS_PER_ID       (ni_params_pkg::NMU_MAX_OUTSTANDING_PER_ID),
+        .AXI_MST_PORT_ID_WIDTH     (NOC_ID_WIDTH                             ),
+        .AXI_ADDR_WIDTH            (ADDR_WIDTH                               ),
+        .AXI_DATA_WIDTH            (DATA_WIDTH                               ),
+        .AXI_USER_WIDTH            (AWUSER_WIDTH                             )
     ) i_noc_id_remap (
-        .clk_i(clk_i),
-        .rst_ni(rst_ni),
-        .slv(tile_mst[NMU_TARGET]),
-        .mst(noc_mst)
+        .clk_i  (clk_i               ),
+        .rst_ni (rst_n_i             ),
+        .slv    (tile_mst[NMU_TARGET]),
+        .mst    (noc_mst             )
     );
 
     assign master_axi_req_o.awid     = noc_mst.aw_id;
@@ -507,19 +551,19 @@ module dma_node_endpoint #(
     assign master_axi_req_o.arvalid  = noc_mst.ar_valid;
     assign master_axi_req_o.rready   = noc_mst.r_ready;
 
-    assign noc_mst.aw_ready  = master_axi_rsp_i.awready;
-    assign noc_mst.w_ready   = master_axi_rsp_i.wready;
-    assign noc_mst.b_id      = master_axi_rsp_i.bid;
-    assign noc_mst.b_resp    = master_axi_rsp_i.bresp;
-    assign noc_mst.b_valid   = master_axi_rsp_i.bvalid;
-    assign noc_mst.ar_ready  = master_axi_rsp_i.arready;
-    assign noc_mst.r_id      = master_axi_rsp_i.rid;
-    assign noc_mst.r_data    = master_axi_rsp_i.rdata;
-    assign noc_mst.r_resp    = master_axi_rsp_i.rresp;
-    assign noc_mst.r_last    = master_axi_rsp_i.rlast;
-    assign noc_mst.r_valid   = master_axi_rsp_i.rvalid;
-    assign noc_mst.b_user    = '0;
-    assign noc_mst.r_user    = '0;
+    assign noc_mst.aw_ready = master_axi_rsp_i.awready;
+    assign noc_mst.w_ready  = master_axi_rsp_i.wready;
+    assign noc_mst.b_id     = master_axi_rsp_i.bid;
+    assign noc_mst.b_resp   = master_axi_rsp_i.bresp;
+    assign noc_mst.b_valid  = master_axi_rsp_i.bvalid;
+    assign noc_mst.ar_ready = master_axi_rsp_i.arready;
+    assign noc_mst.r_id     = master_axi_rsp_i.rid;
+    assign noc_mst.r_data   = master_axi_rsp_i.rdata;
+    assign noc_mst.r_resp   = master_axi_rsp_i.rresp;
+    assign noc_mst.r_last   = master_axi_rsp_i.rlast;
+    assign noc_mst.r_valid  = master_axi_rsp_i.rvalid;
+    assign noc_mst.b_user   = '0;
+    assign noc_mst.r_user   = '0;
 
     // ------------------------------------------------------------------
     // Response checks (ported verbatim in intent from user_node_endpoint:
@@ -536,8 +580,8 @@ module dma_node_endpoint #(
     // axi_sim_mem answers every mapped access OKAY, so an error response here is
     // a fabric bug (a corrupted merged B) or a write that missed every tile
     // window.
-    always_ff @(posedge clk_i) begin
-        if (rst_ni && mst_post_delay.b_valid && mst_post_delay.b_ready &&
+    always @(posedge clk_i) begin
+        if (rst_n_i && mst_post_delay.b_valid && mst_post_delay.b_ready &&
                 mst_post_delay.b_resp != axi_pkg::RESP_OKAY)
             $fatal(1, "[dma_ep] node%0d: BRESP=%0h on id=%0h, expected OKAY",
                    NODE_ID, mst_post_delay.b_resp, mst_post_delay.b_id);
@@ -550,8 +594,8 @@ module dma_node_endpoint #(
     // silently. A DMA reaches this failure mode more easily than the file
     // master did: gen_dma_jobs.py recomputes the window bases through
     // address_map.pack_config(), and a disagreement with the SAM lands here.
-    always_ff @(posedge clk_i) begin
-        if (rst_ni && mst_post_delay.r_valid && mst_post_delay.r_ready &&
+    always @(posedge clk_i) begin
+        if (rst_n_i && mst_post_delay.r_valid && mst_post_delay.r_ready &&
                 !resp_ok(mst_post_delay.r_resp))
             $fatal(1, "[dma_ep] node%0d: RRESP=%0h on id=%0h, expected OKAY (address outside every tile window?)",
                    NODE_ID, mst_post_delay.r_resp, mst_post_delay.r_id);
@@ -567,9 +611,9 @@ module dma_node_endpoint #(
         if ($value$plusargs("hs_trace_node=%d", hs_trace_node) && hs_trace_node == NODE_ID)
             hs_fd = $fopen($sformatf("hs_trace_node%0d.log", NODE_ID), "w");
     end
-    always_ff @(posedge clk_i) begin
+    always @(posedge clk_i) begin
         hs_cyc <= hs_cyc + 1;
-        if (hs_fd != 0 && rst_ni)
+        if (hs_fd != 0 && rst_n_i)
             $fdisplay(hs_fd, "%0d %b%b %b%b %b%b", hs_cyc,
                       mst_post_delay.aw_valid, mst_post_delay.aw_ready,
                       mst_post_delay.w_valid,  mst_post_delay.w_ready,
@@ -595,21 +639,26 @@ module dma_node_endpoint #(
     assign mon_mst_rsp = axi_vip_types_pkg::vip_rsp_from_flat(master_axi_rsp_i);
 
     axi_bw_monitor #(
-        .req_t(axi_vip_types_pkg::vip_req_t),
-        .rsp_t(axi_vip_types_pkg::vip_resp_t),
-        .AxiIdWidth(NOC_ID_WIDTH),
-        .Name($sformatf("node%0d.master", NODE_ID))
+        .req_t      (axi_vip_types_pkg::vip_req_t        ),
+        .rsp_t      (axi_vip_types_pkg::vip_resp_t       ),
+        .AxiIdWidth (NOC_ID_WIDTH                        ),
+        .Name       ($sformatf("node%0d.master", NODE_ID))
     ) u_bw_mst (
-        .clk_i(clk_i), .en_i(rst_ni), .end_of_sim_i(end_of_sim_o),
-        .req_i(mon_mst_req), .rsp_i(mon_mst_rsp),
-        .ar_in_flight_o(), .aw_in_flight_o()
+        .clk_i          (clk_i       ),
+        .en_i           (rst_n_i     ),
+        .end_of_sim_i   (end_of_sim_o),
+        .req_i          (mon_mst_req ),
+        .rsp_i          (mon_mst_rsp ),
+        .ar_in_flight_o (            ),
+        .aw_in_flight_o (            )
     );
 
     // Master-face AX handshakes, the same count user_node_endpoint reports:
     // everything the initiator issued, tile-local traffic included.
-    always_ff @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) txn_cnt_o <= 0;
-        else begin
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
+            txn_cnt_o <= 0;
+        end else begin
             txn_cnt_o <= txn_cnt_o
                 + 32'(mst_post_delay.aw_valid && mst_post_delay.aw_ready)
                 + 32'(mst_post_delay.ar_valid && mst_post_delay.ar_ready);

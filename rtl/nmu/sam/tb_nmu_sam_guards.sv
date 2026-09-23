@@ -12,7 +12,7 @@ module tb_nmu_sam_guards #(
     localparam int unsigned AR_REG_TYPE = INVALID_CASE == 1 ? 3 : 0;
 
     logic clk = 1'b0;
-    logic rst_ni = 1'b0;
+    logic rst_n_i = 1'b0;
     logic s_aw_valid = 1'b0;
     logic s_aw_ready;
     ni_signals_pkg::axi_aw_t s_aw = '0;
@@ -27,29 +27,29 @@ module tb_nmu_sam_guards #(
     ni_types_pkg::nmu_sam_ar_result_t m_ar;
 
     nmu_sam #(
-        .AW_SAM_REG_TYPE ( AW_REG_TYPE   ),
-        .AR_SAM_REG_TYPE ( AR_REG_TYPE   ),
-        .SAM_NUM_RULES   ( SAM_NUM_RULES  ),
-        .addr_t          ( sam_addr_t     ),
-        .sam_mask_sel_t  ( sam_mask_sel_t ),
-        .sam_result_t       ( sam_result_t      ),
-        .sam_rule_t      ( sam_rule_t     ),
-        .SAM             ( SAM            )
+        .AW_SAM_REG_TYPE (AW_REG_TYPE   ),
+        .AR_SAM_REG_TYPE (AR_REG_TYPE   ),
+        .SAM_NUM_RULES   (SAM_NUM_RULES ),
+        .addr_t          (sam_addr_t    ),
+        .sam_mask_sel_t  (sam_mask_sel_t),
+        .sam_result_t    (sam_result_t  ),
+        .sam_rule_t      (sam_rule_t    ),
+        .SAM             (SAM           )
     ) dut (
-        .noc_clk_i       ( clk        ),
-        .noc_rst_ni      ( rst_ni     ),
-        .s_aw_valid_i    ( s_aw_valid ),
-        .s_aw_ready_o    ( s_aw_ready ),
-        .s_aw_i          ( s_aw       ),
-        .m_aw_valid_o    ( m_aw_valid ),
-        .m_aw_ready_i    ( m_aw_ready ),
-        .m_aw_o          ( m_aw       ),
-        .s_ar_valid_i    ( s_ar_valid ),
-        .s_ar_ready_o    ( s_ar_ready ),
-        .s_ar_i          ( s_ar       ),
-        .m_ar_valid_o    ( m_ar_valid ),
-        .m_ar_ready_i    ( m_ar_ready ),
-        .m_ar_o          ( m_ar       )
+        .noc_clk_i    (clk       ),
+        .noc_rst_n_i  (rst_n_i   ),
+        .s_aw_valid_i (s_aw_valid),
+        .s_aw_ready_o (s_aw_ready),
+        .s_aw_i       (s_aw      ),
+        .m_aw_valid_o (m_aw_valid),
+        .m_aw_ready_i (m_aw_ready),
+        .m_aw_o       (m_aw      ),
+        .s_ar_valid_i (s_ar_valid),
+        .s_ar_ready_o (s_ar_ready),
+        .s_ar_i       (s_ar      ),
+        .m_ar_valid_o (m_ar_valid),
+        .m_ar_ready_i (m_ar_ready),
+        .m_ar_o       (m_ar      )
     );
 
     // verilator lint_off BLKSEQ
@@ -64,47 +64,47 @@ module tb_nmu_sam_guards #(
 
         repeat (2) @(posedge clk);
         @(negedge clk);
-        rst_ni = 1'b1;
+        rst_n_i = 1'b1;
 
         case (INVALID_CASE)
             2: begin
-                s_aw = '0;
-                s_aw.awaddr = 48'h0000_01ff_ffc0;
-                s_aw.awlen = 8'd1;
-                s_aw.awsize = 3'd6;
+                s_aw         = '0;
+                s_aw.awaddr  = 48'h0000_01ff_ffc0;
+                s_aw.awlen   = 8'd1;
+                s_aw.awsize  = 3'd6;
                 s_aw.awburst = 2'd1;
-                s_aw_valid = 1'b1;
+                s_aw_valid   = 1'b1;
             end
             3: begin
-                s_ar = '0;
-                s_ar.araddr = 48'h0000_01ff_ffc0;
-                s_ar.arlen = 8'd1;
-                s_ar.arsize = 3'd6;
+                s_ar         = '0;
+                s_ar.araddr  = 48'h0000_01ff_ffc0;
+                s_ar.arlen   = 8'd1;
+                s_ar.arsize  = 3'd6;
                 s_ar.arburst = 2'd1;
-                s_ar_valid = 1'b1;
+                s_ar_valid   = 1'b1;
             end
             4: begin
-                s_aw = '0;
-                s_aw.awaddr = 48'h0000_0000_0080;
+                s_aw             = '0;
+                s_aw.awaddr      = 48'h0000_0000_0080;
                 s_aw.awuser[9:8] = 2'd2;
-                s_aw_valid = 1'b1;
+                s_aw_valid       = 1'b1;
             end
             5: begin
-                s_aw = '0;
+                s_aw        = '0;
                 s_aw.awaddr = 48'hffff_ffff_f000;
-                s_aw_valid = 1'b1;
+                s_aw_valid  = 1'b1;
             end
             6: begin
-                s_ar = '0;
+                s_ar        = '0;
                 s_ar.araddr = 48'hffff_ffff_f000;
-                s_ar_valid = 1'b1;
+                s_ar_valid  = 1'b1;
             end
             default: begin
-                s_aw = '0;
-                s_aw.awaddr = 48'h0004_0000_0080;
-                s_aw.awuser[9:8] = 2'd1;
+                s_aw               = '0;
+                s_aw.awaddr        = 48'h0004_0000_0080;
+                s_aw.awuser[9:8]   = 2'd1;
                 s_aw.awuser[57:10] = 48'h0003_0000_0000;
-                s_aw_valid = 1'b1;
+                s_aw_valid         = 1'b1;
             end
         endcase
 

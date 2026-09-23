@@ -5,9 +5,9 @@ module tb_nmu_req_hold;
     localparam int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH;
 
     logic clk_i = 1'b0;
-    logic rst_ni = 1'b0;
+    logic rst_n_i = 1'b0;
     logic tx_req_ready_i = 1'b1;
-    logic tx_req_valid_o;
+    logic                      tx_req_valid_o;
     logic [REQ_FLIT_WIDTH-1:0] tx_req_flit_o;
     ni_signals_pkg::axi_req_t axi_req_i = '0;
     ni_signals_pkg::axi_rsp_t axi_rsp_o;
@@ -15,35 +15,37 @@ module tb_nmu_req_hold;
 
     always #5 clk_i = ~clk_i;
 
-    always_ff @(posedge clk_i) begin
-        if (!rst_ni) begin
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
             handshakes <= 0;
-        end else if (tx_req_valid_o && tx_req_ready_i) begin
-            assert (tx_req_flit_o[31:0] == 32'h89abcdef + handshakes)
-                else $fatal(1, "REQ payload/order mismatch at transfer %0d", handshakes);
-            handshakes <= handshakes + 1;
+        end else begin
+            if (tx_req_valid_o && tx_req_ready_i) begin
+                assert (tx_req_flit_o[31:0] == 32'h89abcdef + handshakes)
+                    else $fatal(1, "REQ payload/order mismatch at transfer %0d", handshakes);
+                handshakes <= handshakes + 1;
+            end
         end
     end
 
     nmu_wrap u_dut (
-        .clk_i,
-        .rst_ni,
-        .ctx_i(64'd1),
-        .axi_req_i,
-        .awuser_i('0),
-        .axi_rsp_o,
-        .tx_req_valid_o,
-        .tx_req_flit_o,
-        .tx_req_ready_i,
-        .rx_rsp_valid_i(1'b0),
-        .rx_rsp_flit_i('0),
-        .rx_rsp_ready_o(),
-        .tx_dat_valid_o(),
-        .tx_dat_flit_o(),
-        .tx_dat_crdvalid_i('0),
-        .rx_dat_valid_i(1'b0),
-        .rx_dat_flit_i('0),
-        .rx_dat_crdvalid_o()
+        .clk_i             (clk_i         ),
+        .rst_n_i           (rst_n_i       ),
+        .ctx_i             (64'd1         ),
+        .axi_req_i         (axi_req_i     ),
+        .awuser_i          ('0            ),
+        .axi_rsp_o         (axi_rsp_o     ),
+        .tx_req_valid_o    (tx_req_valid_o),
+        .tx_req_flit_o     (tx_req_flit_o ),
+        .tx_req_ready_i    (tx_req_ready_i),
+        .rx_rsp_valid_i    (1'b0          ),
+        .rx_rsp_flit_i     ('0            ),
+        .rx_rsp_ready_o    (              ),
+        .tx_dat_valid_o    (              ),
+        .tx_dat_flit_o     (              ),
+        .tx_dat_crdvalid_i ('0            ),
+        .rx_dat_valid_i    (1'b0          ),
+        .rx_dat_flit_i     ('0            ),
+        .rx_dat_crdvalid_o (              )
     );
 
     initial begin : run_test
@@ -52,7 +54,7 @@ module tb_nmu_req_hold;
 
         repeat (2) @(posedge clk_i);
         @(negedge clk_i);
-        rst_ni = 1'b1;
+        rst_n_i = 1'b1;
 
         while (!tx_req_valid_o && wait_cycles < 8) begin
             @(negedge clk_i);
@@ -61,7 +63,7 @@ module tb_nmu_req_hold;
         assert (tx_req_valid_o)
             else $fatal(1, "REQ model strobe did not reach the wrapper output");
 
-        held_flit = tx_req_flit_o;
+        held_flit      = tx_req_flit_o;
         tx_req_ready_i = 1'b0;
 
         repeat (3) begin

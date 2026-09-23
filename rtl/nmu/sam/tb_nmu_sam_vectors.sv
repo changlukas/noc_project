@@ -10,7 +10,7 @@ module tb_nmu_sam_vectors;
     import topology_pkg::*;
 
     logic clk = 1'b0;
-    logic rst_ni = 1'b0;
+    logic rst_n_i = 1'b0;
     logic s_aw_valid = 1'b0;
     logic s_aw_ready;
     ni_signals_pkg::axi_aw_t s_aw = '0;
@@ -25,29 +25,29 @@ module tb_nmu_sam_vectors;
     ni_types_pkg::nmu_sam_ar_result_t m_ar;
 
     nmu_sam #(
-        .AW_SAM_REG_TYPE ( 0              ),
-        .AR_SAM_REG_TYPE ( 0              ),
-        .SAM_NUM_RULES   ( SAM_NUM_RULES  ),
-        .addr_t          ( sam_addr_t     ),
-        .sam_mask_sel_t  ( sam_mask_sel_t ),
-        .sam_result_t       ( sam_result_t      ),
-        .sam_rule_t      ( sam_rule_t     ),
-        .SAM             ( SAM            )
+        .AW_SAM_REG_TYPE (0             ),
+        .AR_SAM_REG_TYPE (0             ),
+        .SAM_NUM_RULES   (SAM_NUM_RULES ),
+        .addr_t          (sam_addr_t    ),
+        .sam_mask_sel_t  (sam_mask_sel_t),
+        .sam_result_t    (sam_result_t  ),
+        .sam_rule_t      (sam_rule_t    ),
+        .SAM             (SAM           )
     ) dut (
-        .noc_clk_i    ( clk        ),
-        .noc_rst_ni   ( rst_ni     ),
-        .s_aw_valid_i ( s_aw_valid ),
-        .s_aw_ready_o ( s_aw_ready ),
-        .s_aw_i       ( s_aw       ),
-        .m_aw_valid_o ( m_aw_valid ),
-        .m_aw_ready_i ( m_aw_ready ),
-        .m_aw_o       ( m_aw       ),
-        .s_ar_valid_i ( s_ar_valid ),
-        .s_ar_ready_o ( s_ar_ready ),
-        .s_ar_i       ( s_ar       ),
-        .m_ar_valid_o ( m_ar_valid ),
-        .m_ar_ready_i ( m_ar_ready ),
-        .m_ar_o       ( m_ar       )
+        .noc_clk_i    (clk       ),
+        .noc_rst_n_i  (rst_n_i   ),
+        .s_aw_valid_i (s_aw_valid),
+        .s_aw_ready_o (s_aw_ready),
+        .s_aw_i       (s_aw      ),
+        .m_aw_valid_o (m_aw_valid),
+        .m_aw_ready_i (m_aw_ready),
+        .m_aw_o       (m_aw      ),
+        .s_ar_valid_i (s_ar_valid),
+        .s_ar_ready_o (s_ar_ready),
+        .s_ar_i       (s_ar      ),
+        .m_ar_valid_o (m_ar_valid),
+        .m_ar_ready_i (m_ar_ready),
+        .m_ar_o       (m_ar      )
     );
 
     function automatic sam_addr_t rule_address(
@@ -65,15 +65,15 @@ module tb_nmu_sam_vectors;
     task automatic check_pair(
         input int unsigned aw_rule, input int unsigned ar_rule, input int unsigned point
     );
-        s_aw = '0;
-        s_ar = '0;
-        s_aw.awid = ni_params_pkg::NOC_ID_WIDTH'(aw_rule);
-        s_aw.awaddr = rule_address(aw_rule, point);
+        s_aw             = '0;
+        s_ar             = '0;
+        s_aw.awid        = ni_params_pkg::NOC_ID_WIDTH'(aw_rule);
+        s_aw.awaddr      = rule_address(aw_rule, point);
         s_aw.awuser[7:0] = 8'h80 + 8'(aw_rule);
-        s_ar.arid = ni_params_pkg::NOC_ID_WIDTH'(ar_rule);
-        s_ar.araddr = rule_address(ar_rule, point);
-        s_aw_valid = 1'b1;
-        s_ar_valid = 1'b1;
+        s_ar.arid        = ni_params_pkg::NOC_ID_WIDTH'(ar_rule);
+        s_ar.araddr      = rule_address(ar_rule, point);
+        s_aw_valid       = 1'b1;
+        s_ar_valid       = 1'b1;
         #1ps;
         assert (s_aw_ready && s_ar_ready && m_aw_valid && m_ar_valid)
             else $fatal(1, "Mode-0 AW/AR pair did not remain independent");
@@ -93,7 +93,7 @@ module tb_nmu_sam_vectors;
         #1ps;
         assert (!s_aw_ready && !s_ar_ready && !m_aw_valid && !m_ar_valid)
             else $fatal(1, "SAM vectors exposed traffic during reset");
-        rst_ni = 1'b1;
+        rst_n_i = 1'b1;
         for (int unsigned rule_index = 0; rule_index < SAM_NUM_RULES; rule_index++) begin
             for (int unsigned point = 0; point < 3; point++) begin
                 check_pair(rule_index, (rule_index + 1) % SAM_NUM_RULES, point);

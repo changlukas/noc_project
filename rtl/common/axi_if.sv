@@ -44,54 +44,54 @@ interface axi_if #(
 )
 ();
     // AW
-    logic [ID_W-1:0]      awid;
-    logic [ADDR_W-1:0]    awaddr;
-    logic [7:0]           awlen;
-    logic [2:0]           awsize;
-    logic [1:0]           awburst;
-    logic                 awlock;
-    logic [3:0]           awcache;
-    logic [2:0]           awprot;
-    logic [3:0]           awqos;
-    logic [3:0]           awregion;
-    logic [AWUSER_W-1:0]  awuser;
-    logic                 awvalid;
-    logic                 awready;
+    logic     [ID_W-1:0] awid;
+    logic   [ADDR_W-1:0] awaddr;
+    logic          [7:0] awlen;
+    logic          [2:0] awsize;
+    logic          [1:0] awburst;
+    logic                awlock;
+    logic          [3:0] awcache;
+    logic          [2:0] awprot;
+    logic          [3:0] awqos;
+    logic          [3:0] awregion;
+    logic [AWUSER_W-1:0] awuser;
+    logic                awvalid;
+    logic                awready;
     // W
-    logic [DATA_W-1:0]    wdata;
-    logic [STRB_W-1:0]    wstrb;
-    logic                 wlast;
-    logic [WUSER_W-1:0]   wuser;
-    logic                 wvalid;
-    logic                 wready;
+    logic  [DATA_W-1:0] wdata;
+    logic  [STRB_W-1:0] wstrb;
+    logic               wlast;
+    logic [WUSER_W-1:0] wuser;
+    logic               wvalid;
+    logic               wready;
     // B
-    logic [ID_W-1:0]      bid;
-    logic [1:0]           bresp;
-    logic [BUSER_W-1:0]   buser;
-    logic                 bvalid;
-    logic                 bready;
+    logic    [ID_W-1:0] bid;
+    logic         [1:0] bresp;
+    logic [BUSER_W-1:0] buser;
+    logic               bvalid;
+    logic               bready;
     // AR
-    logic [ID_W-1:0]      arid;
-    logic [ADDR_W-1:0]    araddr;
-    logic [7:0]           arlen;
-    logic [2:0]           arsize;
-    logic [1:0]           arburst;
-    logic                 arlock;
-    logic [3:0]           arcache;
-    logic [2:0]           arprot;
-    logic [3:0]           arqos;
-    logic [3:0]           arregion;
-    logic [ARUSER_W-1:0]  aruser;
-    logic                 arvalid;
-    logic                 arready;
+    logic     [ID_W-1:0] arid;
+    logic   [ADDR_W-1:0] araddr;
+    logic          [7:0] arlen;
+    logic          [2:0] arsize;
+    logic          [1:0] arburst;
+    logic                arlock;
+    logic          [3:0] arcache;
+    logic          [2:0] arprot;
+    logic          [3:0] arqos;
+    logic          [3:0] arregion;
+    logic [ARUSER_W-1:0] aruser;
+    logic                arvalid;
+    logic                arready;
     // R
-    logic [ID_W-1:0]      rid;
-    logic [DATA_W-1:0]    rdata;
-    logic [1:0]           rresp;
-    logic                 rlast;
-    logic [RUSER_W-1:0]   ruser;
-    logic                 rvalid;
-    logic                 rready;
+    logic    [ID_W-1:0] rid;
+    logic  [DATA_W-1:0] rdata;
+    logic         [1:0] rresp;
+    logic               rlast;
+    logic [RUSER_W-1:0] ruser;
+    logic               rvalid;
+    logic               rready;
 
     modport wr_mst (
         // AW

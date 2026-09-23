@@ -11,7 +11,7 @@ module nmu_reorder_storage #(
     parameter type         data_t = logic
 ) (
     input  wire logic              clk_i,
-    input  wire logic              rst_i,
+    input  wire logic              rst_n_i,
     input  wire logic              alloc_valid_i,
     input  wire logic  [TAG_W-1:0] alloc_base_i,
     input  wire logic    [TAG_W:0] alloc_cnt_i,
@@ -39,12 +39,12 @@ module nmu_reorder_storage #(
         initial $fatal(0, "Error: DEPTH must be in [1, NUM_TAGS] (instance %m)");
     end
 
-    data_t data_reg [DEPTH];
-    logic [DEPTH-1:0] alloc_reg, alloc_next;
-    logic [DEPTH-1:0] complete_reg, complete_next;
-    logic [TAG_W-1:0] wr_offset_reg [NUM_TAGS], wr_offset_next [NUM_TAGS];
-    logic [TAG_W:0] free_cnt;
-    logic [TAG_W-1:0] next_base;
+    data_t             data_reg [DEPTH];
+    logic  [DEPTH-1:0] alloc_reg, alloc_next;
+    logic  [DEPTH-1:0] complete_reg, complete_next;
+    logic  [TAG_W-1:0] wr_offset_reg [NUM_TAGS], wr_offset_next [NUM_TAGS];
+    logic    [TAG_W:0] free_cnt;
+    logic  [TAG_W-1:0] next_base;
     wire logic [TAG_W:0] wr_addr =
         {1'b0, wr_base_i} + {1'b0, wr_offset_reg[wr_base_i]};
     wire logic wr_accept = wr_valid_i && wr_ready_o;
@@ -53,28 +53,28 @@ module nmu_reorder_storage #(
     wire logic [ADDR_W-1:0] free_idx = ADDR_W'(free_addr_i);
 
     always_comb begin
-        free_cnt = (TAG_W+1)'(DEPTH);
+        free_cnt  = (TAG_W+1)'(DEPTH);
         next_base = '0;
         for (int n = 0; n < DEPTH; n++) begin
             if (alloc_reg[n]) begin
-                free_cnt = (TAG_W+1)'(DEPTH - n - 1);
+                free_cnt  = (TAG_W+1)'(DEPTH - n - 1);
                 next_base = TAG_W'(n + 1);
             end
         end
     end
 
     assign next_base_o = next_base;
-    assign free_cnt_o = free_cnt;
-    assign wr_ready_o = !rst_i && wr_valid_i && wr_addr < (TAG_W+1)'(DEPTH) &&
+    assign free_cnt_o  = free_cnt;
+    assign wr_ready_o  = rst_n_i && wr_valid_i && wr_addr < (TAG_W+1)'(DEPTH) &&
         alloc_reg[wr_idx] && !complete_reg[wr_idx];
-    assign rd_entry_complete_o = !rst_i && rd_en_i &&
+    assign rd_entry_complete_o = rst_n_i && rd_en_i &&
         int'(rd_addr_i) < DEPTH && complete_reg[rd_idx];
     // Payload memory is intentionally unreset; expose only completed entries.
-    assign rd_data_o = rd_entry_complete_o ? data_reg[rd_idx] : data_t'('0);
+    assign rd_data_o  = rd_entry_complete_o ? data_reg[rd_idx] : data_t'('0);
     assign complete_o = complete_reg;
 
     always_comb begin
-        alloc_next = alloc_reg;
+        alloc_next    = alloc_reg;
         complete_next = complete_reg;
         for (int tag = 0; tag < NUM_TAGS; tag++) begin
             wr_offset_next[tag] = wr_offset_reg[tag];
@@ -97,20 +97,20 @@ module nmu_reorder_storage #(
                 wr_offset_reg[wr_base_i] + 1'b1;
         end
         if (free_valid_i && int'(free_addr_i) < DEPTH) begin
-            alloc_next[free_idx] = 1'b0;
+            alloc_next[free_idx]    = 1'b0;
             complete_next[free_idx] = 1'b0;
         end
     end
 
-    always_ff @(posedge clk_i) begin
-        if (rst_i) begin
-            alloc_reg <= '0;
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
+            alloc_reg    <= '0;
             complete_reg <= '0;
             for (int tag = 0; tag < NUM_TAGS; tag++) begin
                 wr_offset_reg[tag] <= '0;
             end
         end else begin
-            alloc_reg <= alloc_next;
+            alloc_reg    <= alloc_next;
             complete_reg <= complete_next;
             for (int tag = 0; tag < NUM_TAGS; tag++) begin
                 wr_offset_reg[tag] <= wr_offset_next[tag];
@@ -122,7 +122,7 @@ module nmu_reorder_storage #(
     end
     // synthesis translate_off
     always @(posedge clk_i) begin
-        if (!rst_i) begin
+        if (rst_n_i) begin
             if (!wr_valid_i && wr_ready_o !== 1'b0)
                 $fatal(1, "inactive storage fill ready must be zero (%m)");
             if (!rd_en_i && {rd_entry_complete_o, rd_data_o} !== '0)

@@ -18,7 +18,7 @@ module nmu_sam #(
     parameter sam_rule_t [SAM_NUM_RULES-1:0] SAM
 ) (
     input  wire logic                              noc_clk_i,
-    input  wire logic                              noc_rst_ni,
+    input  wire logic                              noc_rst_n_i,
     input  wire logic                              s_aw_valid_i,
     output wire logic                              s_aw_ready_o,
     input  wire ni_signals_pkg::axi_aw_t           s_aw_i,
@@ -54,13 +54,13 @@ module nmu_sam #(
     function automatic logic [AXI_ADDR_W-1:0] selector_mask(
         input sam_mask_sel_t selector
     );
-        logic [AXI_ADDR_W-1:0] mask;
-        int unsigned            selector_offset;
-        int unsigned            selector_limit;
+        logic        [AXI_ADDR_W-1:0] mask;
+        int unsigned                  selector_offset;
+        int unsigned                  selector_limit;
 
-        mask = '0;
+        mask            = '0;
         selector_offset = int'(selector.offset);
-        selector_limit = selector_offset + int'(selector.len);
+        selector_limit  = selector_offset + int'(selector.len);
         for (int unsigned bit_idx = 0; bit_idx < AXI_ADDR_W; bit_idx++) begin
             if (bit_idx >= selector_offset && bit_idx < selector_limit) begin
                 mask[bit_idx] = 1'b1;
@@ -94,10 +94,10 @@ module nmu_sam #(
         logic [AXI_ADDR_W:0] extended_addr;
         logic [AXI_ADDR_W:0] total_bytes;
 
-        extended_addr = {1'b0, addr};
-        total_bytes = '0;
+        extended_addr                               = {1'b0, addr};
+        total_bytes                                 = '0;
         total_bytes[ni_flit_pkg::AXI_LEN_WIDTH-1:0] = len;
-        total_bytes = (total_bytes + 1'b1) << size;
+        total_bytes                                 = (total_bytes + 1'b1) << size;
 
         if (burst == 2'd2) begin
             burst_last_byte = (extended_addr & ~(total_bytes - 1'b1)) + total_bytes - 1'b1;
@@ -128,7 +128,7 @@ module nmu_sam #(
         logic [AXI_ADDR_W-1:0] address_mask;
         logic [AXI_ADDR_W-1:0] allowed_address_mask;
 
-        address_mask = awuser[57:10];
+        address_mask         = awuser[57:10];
         allowed_address_mask = selector_mask(sam_idx.mask_x) |
             selector_mask(sam_idx.mask_y);
         case (awuser[9:8])
@@ -141,11 +141,11 @@ module nmu_sam #(
     endfunction
 
     sam_result_t aw_sam_idx;
-    logic     aw_lookup_valid;
-    logic     aw_lookup_error;
+    logic        aw_lookup_valid;
+    logic        aw_lookup_error;
     sam_result_t ar_sam_idx;
-    logic     ar_lookup_valid;
-    logic     ar_lookup_error;
+    logic        ar_lookup_valid;
+    logic        ar_lookup_error;
 
     logic aw_slice_ready;
     logic ar_slice_ready;
@@ -161,11 +161,11 @@ module nmu_sam #(
         .sam_rule_t     (sam_rule_t    ),
         .SAM            (SAM           )
     ) i_aw_ni_sam (
-        .addr_i         (s_aw_i.awaddr             ),
-        .lookup_en_i    (noc_rst_ni && s_aw_valid_i),
-        .sam_idx_o      (aw_sam_idx                ),
-        .lookup_valid_o (aw_lookup_valid           ),
-        .lookup_error_o (aw_lookup_error           )
+        .addr_i         (s_aw_i.awaddr              ),
+        .lookup_en_i    (noc_rst_n_i && s_aw_valid_i),
+        .sam_idx_o      (aw_sam_idx                 ),
+        .lookup_valid_o (aw_lookup_valid            ),
+        .lookup_error_o (aw_lookup_error            )
     );
 
     ni_sam #(
@@ -176,60 +176,60 @@ module nmu_sam #(
         .sam_rule_t     (sam_rule_t    ),
         .SAM            (SAM           )
     ) i_ar_ni_sam (
-        .addr_i         (s_ar_i.araddr             ),
-        .lookup_en_i    (noc_rst_ni && s_ar_valid_i),
-        .sam_idx_o      (ar_sam_idx                ),
-        .lookup_valid_o (ar_lookup_valid           ),
-        .lookup_error_o (ar_lookup_error           )
+        .addr_i         (s_ar_i.araddr              ),
+        .lookup_en_i    (noc_rst_n_i && s_ar_valid_i),
+        .sam_idx_o      (ar_sam_idx                 ),
+        .lookup_valid_o (ar_lookup_valid            ),
+        .lookup_error_o (ar_lookup_error            )
     );
 
-    assign s_aw_ready_o = noc_rst_ni && aw_slice_ready;
-    assign s_ar_ready_o = noc_rst_ni && ar_slice_ready;
+    assign s_aw_ready_o = noc_rst_n_i && aw_slice_ready;
+    assign s_ar_ready_o = noc_rst_n_i && ar_slice_ready;
 
-    assign aw_decoded.axi = s_aw_i;
-    assign aw_decoded.route.route.domain.dst_id = aw_sam_idx.dst_id;
+    assign aw_decoded.axi                            = s_aw_i;
+    assign aw_decoded.route.route.domain.dst_id      = aw_sam_idx.dst_id;
     assign aw_decoded.route.route.domain.dst_port_id = aw_sam_idx.dst_port_id;
-    assign aw_decoded.route.route.domain.is_data = aw_sam_idx.is_data;
-    assign aw_decoded.route.user = s_aw_i.awuser[7:0];
-    assign aw_decoded.route.collective_op = s_aw_i.awuser[9:8];
-    assign aw_decoded.route.collective_mask = collective_mask_from_address_mask(
+    assign aw_decoded.route.route.domain.is_data     = aw_sam_idx.is_data;
+    assign aw_decoded.route.user                     = s_aw_i.awuser[7:0];
+    assign aw_decoded.route.collective_op            = s_aw_i.awuser[9:8];
+    assign aw_decoded.route.collective_mask          = collective_mask_from_address_mask(
         s_aw_i.awuser[57:10], aw_sam_idx);
 
-    assign ar_decoded.axi = s_ar_i;
-    assign ar_decoded.route.domain.dst_id = ar_sam_idx.dst_id;
+    assign ar_decoded.axi                      = s_ar_i;
+    assign ar_decoded.route.domain.dst_id      = ar_sam_idx.dst_id;
     assign ar_decoded.route.domain.dst_port_id = ar_sam_idx.dst_port_id;
-    assign ar_decoded.route.domain.is_data = ar_sam_idx.is_data;
+    assign ar_decoded.route.domain.is_data     = ar_sam_idx.is_data;
 
     stream_register #(
         .REG_TYPE (AW_SAM_REG_TYPE                  ),
         .data_t   (ni_types_pkg::nmu_sam_aw_result_t)
     ) i_aw_reg_slice (
-        .clk_i     (noc_clk_i                                    ),
-        .rst_ni    (noc_rst_ni                                   ),
-        .s_valid_i (noc_rst_ni && s_aw_valid_i && aw_lookup_valid),
-        .s_ready_o (aw_slice_ready                               ),
-        .s_data_i  (aw_decoded                                   ),
-        .m_valid_o (m_aw_valid_o                                 ),
-        .m_ready_i (m_aw_ready_i                                 ),
-        .m_data_o  (m_aw_o                                       )
+        .clk_i     (noc_clk_i                                     ),
+        .rst_n_i   (noc_rst_n_i                                   ),
+        .s_valid_i (noc_rst_n_i && s_aw_valid_i && aw_lookup_valid),
+        .s_ready_o (aw_slice_ready                                ),
+        .s_data_i  (aw_decoded                                    ),
+        .m_valid_o (m_aw_valid_o                                  ),
+        .m_ready_i (m_aw_ready_i                                  ),
+        .m_data_o  (m_aw_o                                        )
     );
 
     stream_register #(
         .REG_TYPE (AR_SAM_REG_TYPE                  ),
         .data_t   (ni_types_pkg::nmu_sam_ar_result_t)
     ) i_ar_reg_slice (
-        .clk_i     (noc_clk_i                                    ),
-        .rst_ni    (noc_rst_ni                                   ),
-        .s_valid_i (noc_rst_ni && s_ar_valid_i && ar_lookup_valid),
-        .s_ready_o (ar_slice_ready                               ),
-        .s_data_i  (ar_decoded                                   ),
-        .m_valid_o (m_ar_valid_o                                 ),
-        .m_ready_i (m_ar_ready_i                                 ),
-        .m_data_o  (m_ar_o                                       )
+        .clk_i     (noc_clk_i                                     ),
+        .rst_n_i   (noc_rst_n_i                                   ),
+        .s_valid_i (noc_rst_n_i && s_ar_valid_i && ar_lookup_valid),
+        .s_ready_o (ar_slice_ready                                ),
+        .s_data_i  (ar_decoded                                    ),
+        .m_valid_o (m_ar_valid_o                                  ),
+        .m_ready_i (m_ar_ready_i                                  ),
+        .m_data_o  (m_ar_o                                        )
     );
 
-    always_ff @(posedge noc_clk_i) begin
-        if (noc_rst_ni) begin
+    always @(posedge noc_clk_i) begin
+        if (noc_rst_n_i) begin
             if (s_aw_valid_i && aw_lookup_error) begin
                 $fatal(0, "Error: invalid AW SAM mapping (instance %m)");
             end else if (s_aw_valid_i && burst_footprint_error(

@@ -47,8 +47,8 @@ module ni_sam #(
     end
 
     sam_result_t decoded_idx;
-    logic     decoded_valid;
-    logic     decoded_error;
+    logic        decoded_valid;
+    logic        decoded_error;
 
     cc_addr_decode #(
         .NoRules (SAM_NUM_RULES),
@@ -56,7 +56,7 @@ module ni_sam #(
         .idx_t   (sam_result_t ),
         .rule_t  (sam_rule_t   )
     ) i_cc_addr_decode (
-        .addr_i,
+        .addr_i           (addr_i       ),
         .addr_map_i       (SAM          ),
         .idx_o            (decoded_idx  ),
         .dec_valid_o      (decoded_valid),

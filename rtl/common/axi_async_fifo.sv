@@ -10,12 +10,12 @@ module axi_async_fifo #(
     parameter type         data_t         = logic
 ) (
     input  wire logic   src_clk_i,
-    input  wire logic   src_rst_ni,
+    input  wire logic   src_rst_n_i,
     input  wire logic   src_valid_i,
     output wire logic   src_ready_o,
     input  wire data_t  src_data_i,
     input  wire logic   dst_clk_i,
-    input  wire logic   dst_rst_ni,
+    input  wire logic   dst_rst_n_i,
     output wire logic   dst_valid_o,
     input  wire logic   dst_ready_i,
     output wire data_t  dst_data_o
@@ -32,16 +32,16 @@ module axi_async_fifo #(
         .LogDepth   (FIFO_ADDR_W),
         .SyncStages (2          )
     ) i_cc_cdc_fifo_gray (
-        .src_rst_ni,
-        .src_clk_i,
-        .src_data_i,
-        .src_valid_i,
-        .src_ready_o,
-        .dst_rst_ni,
-        .dst_clk_i,
-        .dst_data_o,
-        .dst_valid_o,
-        .dst_ready_i
+        .src_rst_ni  (src_rst_n_i),
+        .src_clk_i   (src_clk_i  ),
+        .src_data_i  (src_data_i ),
+        .src_valid_i (src_valid_i),
+        .src_ready_o (src_ready_o),
+        .dst_rst_ni  (dst_rst_n_i),
+        .dst_clk_i   (dst_clk_i  ),
+        .dst_data_o  (dst_data_o ),
+        .dst_valid_o (dst_valid_o),
+        .dst_ready_i (dst_ready_i)
     );
 
 endmodule

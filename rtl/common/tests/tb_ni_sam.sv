@@ -27,48 +27,48 @@ module tb_ni_sam;
         0: '{idx: OVERLAP_NARROW_IDX, start_addr: 48'h080, end_addr: 48'h0C0}
     };
 
-    sam_addr_t addr;
-    logic      lookup_en;
-    sam_result_t  sam_idx;
-    logic      lookup_valid;
-    logic      lookup_error;
+    sam_addr_t   addr;
+    logic        lookup_en;
+    sam_result_t sam_idx;
+    logic        lookup_valid;
+    logic        lookup_error;
 
     sam_result_t overlap_idx;
-    logic     overlap_valid;
-    logic     overlap_error;
+    logic        overlap_valid;
+    logic        overlap_error;
 
     ni_sam #(
-        .SAM_NUM_RULES  ( SAM_NUM_RULES  ),
-        .addr_t         ( sam_addr_t     ),
-        .sam_mask_sel_t ( sam_mask_sel_t ),
-        .sam_result_t      ( sam_result_t      ),
-        .sam_rule_t     ( sam_rule_t     ),
-        .SAM            ( SAM            )
+        .SAM_NUM_RULES  (SAM_NUM_RULES ),
+        .addr_t         (sam_addr_t    ),
+        .sam_mask_sel_t (sam_mask_sel_t),
+        .sam_result_t   (sam_result_t  ),
+        .sam_rule_t     (sam_rule_t    ),
+        .SAM            (SAM           )
     ) i_ni_sam (
-        .addr_i         ( addr         ),
-        .lookup_en_i    ( lookup_en    ),
-        .sam_idx_o      ( sam_idx      ),
-        .lookup_valid_o ( lookup_valid ),
-        .lookup_error_o ( lookup_error )
+        .addr_i         (addr        ),
+        .lookup_en_i    (lookup_en   ),
+        .sam_idx_o      (sam_idx     ),
+        .lookup_valid_o (lookup_valid),
+        .lookup_error_o (lookup_error)
     );
 
     ni_sam #(
-        .SAM_NUM_RULES  ( 2              ),
-        .addr_t         ( sam_addr_t     ),
-        .sam_mask_sel_t ( sam_mask_sel_t ),
-        .sam_result_t      ( sam_result_t      ),
-        .sam_rule_t     ( sam_rule_t     ),
-        .SAM            ( OVERLAP_SAM    )
+        .SAM_NUM_RULES  (2             ),
+        .addr_t         (sam_addr_t    ),
+        .sam_mask_sel_t (sam_mask_sel_t),
+        .sam_result_t   (sam_result_t  ),
+        .sam_rule_t     (sam_rule_t    ),
+        .SAM            (OVERLAP_SAM   )
     ) i_overlap_ni_sam (
-        .addr_i         ( addr          ),
-        .lookup_en_i    ( lookup_en     ),
-        .sam_idx_o      ( overlap_idx   ),
-        .lookup_valid_o ( overlap_valid ),
-        .lookup_error_o ( overlap_error )
+        .addr_i         (addr         ),
+        .lookup_en_i    (lookup_en    ),
+        .sam_idx_o      (overlap_idx  ),
+        .lookup_valid_o (overlap_valid),
+        .lookup_error_o (overlap_error)
     );
 
     initial begin
-        addr = 48'h0000_0000_0000;
+        addr      = 48'h0000_0000_0000;
         lookup_en = 1'b0;
         #1ps;
         assert (sam_idx == '0 && !lookup_valid && !lookup_error)

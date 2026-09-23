@@ -13,8 +13,7 @@
 // outputs via cmodel_nmu_get_outputs, then registers those outputs nonblocking
 // so they are visible to SV wires from the NEXT cycle onward.
 //
-// Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
-// No async reset path — sync reset is the project default.
+// Reset: asynchronous active-low (rst_n_i). Output registers cleared on reset.
 //
 // Error polling is centralized in tb_top.sv; this wrap no longer
 // calls cmodel_check_error/cmodel_finalize itself.
@@ -52,7 +51,7 @@ module nmu_wrap #(
     parameter int unsigned AWUSER_WIDTH   = ni_params_pkg::AXI_AWUSER_WIDTH
 ) (
     input  logic              clk_i,
-    input  logic              rst_ni,
+    input  logic              rst_n_i,
     input  longint unsigned            ctx_i,
     input  ni_signals_pkg::axi_req_t   axi_req_i,
     input  logic [AWUSER_WIDTH-1:0]    awuser_i,
@@ -150,51 +149,51 @@ module nmu_wrap #(
     // -------------------------------------------------------------------------
 
     // AXI slave side outputs (Nmu drives)
-    bit                    awready_q;
-    bit                    wready_q;
-    bit                    arready_q;
+    bit awready_q;
+    bit wready_q;
+    bit arready_q;
 
-    bit                    bvalid_q;
-    bit [ID_WIDTH-1:0]     bid_q;
-    bit [1:0]              bresp_q;
+    bit                bvalid_q;
+    bit [ID_WIDTH-1:0] bid_q;
+    bit          [1:0] bresp_q;
 
-    bit                    rvalid_q;
-    bit [ID_WIDTH-1:0]     rid_q;
-    bit [DATA_WIDTH-1:0]   rdata_q;
-    bit [1:0]              rresp_q;
-    bit                    rlast_q;
+    bit                  rvalid_q;
+    bit   [ID_WIDTH-1:0] rid_q;
+    bit [DATA_WIDTH-1:0] rdata_q;
+    bit            [1:0] rresp_q;
+    bit                  rlast_q;
 
-    bit                    tx_req_valid_q;
-    bit [REQ_FLIT_WIDTH-1:0] tx_req_flit_q;
-    logic                  tx_req_model_ready;
-    bit                    rx_rsp_ready_q;
-    bit                    tx_dat_valid_q;
-    bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q;
-    bit [NUM_DAT_VC-1:0]     rx_dat_crdvalid_q;
+    bit                        tx_req_valid_q;
+    bit   [REQ_FLIT_WIDTH-1:0] tx_req_flit_q;
+    logic                      tx_req_model_ready;
+    bit                        rx_rsp_ready_q;
+    bit                        tx_dat_valid_q;
+    bit   [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q;
+    bit       [NUM_DAT_VC-1:0] rx_dat_crdvalid_q;
 
     // -------------------------------------------------------------------------
-    // always_ff: sync-reset, 3-step DPI call, registered outputs, error check
+    // always: async-reset outputs, 3-step DPI call, registered outputs, error check
     // -------------------------------------------------------------------------
 
-    always_ff @(posedge clk_i) begin
-        if (!rst_ni) begin
-            awready_q              <= '0;
-            wready_q               <= '0;
-            arready_q              <= '0;
-            bvalid_q               <= '0;
-            bid_q                  <= '0;
-            bresp_q                <= '0;
-            rvalid_q               <= '0;
-            rid_q                  <= '0;
-            rdata_q                <= '0;
-            rresp_q                <= '0;
-            rlast_q                <= '0;
-            tx_req_valid_q         <= '0;
-            tx_req_flit_q          <= '0;
-            rx_rsp_ready_q         <= '0;
-            tx_dat_valid_q         <= '0;
-            tx_dat_flit_q          <= '0;
-            rx_dat_crdvalid_q      <= '0;
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
+            awready_q         <= '0;
+            wready_q          <= '0;
+            arready_q         <= '0;
+            bvalid_q          <= '0;
+            bid_q             <= '0;
+            bresp_q           <= '0;
+            rvalid_q          <= '0;
+            rid_q             <= '0;
+            rdata_q           <= '0;
+            rresp_q           <= '0;
+            rlast_q           <= '0;
+            tx_req_valid_q    <= '0;
+            tx_req_flit_q     <= '0;
+            rx_rsp_ready_q    <= '0;
+            tx_dat_valid_q    <= '0;
+            tx_dat_flit_q     <= '0;
+            rx_dat_crdvalid_q <= '0;
         end else begin
             // Step 1: push current wire values into C++ input latch.
             cmodel_nmu_set_inputs(
@@ -242,23 +241,23 @@ module nmu_wrap #(
             // Step 3: pull outputs into local temporaries (blocking to locals is
             // safe; avoids BLKANDNBLK with the nonblocking reset path above).
             begin : get_outputs_blk
-                bit                    t_awready;
-                bit                    t_wready;
-                bit                    t_arready;
-                bit                    t_bvalid;
-                bit [ID_WIDTH-1:0]     t_bid;
-                bit [1:0]              t_bresp;
-                bit                    t_rvalid;
-                bit [ID_WIDTH-1:0]     t_rid;
-                bit [DATA_WIDTH-1:0]   t_rdata;
-                bit [1:0]              t_rresp;
-                bit                    t_rlast;
-                bit                    t_tx_req_valid;
+                bit                      t_awready;
+                bit                      t_wready;
+                bit                      t_arready;
+                bit                      t_bvalid;
+                bit       [ID_WIDTH-1:0] t_bid;
+                bit                [1:0] t_bresp;
+                bit                      t_rvalid;
+                bit       [ID_WIDTH-1:0] t_rid;
+                bit     [DATA_WIDTH-1:0] t_rdata;
+                bit                [1:0] t_rresp;
+                bit                      t_rlast;
+                bit                      t_tx_req_valid;
                 bit [REQ_FLIT_WIDTH-1:0] t_tx_req_flit;
-                bit                    t_rx_rsp_ready;
-                bit                    t_tx_dat_valid;
+                bit                      t_rx_rsp_ready;
+                bit                      t_tx_dat_valid;
                 bit [DAT_FLIT_WIDTH-1:0] t_tx_dat_flit;
-                bit [NUM_DAT_VC-1:0]     t_rx_dat_crdvalid;
+                bit     [NUM_DAT_VC-1:0] t_rx_dat_crdvalid;
                 cmodel_nmu_get_outputs(
                     ctx_i,
                     t_awready, t_wready, t_arready,
@@ -269,17 +268,17 @@ module nmu_wrap #(
                     t_tx_dat_valid, t_tx_dat_flit,
                     t_rx_dat_crdvalid
                 );
-                awready_q               <= t_awready;
-                wready_q                <= t_wready;
-                arready_q               <= t_arready;
-                bvalid_q                <= t_bvalid;
-                bid_q                   <= t_bid;
-                bresp_q                 <= t_bresp;
-                rvalid_q                <= t_rvalid;
-                rid_q                   <= t_rid;
-                rdata_q                 <= t_rdata;
-                rresp_q                 <= t_rresp;
-                rlast_q                 <= t_rlast;
+                awready_q <= t_awready;
+                wready_q  <= t_wready;
+                arready_q <= t_arready;
+                bvalid_q  <= t_bvalid;
+                bid_q     <= t_bid;
+                bresp_q   <= t_bresp;
+                rvalid_q  <= t_rvalid;
+                rid_q     <= t_rid;
+                rdata_q   <= t_rdata;
+                rresp_q   <= t_rresp;
+                rlast_q   <= t_rlast;
                 // REQ egress hold register: the strobe loads it, the wire
                 // handshake frees it; a strobe may land on the freeing edge
                 // (load wins, the old flit was consumed at that edge). See
@@ -290,10 +289,10 @@ module nmu_wrap #(
                 end else if (tx_req_ready_i) begin
                     tx_req_valid_q <= 1'b0;
                 end
-                rx_rsp_ready_q          <= t_rx_rsp_ready;
-                tx_dat_valid_q          <= t_tx_dat_valid;
-                tx_dat_flit_q           <= t_tx_dat_flit;
-                rx_dat_crdvalid_q       <= t_rx_dat_crdvalid;
+                rx_rsp_ready_q    <= t_rx_rsp_ready;
+                tx_dat_valid_q    <= t_tx_dat_valid;
+                tx_dat_flit_q     <= t_tx_dat_flit;
+                rx_dat_crdvalid_q <= t_rx_dat_crdvalid;
             end
         end
     end
@@ -307,34 +306,34 @@ module nmu_wrap #(
     assign axi_rsp_o.wready  = wready_q;
     assign axi_rsp_o.arready = arready_q;
 
-    assign axi_rsp_o.bvalid  = bvalid_q;
-    assign axi_rsp_o.bid     = bid_q;
-    assign axi_rsp_o.bresp   = bresp_q;
+    assign axi_rsp_o.bvalid = bvalid_q;
+    assign axi_rsp_o.bid    = bid_q;
+    assign axi_rsp_o.bresp  = bresp_q;
 
-    assign axi_rsp_o.rvalid  = rvalid_q;
-    assign axi_rsp_o.rid     = rid_q;
-    assign axi_rsp_o.rdata   = rdata_q;
-    assign axi_rsp_o.rresp   = rresp_q;
-    assign axi_rsp_o.rlast   = rlast_q;
+    assign axi_rsp_o.rvalid = rvalid_q;
+    assign axi_rsp_o.rid    = rid_q;
+    assign axi_rsp_o.rdata  = rdata_q;
+    assign axi_rsp_o.rresp  = rresp_q;
+    assign axi_rsp_o.rlast  = rlast_q;
 
     // The C++ model emits a one-cycle REQ strobe after sampling ready; the
     // hold register above owns the RTL-facing held-valid contract, and the
     // model may pop when it is empty or its flit's handshake completes this
     // cycle (full rate, single stage).
     assign tx_req_model_ready = !tx_req_valid_q || tx_req_ready_i;
-    assign tx_req_valid_o = tx_req_valid_q;
-    assign tx_req_flit_o  = tx_req_flit_q;
+    assign tx_req_valid_o     = tx_req_valid_q;
+    assign tx_req_flit_o      = tx_req_flit_q;
 
     // Egress-hold checker, explicit sampled-history form (SVA $stable in a
     // |=> consequent false-fires under Verilator on the first backpressured
     // cycle — see router_wrap.sv).
-    logic chk_req_v_q, chk_req_r_q;
+    logic                      chk_req_v_q, chk_req_r_q;
     logic [REQ_FLIT_WIDTH-1:0] chk_req_flit_q;
-    always_ff @(posedge clk_i) begin
-        chk_req_v_q    <= rst_ni && tx_req_valid_o;
+    always @(posedge clk_i) begin
+        chk_req_v_q    <= rst_n_i && tx_req_valid_o;
         chk_req_r_q    <= tx_req_ready_i;
         chk_req_flit_q <= tx_req_flit_o;
-        if (rst_ni && chk_req_v_q && !chk_req_r_q &&
+        if (rst_n_i && chk_req_v_q && !chk_req_r_q &&
             (!tx_req_valid_o || tx_req_flit_o !== chk_req_flit_q))
             $error("nmu_wrap: REQ changed before valid/ready handshake");
     end

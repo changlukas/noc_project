@@ -33,22 +33,23 @@ module tb_top #(
     localparam int unsigned MST_FIXED_DELAY_OUTPUT  = 0;
 
     noc_tb_top #(
-        .X_DIM(X_DIM), .Y_DIM(Y_DIM),
-        .NUM_ENDPOINTS(NUM_ENDPOINTS),
-        .TILE_TARGETS(TILE_TARGETS),
-        .TILE_BASE_ADDR(TILE_BASE_ADDR),
-        .TILE_SIZE(TILE_SIZE),
-        .NOC_EGRESS_BASE(NOC_EGRESS_BASE),
-        .REGION_BYTES(REGION_BYTES),
-        .N_PERIPH(N_PERIPH),
-        .PERIPH_NODE(PERIPH_NODE),
-        .PERIPH_PORT(PERIPH_PORT),
-        .MEM_STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),
-        .MEM_STALL_RANDOM_OUTPUT(MEM_STALL_RANDOM_OUTPUT),
-        .MEM_FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),
-        .MEM_FIXED_DELAY_OUTPUT(MEM_FIXED_DELAY_OUTPUT),
-        .MST_STALL_RANDOM_OUTPUT(MST_STALL_RANDOM_OUTPUT),
-        .MST_FIXED_DELAY_OUTPUT(MST_FIXED_DELAY_OUTPUT)
+        .X_DIM                   (X_DIM                  ),
+        .Y_DIM                   (Y_DIM                  ),
+        .NUM_ENDPOINTS           (NUM_ENDPOINTS          ),
+        .TILE_TARGETS            (TILE_TARGETS           ),
+        .TILE_BASE_ADDR          (TILE_BASE_ADDR         ),
+        .TILE_SIZE               (TILE_SIZE              ),
+        .NOC_EGRESS_BASE         (NOC_EGRESS_BASE        ),
+        .REGION_BYTES            (REGION_BYTES           ),
+        .N_PERIPH                (N_PERIPH               ),
+        .PERIPH_NODE             (PERIPH_NODE            ),
+        .PERIPH_PORT             (PERIPH_PORT            ),
+        .MEM_STALL_RANDOM_INPUT  (MEM_STALL_RANDOM_INPUT ),
+        .MEM_STALL_RANDOM_OUTPUT (MEM_STALL_RANDOM_OUTPUT),
+        .MEM_FIXED_DELAY_INPUT   (MEM_FIXED_DELAY_INPUT  ),
+        .MEM_FIXED_DELAY_OUTPUT  (MEM_FIXED_DELAY_OUTPUT ),
+        .MST_STALL_RANDOM_OUTPUT (MST_STALL_RANDOM_OUTPUT),
+        .MST_FIXED_DELAY_OUTPUT  (MST_FIXED_DELAY_OUTPUT )
     ) u_tb ();
 
 endmodule

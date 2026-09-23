@@ -53,7 +53,7 @@ module ni_wrap #(
     parameter int unsigned AWUSER_WIDTH   = ni_params_pkg::AXI_AWUSER_WIDTH
 ) (
     input  logic              clk_i,
-    input  logic              rst_ni,
+    input  logic              rst_n_i,
     input  longint unsigned   nmu_ctx_i,
     input  longint unsigned   nsu_ctx_i,
     input  longint unsigned   dat_merge_ctx_i,
@@ -97,75 +97,105 @@ module ni_wrap #(
     // NMU <-> dat_merge_wrap DAT pins.
     logic                      nmu_tx_dat_valid;
     logic [DAT_FLIT_WIDTH-1:0] nmu_tx_dat_flit;
-    logic [NUM_DAT_VC-1:0]     nmu_tx_dat_crdvalid;
+    logic     [NUM_DAT_VC-1:0] nmu_tx_dat_crdvalid;
     logic                      nmu_rx_dat_valid;
     logic [DAT_FLIT_WIDTH-1:0] nmu_rx_dat_flit;
 
     // NSU <-> dat_merge_wrap DAT pins.
     logic                      nsu_tx_dat_valid;
     logic [DAT_FLIT_WIDTH-1:0] nsu_tx_dat_flit;
-    logic [NUM_DAT_VC-1:0]     nsu_tx_dat_crdvalid;
+    logic     [NUM_DAT_VC-1:0] nsu_tx_dat_crdvalid;
     logic                      nsu_rx_dat_valid;
     logic [DAT_FLIT_WIDTH-1:0] nsu_rx_dat_flit;
-    logic [NUM_DAT_VC-1:0]     nsu_rx_dat_crdvalid;
+    logic     [NUM_DAT_VC-1:0] nsu_rx_dat_crdvalid;
 
     nmu_wrap #(
-        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
-        .NUM_DAT_VC(NUM_DAT_VC),
-        .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH), .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH),
-        .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH), .AWUSER_WIDTH(AWUSER_WIDTH)
+        .ID_WIDTH       (ID_WIDTH      ),
+        .ADDR_WIDTH     (ADDR_WIDTH    ),
+        .DATA_WIDTH     (DATA_WIDTH    ),
+        .NUM_DAT_VC     (NUM_DAT_VC    ),
+        .REQ_FLIT_WIDTH (REQ_FLIT_WIDTH),
+        .RSP_FLIT_WIDTH (RSP_FLIT_WIDTH),
+        .DAT_FLIT_WIDTH (DAT_FLIT_WIDTH),
+        .AWUSER_WIDTH   (AWUSER_WIDTH  )
     ) u_nmu (
-        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(nmu_ctx_i),
-        .axi_req_i(master_axi_req_i), .awuser_i(master_awuser_i),
-        .axi_rsp_o(master_axi_rsp_o),
-        .tx_req_valid_o(tx_req_valid_o), .tx_req_flit_o(tx_req_flit_o),
-        .tx_req_ready_i(tx_req_ready_i),
-        .rx_rsp_valid_i(rx_rsp_valid_i), .rx_rsp_flit_i(rx_rsp_flit_i),
-        .rx_rsp_ready_o(rx_rsp_ready_o),
-        .tx_dat_valid_o(nmu_tx_dat_valid), .tx_dat_flit_o(nmu_tx_dat_flit),
-        .tx_dat_crdvalid_i(nmu_tx_dat_crdvalid),
-        .rx_dat_valid_i(nmu_rx_dat_valid), .rx_dat_flit_i(nmu_rx_dat_flit),
+        .clk_i             (clk_i              ),
+        .rst_n_i           (rst_n_i            ),
+        .ctx_i             (nmu_ctx_i          ),
+        .axi_req_i         (master_axi_req_i   ),
+        .awuser_i          (master_awuser_i    ),
+        .axi_rsp_o         (master_axi_rsp_o   ),
+        .tx_req_valid_o    (tx_req_valid_o     ),
+        .tx_req_flit_o     (tx_req_flit_o      ),
+        .tx_req_ready_i    (tx_req_ready_i     ),
+        .rx_rsp_valid_i    (rx_rsp_valid_i     ),
+        .rx_rsp_flit_i     (rx_rsp_flit_i      ),
+        .rx_rsp_ready_o    (rx_rsp_ready_o     ),
+        .tx_dat_valid_o    (nmu_tx_dat_valid   ),
+        .tx_dat_flit_o     (nmu_tx_dat_flit    ),
+        .tx_dat_crdvalid_i (nmu_tx_dat_crdvalid),
+        .rx_dat_valid_i    (nmu_rx_dat_valid   ),
+        .rx_dat_flit_i     (nmu_rx_dat_flit    ),
         .rx_dat_crdvalid_o()  // NMU's own ingress credit-return has no
                               // consumer once the merge's demux is unbuffered
                               // same-cycle (dat_merge_wrap.hpp class comment)
     );
 
     nsu_wrap #(
-        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
-        .NUM_DAT_VC(NUM_DAT_VC),
-        .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH), .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH),
-        .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH)
+        .ID_WIDTH       (ID_WIDTH      ),
+        .ADDR_WIDTH     (ADDR_WIDTH    ),
+        .DATA_WIDTH     (DATA_WIDTH    ),
+        .NUM_DAT_VC     (NUM_DAT_VC    ),
+        .REQ_FLIT_WIDTH (REQ_FLIT_WIDTH),
+        .RSP_FLIT_WIDTH (RSP_FLIT_WIDTH),
+        .DAT_FLIT_WIDTH (DAT_FLIT_WIDTH)
     ) u_nsu (
-        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(nsu_ctx_i),
-        .rx_req_valid_i(rx_req_valid_i), .rx_req_flit_i(rx_req_flit_i),
-        .rx_req_ready_o(rx_req_ready_o),
-        .tx_rsp_valid_o(tx_rsp_valid_o), .tx_rsp_flit_o(tx_rsp_flit_o),
-        .tx_rsp_ready_i(tx_rsp_ready_i),
-        .tx_dat_valid_o(nsu_tx_dat_valid), .tx_dat_flit_o(nsu_tx_dat_flit),
-        .tx_dat_crdvalid_i(nsu_tx_dat_crdvalid),
-        .rx_dat_valid_i(nsu_rx_dat_valid), .rx_dat_flit_i(nsu_rx_dat_flit),
+        .clk_i             (clk_i              ),
+        .rst_n_i           (rst_n_i            ),
+        .ctx_i             (nsu_ctx_i          ),
+        .rx_req_valid_i    (rx_req_valid_i     ),
+        .rx_req_flit_i     (rx_req_flit_i      ),
+        .rx_req_ready_o    (rx_req_ready_o     ),
+        .tx_rsp_valid_o    (tx_rsp_valid_o     ),
+        .tx_rsp_flit_o     (tx_rsp_flit_o      ),
+        .tx_rsp_ready_i    (tx_rsp_ready_i     ),
+        .tx_dat_valid_o    (nsu_tx_dat_valid   ),
+        .tx_dat_flit_o     (nsu_tx_dat_flit    ),
+        .tx_dat_crdvalid_i (nsu_tx_dat_crdvalid),
+        .rx_dat_valid_i    (nsu_rx_dat_valid   ),
+        .rx_dat_flit_i     (nsu_rx_dat_flit    ),
         // NSU's ingress DAT queues ARE bounded (one per VC), so its consume
         // pulse is the merge's credit-return to the router for NSU-bound flits
         // (dat_merge_wrap.hpp class comment).
-        .rx_dat_crdvalid_o(nsu_rx_dat_crdvalid),
-        .axi_req_o(slave_axi_req_o), .axi_rsp_i(slave_axi_rsp_i)
+        .rx_dat_crdvalid_o (nsu_rx_dat_crdvalid),
+        .axi_req_o         (slave_axi_req_o    ),
+        .axi_rsp_i         (slave_axi_rsp_i    )
     );
 
     dat_merge_wrap #(
-        .NUM_DAT_VC(NUM_DAT_VC), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH)
+        .NUM_DAT_VC     (NUM_DAT_VC    ),
+        .DAT_FLIT_WIDTH (DAT_FLIT_WIDTH)
     ) u_dat_merge (
-        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(dat_merge_ctx_i),
-        .nmu_tx_dat_valid_i(nmu_tx_dat_valid), .nmu_tx_dat_flit_i(nmu_tx_dat_flit),
-        .nmu_tx_dat_crdvalid_o(nmu_tx_dat_crdvalid),
-        .nmu_rx_dat_valid_o(nmu_rx_dat_valid), .nmu_rx_dat_flit_o(nmu_rx_dat_flit),
-        .nsu_tx_dat_valid_i(nsu_tx_dat_valid), .nsu_tx_dat_flit_i(nsu_tx_dat_flit),
-        .nsu_tx_dat_crdvalid_o(nsu_tx_dat_crdvalid),
-        .nsu_rx_dat_valid_o(nsu_rx_dat_valid), .nsu_rx_dat_flit_o(nsu_rx_dat_flit),
-        .nsu_rx_dat_crdvalid_i(nsu_rx_dat_crdvalid),
-        .tx_dat_valid_o(tx_dat_valid_o), .tx_dat_flit_o(tx_dat_flit_o),
-        .tx_dat_crdvalid_i(tx_dat_crdvalid_i),
-        .rx_dat_valid_i(rx_dat_valid_i), .rx_dat_flit_i(rx_dat_flit_i),
-        .rx_dat_crdvalid_o(rx_dat_crdvalid_o)
+        .clk_i                 (clk_i              ),
+        .rst_n_i               (rst_n_i            ),
+        .ctx_i                 (dat_merge_ctx_i    ),
+        .nmu_tx_dat_valid_i    (nmu_tx_dat_valid   ),
+        .nmu_tx_dat_flit_i     (nmu_tx_dat_flit    ),
+        .nmu_tx_dat_crdvalid_o (nmu_tx_dat_crdvalid),
+        .nmu_rx_dat_valid_o    (nmu_rx_dat_valid   ),
+        .nmu_rx_dat_flit_o     (nmu_rx_dat_flit    ),
+        .nsu_tx_dat_valid_i    (nsu_tx_dat_valid   ),
+        .nsu_tx_dat_flit_i     (nsu_tx_dat_flit    ),
+        .nsu_tx_dat_crdvalid_o (nsu_tx_dat_crdvalid),
+        .nsu_rx_dat_valid_o    (nsu_rx_dat_valid   ),
+        .nsu_rx_dat_flit_o     (nsu_rx_dat_flit    ),
+        .nsu_rx_dat_crdvalid_i (nsu_rx_dat_crdvalid),
+        .tx_dat_valid_o        (tx_dat_valid_o     ),
+        .tx_dat_flit_o         (tx_dat_flit_o      ),
+        .tx_dat_crdvalid_i     (tx_dat_crdvalid_i  ),
+        .rx_dat_valid_i        (rx_dat_valid_i     ),
+        .rx_dat_flit_i         (rx_dat_flit_i      ),
+        .rx_dat_crdvalid_o     (rx_dat_crdvalid_o  )
     );
 
 endmodule

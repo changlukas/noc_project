@@ -14,7 +14,7 @@ module nmu_request_inject_tb_dut #(
     parameter logic [ni_flit_pkg::SRC_PORT_ID_WIDTH-1:0] SRC_PORT_ID     = '0
 ) (
     input  wire logic                                           clk_i,
-    input  wire logic                                           rst_i,
+    input  wire logic                                           rst_n_i,
     input  wire ni_types_pkg::nmu_aw_request_t                  s_aw_i,
     input  wire logic                                           s_aw_valid_i,
     output wire logic                                           s_aw_ready_o,
@@ -43,7 +43,7 @@ module nmu_request_inject_tb_dut #(
         .SRC_PORT_ID (SRC_PORT_ID)
     ) i_packetize (
         .clk_i         (clk_i         ),
-        .rst_i         (rst_i         ),
+        .rst_n_i       (rst_n_i       ),
         .s_aw_i        (s_aw_i        ),
         .s_aw_valid_i  (s_aw_valid_i  ),
         .s_aw_ready_o  (s_aw_ready_o  ),
@@ -66,7 +66,7 @@ module nmu_request_inject_tb_dut #(
         .ROUTER_VC_DEPTH (ROUTER_VC_DEPTH)
     ) i_channel_assign (
         .clk_i               (clk_i              ),
-        .rst_i               (rst_i              ),
+        .rst_n_i             (rst_n_i            ),
         .s_req_i             (req_candidates     ),
         .s_req_valid_i       (req_valid          ),
         .s_req_ready_o       (req_ready          ),

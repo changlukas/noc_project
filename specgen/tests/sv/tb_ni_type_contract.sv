@@ -15,25 +15,25 @@ module tb_ni_type_contract;
     ni_flit_pkg::dat_flit_t dat_flit;
 
     ni_types_pkg::nmu_ordering_domain_t nmu_domain;
-    ni_types_pkg::nmu_route_t nmu_route;
-    ni_types_pkg::nmu_aw_route_t nmu_aw_route;
-    ni_types_pkg::nmu_request_t nmu_request;
-    ni_types_pkg::nmu_response_t nmu_response;
-    ni_types_pkg::nmu_sam_aw_result_t nmu_sam_aw_result;
-    ni_types_pkg::nmu_sam_ar_result_t nmu_sam_ar_result;
-    ni_types_pkg::nmu_aw_request_t nmu_aw_request;
-    ni_types_pkg::nmu_ar_request_t nmu_ar_request;
-    ni_types_pkg::nmu_b_response_t nmu_b_response;
-    ni_types_pkg::nmu_r_response_t nmu_r_response;
+    ni_types_pkg::nmu_route_t           nmu_route;
+    ni_types_pkg::nmu_aw_route_t        nmu_aw_route;
+    ni_types_pkg::nmu_request_t         nmu_request;
+    ni_types_pkg::nmu_response_t        nmu_response;
+    ni_types_pkg::nmu_sam_aw_result_t   nmu_sam_aw_result;
+    ni_types_pkg::nmu_sam_ar_result_t   nmu_sam_ar_result;
+    ni_types_pkg::nmu_aw_request_t      nmu_aw_request;
+    ni_types_pkg::nmu_ar_request_t      nmu_ar_request;
+    ni_types_pkg::nmu_b_response_t      nmu_b_response;
+    ni_types_pkg::nmu_r_response_t      nmu_r_response;
     ni_types_pkg::nmu_rob_order_entry_t nmu_order_entry;
-    ni_types_pkg::nmu_b_rob_entry_t nmu_b_entry;
-    ni_types_pkg::nmu_r_rob_entry_t nmu_r_entry;
-    ni_types_pkg::nmu_read_context_t nmu_read_context;
-    ni_types_pkg::response_entry_t response_entry;
-    ni_types_pkg::nsu_aw_request_t nsu_aw_request;
-    ni_types_pkg::nsu_ar_request_t nsu_ar_request;
-    ni_types_pkg::nsu_b_response_t nsu_b_response;
-    ni_types_pkg::nsu_r_response_t nsu_r_response;
+    ni_types_pkg::nmu_b_rob_entry_t     nmu_b_entry;
+    ni_types_pkg::nmu_r_rob_entry_t     nmu_r_entry;
+    ni_types_pkg::nmu_read_context_t    nmu_read_context;
+    ni_types_pkg::response_entry_t      response_entry;
+    ni_types_pkg::nsu_aw_request_t      nsu_aw_request;
+    ni_types_pkg::nsu_ar_request_t      nsu_ar_request;
+    ni_types_pkg::nsu_b_response_t      nsu_b_response;
+    ni_types_pkg::nsu_r_response_t      nsu_r_response;
 
     // One independent valid/ready bit per stream in the rtl/README.md table:
     // nmu_sam 2 inputs + 2 outputs, nmu_rob 5 + 5,
@@ -83,50 +83,50 @@ module tb_ni_type_contract;
 
         // The four leaf-boundary payloads elaborate independently of their
         // valid/ready wires; handshake is never embedded in a packed record.
-        nmu_sam_aw_result = '0;
-        nmu_sam_ar_result = '0;
-        nmu_aw_request = '0;
-        nmu_ar_request = '0;
-        nmu_b_response = '0;
-        nmu_r_response = '0;
-        nsu_aw_request = '0;
-        nsu_ar_request = '0;
-        nsu_b_response = '0;
-        nsu_r_response = '0;
-        nmu_sam_valid = '0;
-        nmu_sam_ready = '0;
-        nmu_rob_valid = '0;
-        nmu_rob_ready = '0;
-        nsu_depacketize_valid = '0;
-        nsu_depacketize_ready = '0;
+        nmu_sam_aw_result        = '0;
+        nmu_sam_ar_result        = '0;
+        nmu_aw_request           = '0;
+        nmu_ar_request           = '0;
+        nmu_b_response           = '0;
+        nmu_r_response           = '0;
+        nsu_aw_request           = '0;
+        nsu_ar_request           = '0;
+        nsu_b_response           = '0;
+        nsu_r_response           = '0;
+        nmu_sam_valid            = '0;
+        nmu_sam_ready            = '0;
+        nmu_rob_valid            = '0;
+        nmu_rob_ready            = '0;
+        nsu_depacketize_valid    = '0;
+        nsu_depacketize_ready    = '0;
         nsu_response_queue_valid = '0;
         nsu_response_queue_ready = '0;
 
-        req_flit = '0;
+        req_flit        = '0;
         req_flit.header = '1;
         if (req_flit[ni_flit_pkg::HEADER_WIDTH-1:0] != '1)
             $fatal(1, "REQ header is not in the canonical LSB position");
-        req_flit = '0;
+        req_flit         = '0;
         req_flit.payload = '1;
         if (req_flit[ni_params_pkg::NOC_REQ_FLIT_WIDTH-1:
                      ni_flit_pkg::HEADER_WIDTH] != '1)
             $fatal(1, "REQ payload is not above the header");
 
-        rsp_flit = '0;
+        rsp_flit        = '0;
         rsp_flit.header = '1;
         if (rsp_flit[ni_flit_pkg::HEADER_WIDTH-1:0] != '1)
             $fatal(1, "RSP header is not in the canonical LSB position");
-        rsp_flit = '0;
+        rsp_flit         = '0;
         rsp_flit.payload = '1;
         if (rsp_flit[ni_params_pkg::NOC_RSP_FLIT_WIDTH-1:
                      ni_flit_pkg::HEADER_WIDTH] != '1)
             $fatal(1, "RSP payload is not above the header");
 
-        dat_flit = '0;
+        dat_flit        = '0;
         dat_flit.header = '1;
         if (dat_flit[ni_flit_pkg::HEADER_WIDTH-1:0] != '1)
             $fatal(1, "DAT header is not in the canonical LSB position");
-        dat_flit = '0;
+        dat_flit         = '0;
         dat_flit.payload = '1;
         if (dat_flit[ni_params_pkg::NOC_DAT_FLIT_WIDTH-1:
                      ni_flit_pkg::HEADER_WIDTH] != '1)

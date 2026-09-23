@@ -14,7 +14,7 @@ for (genvar i = 0; i < $size(master_axi_req); i++) begin : g_axi_trace
     end
     always @(posedge clk_i) begin
         if (trace_fd) begin
-            if (!rst_ni) begin
+            if (~rst_n_i) begin
                 $fdisplay(trace_fd, "%0d,RESET,0,0,0,0,0,0,0,0", live_cyc);
             end else begin
                 if (master_axi_req[i].awvalid)

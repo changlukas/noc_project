@@ -19,7 +19,7 @@ module link_perf_monitor #(
     parameter int    VC_ID_WIDTH  = 3  // full flit-header VC_ID field width (ni_flit_pkg::VC_ID_WIDTH)
 ) (
     input logic clk_i,
-    input logic rst_ni,
+    input logic rst_n_i,
     input logic measure_en,
     input logic valid,                    // a flit is presented on the wire this cycle
     input logic ready,                    // ready_valid flow only: downstream accepts this cycle
@@ -41,8 +41,8 @@ module link_perf_monitor #(
         end
     end
 
-    always_ff @(posedge clk_i) begin
-        if (!rst_ni) begin
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
             flit_count <= 0;
             stall_cyc  <= 0;
             for (int v = 0; v < NUM_VC; v++) credit[v] <= BUFFER_DEPTH;
@@ -84,7 +84,7 @@ module link_perf_monitor #(
     if (FLOW != "ready_valid") begin : g_credit_asserts
         // Per-VC credit must never underflow: valid && credit[vc_id]==0 means the
         // upstream sender violated the credit protocol (or a mis-wire). Assert loudly.
-        assert property (@(posedge clk_i) disable iff (!rst_ni)
+        assert property (@(posedge clk_i) disable iff (~rst_n_i)
             !(valid && credit[vc_id] == 0))
             else $error("[%s] credit underflow on VC%0d: valid asserted with zero credit",
                         LINK_NAME, vc_id);
@@ -92,7 +92,7 @@ module link_perf_monitor #(
         // vc_id in flit header must be a valid VC index. The flit field is VC_ID_WIDTH
         // bits wide (fixed by the packet spec) but NUM_VC may be < 2^VC_ID_WIDTH; a
         // mis-configured encoder would otherwise silently alias into a valid credit[].
-        assert property (@(posedge clk_i) disable iff (!rst_ni)
+        assert property (@(posedge clk_i) disable iff (~rst_n_i)
             !(valid && (int'(vc_id) >= NUM_VC)))
             else $error("[%s] out-of-range vc_id=%0d on valid flit (NUM_VC=%0d)",
                         LINK_NAME, vc_id, NUM_VC);

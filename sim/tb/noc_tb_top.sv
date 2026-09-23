@@ -10,7 +10,7 @@
 // Checking: pulp axi_scoreboard lives inside each endpoint on master_dv,
 // comparing read data end-to-end through the NoC against golden write data.
 //
-// Self-clocked: clk_i/rst_ni are internal logic (10 ns clock, 4-cycle reset).
+// Self-clocked: clk_i/rst_n_i are internal logic (10 ns clock, 4-cycle reset).
 // Plusargs: +num_reads=<n> +num_writes=<n> (per endpoint); seed via
 // +verilator+seed+<N>.
 
@@ -78,11 +78,11 @@ module noc_tb_top #(
 ) ();
 
     logic clk_i  = 1'b0;
-    logic rst_ni = 1'b0;
+    logic rst_n_i = 1'b0;
     always #5 clk_i = ~clk_i;
     initial begin
         repeat (4) @(posedge clk_i);
-        rst_ni = 1'b1;
+        rst_n_i = 1'b1;
     end
 
     localparam int unsigned NUM_NODES      = X_DIM * Y_DIM;
@@ -106,8 +106,8 @@ module noc_tb_top #(
     int unsigned last_progress  [NUM_ENDPOINTS];
     int unsigned axi_outstanding[NUM_ENDPOINTS];
 
-    always_ff @(posedge clk_i) begin
-        if (!rst_ni) begin
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
             live_cyc <= 0;
             for (int i = 0; i < NUM_ENDPOINTS; i++) begin
                 last_progress[i]   <= 0;
@@ -164,7 +164,7 @@ module noc_tb_top #(
     initial begin
         int unsigned timeout_cycles;
         int unsigned expected_total;
-        @(posedge rst_ni);
+        @(posedge rst_n_i);
         expected_total = 0;
         for (int i = 0; i < NUM_ENDPOINTS; i++)
             expected_total += expected_txn_cnt[i];
@@ -321,21 +321,32 @@ module noc_tb_top #(
     // NoC fabric (NUM_NODES routers, directional links, N_PERIPH off-mesh NIs)
     // -------------------------------------------------------------------------
     noc_fabric #(
-        .X_DIM(X_DIM), .Y_DIM(Y_DIM),
-        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
-        .NUM_DAT_VC(NUM_DAT_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),
-        .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH),
-        .ROUTER_VC_DEPTH(ROUTER_VC_DEPTH),
-        .N_PERIPH(N_PERIPH),
-        .PERIPH_NODE(PERIPH_NODE),
-        .PERIPH_PORT(PERIPH_PORT)
+        .X_DIM           (X_DIM          ),
+        .Y_DIM           (Y_DIM          ),
+        .ID_WIDTH        (ID_WIDTH       ),
+        .ADDR_WIDTH      (ADDR_WIDTH     ),
+        .DATA_WIDTH      (DATA_WIDTH     ),
+        .NUM_DAT_VC      (NUM_DAT_VC     ),
+        .REQ_FLIT_WIDTH  (REQ_FLIT_WIDTH ),
+        .RSP_FLIT_WIDTH  (RSP_FLIT_WIDTH ),
+        .DAT_FLIT_WIDTH  (DAT_FLIT_WIDTH ),
+        .ROUTER_VC_DEPTH (ROUTER_VC_DEPTH),
+        .N_PERIPH        (N_PERIPH       ),
+        .PERIPH_NODE     (PERIPH_NODE    ),
+        .PERIPH_PORT     (PERIPH_PORT    )
     ) u_fabric (
-        .clk_i(clk_i), .rst_ni(rst_ni), .measure_en(perf_measure_en),
-        .router_ctx(router_ctx), .nmu_ctx(nmu_ctx), .nsu_ctx(nsu_ctx),
-        .dat_merge_ctx(dat_merge_ctx),
-        .master_axi_req(master_axi_req), .master_awuser(master_awuser),
-        .master_axi_rsp(master_axi_rsp),
-        .slave_axi_req(slave_axi_req),   .slave_axi_rsp(slave_axi_rsp)
+        .clk_i          (clk_i          ),
+        .rst_n_i        (rst_n_i        ),
+        .measure_en     (perf_measure_en),
+        .router_ctx     (router_ctx     ),
+        .nmu_ctx        (nmu_ctx        ),
+        .nsu_ctx        (nsu_ctx        ),
+        .dat_merge_ctx  (dat_merge_ctx  ),
+        .master_axi_req (master_axi_req ),
+        .master_awuser  (master_awuser  ),
+        .master_axi_rsp (master_axi_rsp ),
+        .slave_axi_req  (slave_axi_req  ),
+        .slave_axi_rsp  (slave_axi_rsp  )
     );
 
     // -------------------------------------------------------------------------
@@ -345,33 +356,33 @@ module noc_tb_top #(
     // NUM_NODES..NUM_ENDPOINTS-1: they have an NI and an endpoint but no router,
     // they carry their own stimulus, and the exit logic below gates on them too.
     // -------------------------------------------------------------------------
-    logic        end_of_sim [NUM_ENDPOINTS];
-    int unsigned txn_cnt    [NUM_ENDPOINTS];
-    int unsigned expected_txn_cnt [NUM_ENDPOINTS];
-    int unsigned expected_write_cnt [NUM_ENDPOINTS];
+    logic            end_of_sim [NUM_ENDPOINTS];
+    int unsigned     txn_cnt    [NUM_ENDPOINTS];
+    int unsigned     expected_txn_cnt [NUM_ENDPOINTS];
+    int unsigned     expected_write_cnt [NUM_ENDPOINTS];
     longint unsigned stimulus_start_cycle [NUM_ENDPOINTS];
     longint unsigned stimulus_done_cycle [NUM_ENDPOINTS];
-    logic        compare_ready [NUM_ENDPOINTS];
-    logic        compare_start;
-    logic        compare_finish;
-    logic        compare_work_done [NUM_ENDPOINTS];
-    logic        compare_done [NUM_ENDPOINTS];
-    logic        compare_background [NUM_ENDPOINTS];
-    logic        source_done [NUM_ENDPOINTS];
+    logic            compare_ready [NUM_ENDPOINTS];
+    logic            compare_start;
+    logic            compare_finish;
+    logic            compare_work_done [NUM_ENDPOINTS];
+    logic            compare_done [NUM_ENDPOINTS];
+    logic            compare_background [NUM_ENDPOINTS];
+    logic            source_done [NUM_ENDPOINTS];
     logic        mode3_start = 1'b0;
     logic        mode4_start = 1'b0;
-    logic        all_barrier_ready;
-    logic        any_active_source;
-    logic        all_active_sources_done;
-    logic        all_compare_work_done;
-    logic        all_compare_done;
+    logic all_barrier_ready;
+    logic any_active_source;
+    logic all_active_sources_done;
+    logic all_compare_work_done;
+    logic all_compare_done;
     longint unsigned compare_barrier_cycle = 0;
     always_comb begin
-        all_barrier_ready = 1'b1;
-        any_active_source = 1'b0;
+        all_barrier_ready       = 1'b1;
+        any_active_source       = 1'b0;
         all_active_sources_done = 1'b1;
-        all_compare_work_done = 1'b1;
-        all_compare_done = 1'b1;
+        all_compare_work_done   = 1'b1;
+        all_compare_done        = 1'b1;
         for (int i = 0; i < NUM_ENDPOINTS; i++) begin
             all_barrier_ready &= compare_ready[i];
             all_compare_work_done &= compare_work_done[i];
@@ -381,12 +392,12 @@ module noc_tb_top #(
                 all_active_sources_done &= source_done[i];
             end
         end
-        compare_start = injection_mode == 3 ? mode3_start : mode4_start;
+        compare_start  = injection_mode == 3 ? mode3_start : mode4_start;
         compare_finish = injection_mode == 3 && all_compare_work_done;
     end
 
     always @(posedge compare_finish) begin
-        if (rst_ni && injection_mode == 3) begin
+        if (rst_n_i && injection_mode == 3) begin
             compare_barrier_cycle = live_cyc;
             $display("[ChannelCompareBarrier] release_cycle=%0d",
                      compare_barrier_cycle);
@@ -394,32 +405,43 @@ module noc_tb_top #(
     end
     for (genvar i = 0; i < NUM_ENDPOINTS; i++) begin : g_endpoint
         user_node_endpoint #(
-            .NODE_ID(i),
+            .NODE_ID (i),
             // #57 split the endpoint's id width into AXI (external, its own
             // ni_params default) and NOC (this tb's ID_WIDTH knob).
-            .NOC_ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
-            .TILE_TARGETS(TILE_TARGETS), .TILE_BASE_ADDR(TILE_BASE_ADDR[i]),
-            .TILE_SIZE(TILE_SIZE[i]), .NOC_EGRESS_BASE(NOC_EGRESS_BASE),
-            .MEM_STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),
-            .MEM_STALL_RANDOM_OUTPUT(MEM_STALL_RANDOM_OUTPUT),
-            .MEM_FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),
-            .MEM_FIXED_DELAY_OUTPUT(MEM_FIXED_DELAY_OUTPUT),
-            .MST_STALL_RANDOM_OUTPUT(MST_STALL_RANDOM_OUTPUT),
-            .MST_FIXED_DELAY_OUTPUT(MST_FIXED_DELAY_OUTPUT)
+            .NOC_ID_WIDTH            (ID_WIDTH               ),
+            .ADDR_WIDTH              (ADDR_WIDTH             ),
+            .DATA_WIDTH              (DATA_WIDTH             ),
+            .TILE_TARGETS            (TILE_TARGETS           ),
+            .TILE_BASE_ADDR          (TILE_BASE_ADDR[i]      ),
+            .TILE_SIZE               (TILE_SIZE[i]           ),
+            .NOC_EGRESS_BASE         (NOC_EGRESS_BASE        ),
+            .MEM_STALL_RANDOM_INPUT  (MEM_STALL_RANDOM_INPUT ),
+            .MEM_STALL_RANDOM_OUTPUT (MEM_STALL_RANDOM_OUTPUT),
+            .MEM_FIXED_DELAY_INPUT   (MEM_FIXED_DELAY_INPUT  ),
+            .MEM_FIXED_DELAY_OUTPUT  (MEM_FIXED_DELAY_OUTPUT ),
+            .MST_STALL_RANDOM_OUTPUT (MST_STALL_RANDOM_OUTPUT),
+            .MST_FIXED_DELAY_OUTPUT  (MST_FIXED_DELAY_OUTPUT )
         ) u_endpoint (
-            .clk_i(clk_i), .rst_ni(rst_ni),
-            .master_axi_req_o(master_axi_req[i]), .master_awuser_o(master_awuser[i]),
-            .master_axi_rsp_i(master_axi_rsp[i]),
-            .slave_axi_req_i(slave_axi_req[i]),   .slave_axi_rsp_o(slave_axi_rsp[i]),
-            .end_of_sim_o(end_of_sim[i]), .txn_cnt_o(txn_cnt[i]),
-            .expected_txn_cnt_o(expected_txn_cnt[i]),
-            .expected_write_cnt_o(expected_write_cnt[i]),
-            .stimulus_start_cycle_o(stimulus_start_cycle[i]),
-            .stimulus_done_cycle_o(stimulus_done_cycle[i]),
-            .compare_ready_o(compare_ready[i]), .compare_start_i(compare_start),
-            .compare_finish_i(compare_finish), .compare_work_done_o(compare_work_done[i]),
-            .compare_done_o(compare_done[i]),
-            .compare_background_o(compare_background[i]), .source_done_o(source_done[i])
+            .clk_i                  (clk_i                  ),
+            .rst_n_i                (rst_n_i                ),
+            .master_axi_req_o       (master_axi_req[i]      ),
+            .master_awuser_o        (master_awuser[i]       ),
+            .master_axi_rsp_i       (master_axi_rsp[i]      ),
+            .slave_axi_req_i        (slave_axi_req[i]       ),
+            .slave_axi_rsp_o        (slave_axi_rsp[i]       ),
+            .end_of_sim_o           (end_of_sim[i]          ),
+            .txn_cnt_o              (txn_cnt[i]             ),
+            .expected_txn_cnt_o     (expected_txn_cnt[i]    ),
+            .expected_write_cnt_o   (expected_write_cnt[i]  ),
+            .stimulus_start_cycle_o (stimulus_start_cycle[i]),
+            .stimulus_done_cycle_o  (stimulus_done_cycle[i] ),
+            .compare_ready_o        (compare_ready[i]       ),
+            .compare_start_i        (compare_start          ),
+            .compare_finish_i       (compare_finish         ),
+            .compare_work_done_o    (compare_work_done[i]   ),
+            .compare_done_o         (compare_done[i]        ),
+            .compare_background_o   (compare_background[i]  ),
+            .source_done_o          (source_done[i]         )
         );
     end : g_endpoint
 
@@ -477,7 +499,7 @@ module noc_tb_top #(
 
     always @(posedge clk_i) begin
         if (packet_trace_fd) begin
-            if (!rst_ni) begin
+            if (~rst_n_i) begin
                 $fdisplay(packet_trace_fd, "%0d,RESET,0,REQ,0,0,0,0,0,0,0,0,0", live_cyc);
             end else begin
                 $fdisplay(link_trace_fd, "%0d,TICK,,%0d", live_cyc, perf_measure_en);
@@ -551,20 +573,20 @@ module noc_tb_top #(
         perf_cycle = perf_cycle + 1;
     end
 
-    always @(posedge clk_i) begin
-        if (!rst_ni) begin
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
             perf_measure_en <= 1'b0;
-            mode3_start <= 1'b0;
-            mode4_start <= 1'b0;
-            mode4_ended <= 1'b0;
-            mode3_started <= 1'b0;
-            mode3_ended <= 1'b0;
+            mode3_start     <= 1'b0;
+            mode4_start     <= 1'b0;
+            mode4_ended     <= 1'b0;
+            mode3_started   <= 1'b0;
+            mode3_ended     <= 1'b0;
         end else if (injection_mode == 3 && !mode3_started && all_barrier_ready) begin
             measurement_start_cycle = live_cyc + 1;
             cmodel_perf_begin(longint'(measurement_start_cycle));
             perf_measure_en <= 1'b1;
-            mode3_start <= 1'b1;
-            mode3_started <= 1'b1;
+            mode3_start     <= 1'b1;
+            mode3_started   <= 1'b1;
         end else if (injection_mode == 3 && mode3_started && !mode3_ended &&
                      all_compare_done) begin
             measurement_end_cycle = 0;
@@ -574,7 +596,7 @@ module noc_tb_top #(
                     measurement_end_cycle = stimulus_done_cycle[i];
             end
             perf_measure_en <= 1'b0;
-            mode3_ended <= 1'b1;
+            mode3_ended     <= 1'b1;
             #1ps cmodel_perf_end(longint'(measurement_end_cycle));
         end else if (injection_mode != 3 && injection_mode != 4 && !perf_measure_en) begin
             cmodel_perf_begin(0);
@@ -583,11 +605,11 @@ module noc_tb_top #(
             measurement_start_cycle = live_cyc + 1;
             cmodel_perf_begin(longint'(measurement_start_cycle));
             perf_measure_en <= 1'b1;
-            mode4_start <= 1'b1;
+            mode4_start     <= 1'b1;
         end else if (injection_mode == 4 && !mode4_ended && all_active_sources_done) begin
             measurement_end_cycle = live_cyc;
-            perf_measure_en <= 1'b0;
-            mode4_ended <= 1'b1;
+            perf_measure_en       <= 1'b0;
+            mode4_ended           <= 1'b1;
             #1ps cmodel_perf_end(longint'(measurement_end_cycle));
             $display("[MeasurementWindow] start_cycle=%0d completion_cycle=%0d",
                      measurement_start_cycle, measurement_end_cycle);
@@ -620,31 +642,31 @@ module noc_tb_top #(
     bit round_perf = 1'b0;
     initial void'($value$plusargs("round_perf=%d", round_perf));
     initial begin
-        bit vacuous;
-        bit all_done;
-        int unsigned expected_total;
-        int unsigned active_sources;
-        int unsigned write_bursts;
+        bit              vacuous;
+        bit              all_done;
+        int unsigned     expected_total;
+        int unsigned     active_sources;
+        int unsigned     write_bursts;
         longint unsigned round_start;
         longint unsigned round_completion;
-        int unsigned aw_idle, aw_same, aw_alloc, ar_idle, ar_same, ar_alloc;
-        int unsigned list_hwm, wtxn_hwm, rtxn_hwm;
-        int unsigned nsu_write_hwm, nsu_read_hwm;
-        int unsigned background_nodes;
-        bit all_completion_at_barrier;
+        int unsigned     aw_idle, aw_same, aw_alloc, ar_idle, ar_same, ar_alloc;
+        int unsigned     list_hwm, wtxn_hwm, rtxn_hwm;
+        int unsigned     nsu_write_hwm, nsu_read_hwm;
+        int unsigned     background_nodes;
+        bit              all_completion_at_barrier;
         // clock-polled (not wait()): end_of_sim is driven through port
         // aliases; Verilator --timing wait() on it does not wake reliably.
         do begin
             @(posedge clk_i);
-            all_done = rst_ni;
+            all_done = rst_n_i;
             for (int i = 0; i < NUM_ENDPOINTS; i++)
                 all_done &= injection_mode == 3 ? compare_done[i] : end_of_sim[i];
         end while (!all_done);
         if (injection_mode == 4 && !mode4_ended)
             $fatal(1, "tb_top: Mode 4 completed without closing the measurement window");
         if (injection_mode == 3) begin
-            background_nodes = 0;
-            round_completion = 0;
+            background_nodes          = 0;
+            round_completion          = 0;
             all_completion_at_barrier = stimulus_done_cycle[0] == compare_barrier_cycle;
             for (int i = 0; i < NUM_ENDPOINTS; i++) begin
                 if (compare_background[i]) begin
@@ -682,7 +704,7 @@ module noc_tb_top #(
                 $fatal(1, "tb_top: Mode 4 measurement window missed final completion");
         end
         repeat (SETTLE_CYCLES) @(posedge clk_i);
-        vacuous = 1'b0;
+        vacuous        = 1'b0;
         expected_total = 0;
         for (int i = 0; i < NUM_ENDPOINTS; i++) begin
             expected_total += expected_txn_cnt[i];
@@ -695,7 +717,7 @@ module noc_tb_top #(
         if (expected_total == 0) $fatal(1, "tb_top: empty stimulus");
         if (vacuous) $fatal(1, "tb_top: vacuous run");
         active_sources = 0;
-        write_bursts = 0;
+        write_bursts   = 0;
         if (injection_mode == 4) begin
             for (int i = 0; i < NUM_ENDPOINTS; i++) begin
                 if (expected_txn_cnt[i] > 0) active_sources++;
@@ -716,9 +738,9 @@ module noc_tb_top #(
         if (round_perf) begin
             if (injection_mode != 0)
                 $fatal(1, "RoundPerf requires injection_mode=0");
-            round_start = 0;
+            round_start      = 0;
             round_completion = 0;
-            active_sources = 0;
+            active_sources   = 0;
             for (int i = 0; i < NUM_ENDPOINTS; i++) begin
                 if (expected_txn_cnt[i] > 0) begin
                     if (expected_txn_cnt[i] != expected_write_cnt[i])
@@ -759,9 +781,9 @@ module noc_tb_top #(
     // -------------------------------------------------------------------------
     import "DPI-C" context function int cmodel_check_error(output string msg);
 
-    always_ff @(posedge clk_i) begin
+    always @(posedge clk_i) begin
         /* verilator lint_off WIDTHTRUNC */
-        if (rst_ni) begin
+        if (rst_n_i) begin
             string dpi_err_msg;
             int    dpi_err_code;
             dpi_err_code = cmodel_check_error(dpi_err_msg);

@@ -16,9 +16,9 @@ module nmu_response_path #(
     parameter int unsigned MAX_OUTSTANDING_PER_ID = ni_params_pkg::NMU_MAX_OUTSTANDING_PER_ID
 ) (
     input  wire logic                                                                     axi_clk_i,
-    input  wire logic                                                                     axi_rst_ni,
+    input  wire logic                                                                     axi_rst_n_i,
     input  wire logic                                                                     noc_clk_i,
-    input  wire logic                                                                     noc_rst_ni,
+    input  wire logic                                                                     noc_rst_n_i,
     input  wire ni_types_pkg::nmu_sam_aw_result_t                                         s_aw_i,
     input  wire logic                                                                     s_aw_valid_i,
     output wire logic                                                                     s_aw_ready_o,
@@ -53,10 +53,10 @@ module nmu_response_path #(
 
     ni_types_pkg::nmu_b_response_t decoded_b;
     ni_types_pkg::nmu_r_response_t decoded_r;
-    ni_signals_pkg::axi_b_t ordered_b;
-    ni_signals_pkg::axi_r_t ordered_r;
-    wire decoded_b_valid, decoded_b_ready, decoded_r_valid, decoded_r_ready;
-    wire ordered_b_valid, ordered_b_ready, ordered_r_valid, ordered_r_ready;
+    ni_signals_pkg::axi_b_t        ordered_b;
+    ni_signals_pkg::axi_r_t        ordered_r;
+    wire                           decoded_b_valid, decoded_b_ready, decoded_r_valid, decoded_r_ready;
+    wire                           ordered_b_valid, ordered_b_ready, ordered_r_valid, ordered_r_ready;
     nmu_ordering #(
         .B_ROB_DEPTH            (B_ROB_DEPTH           ),
         .R_ROB_DEPTH            (R_ROB_DEPTH           ),
@@ -64,7 +64,7 @@ module nmu_response_path #(
         .R_ROB_EN               (R_ROB_EN              )
     ) i_ordering (
         .clk_i        (noc_clk_i           ),
-        .rst_i        (!noc_rst_ni         ),
+        .rst_n_i      (noc_rst_n_i         ),
         .s_aw_i       (s_aw_i              ),
         .s_aw_valid_i (s_aw_valid_i        ),
         .s_aw_ready_o (s_aw_ready_o        ),
@@ -102,7 +102,7 @@ module nmu_response_path #(
         .DAT_RX_VC_DEPTH (DAT_RX_VC_DEPTH)
     ) i_depacketize (
         .clk_i               (noc_clk_i                              ),
-        .rst_i               (!noc_rst_ni                            ),
+        .rst_n_i             (noc_rst_n_i                            ),
         .s_dat_i             (ni_flit_pkg::dat_flit_t'(rx_dat_flit_i)),
         .s_dat_valid_i       (rx_dat_valid_i                         ),
         .dat_credit_return_o (rx_dat_crdvalid_o                      ),
@@ -121,22 +121,22 @@ module nmu_response_path #(
         .b_t            (ni_signals_pkg::axi_b_t),
         .r_t            (ni_signals_pkg::axi_r_t)
     ) i_response_fifo (
-        .noc_clk_i,
-        .noc_rst_ni,
-        .axi_clk_i,
-        .axi_rst_ni,
+        .noc_clk_i   (noc_clk_i      ),
+        .noc_rst_n_i (noc_rst_n_i    ),
+        .axi_clk_i   (axi_clk_i      ),
+        .axi_rst_n_i (axi_rst_n_i    ),
         .s_b_data_i  (ordered_b      ),
         .s_b_valid_i (ordered_b_valid),
         .s_b_ready_o (ordered_b_ready),
         .m_b_data_o  (m_b_o          ),
-        .m_b_valid_o,
-        .m_b_ready_i,
+        .m_b_valid_o (m_b_valid_o    ),
+        .m_b_ready_i (m_b_ready_i    ),
         .s_r_data_i  (ordered_r      ),
         .s_r_valid_i (ordered_r_valid),
         .s_r_ready_o (ordered_r_ready),
         .m_r_data_o  (m_r_o          ),
-        .m_r_valid_o,
-        .m_r_ready_i
+        .m_r_valid_o (m_r_valid_o    ),
+        .m_r_ready_i (m_r_ready_i    )
     );
 endmodule
 

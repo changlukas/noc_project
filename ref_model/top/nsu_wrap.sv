@@ -10,8 +10,7 @@
 // outputs via cmodel_nsu_get_outputs, then registers those outputs nonblocking
 // so they are visible to SV wires from the NEXT cycle onward.
 //
-// Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
-// No async reset path — sync reset is the project default.
+// Reset: asynchronous active-low (rst_n_i). Output registers cleared on reset.
 //
 // Error polling is centralized in tb_top.sv; this wrap no longer
 // calls cmodel_check_error/cmodel_finalize itself.
@@ -45,7 +44,7 @@ module nsu_wrap #(
     parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH
 ) (
     input  logic              clk_i,
-    input  logic              rst_ni,
+    input  logic              rst_n_i,
     input  longint unsigned            ctx_i,
 
     // REQ face (ingress, ready/valid).
@@ -141,84 +140,84 @@ module nsu_wrap #(
     // Output registers (registered one cycle behind DPI sample)
     // -------------------------------------------------------------------------
 
-    bit                    rx_req_ready_q;
-    bit                    tx_rsp_valid_q;
-    bit [RSP_FLIT_WIDTH-1:0] tx_rsp_flit_q;
-    logic                  tx_rsp_model_ready;
-    bit                    tx_dat_valid_q;
-    bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q;
-    bit [NUM_DAT_VC-1:0]     rx_dat_crdvalid_q;
+    bit                        rx_req_ready_q;
+    bit                        tx_rsp_valid_q;
+    bit   [RSP_FLIT_WIDTH-1:0] tx_rsp_flit_q;
+    logic                      tx_rsp_model_ready;
+    bit                        tx_dat_valid_q;
+    bit   [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q;
+    bit       [NUM_DAT_VC-1:0] rx_dat_crdvalid_q;
 
     // AXI master side outputs (Nsu drives toward slave)
-    bit                    awvalid_q;
-    bit [ID_WIDTH-1:0]     awid_q;
-    bit [ADDR_WIDTH-1:0]   awaddr_q;
-    bit [7:0]              awlen_q;
-    bit [2:0]              awsize_q;
-    bit [1:0]              awburst_q;
-    bit                    awlock_q;
-    bit [3:0]              awcache_q;
-    bit [2:0]              awprot_q;
-    bit [3:0]              awqos_q;
+    bit                  awvalid_q;
+    bit   [ID_WIDTH-1:0] awid_q;
+    bit [ADDR_WIDTH-1:0] awaddr_q;
+    bit            [7:0] awlen_q;
+    bit            [2:0] awsize_q;
+    bit            [1:0] awburst_q;
+    bit                  awlock_q;
+    bit            [3:0] awcache_q;
+    bit            [2:0] awprot_q;
+    bit            [3:0] awqos_q;
 
     bit                    wvalid_q;
-    bit [DATA_WIDTH-1:0]   wdata_q;
+    bit   [DATA_WIDTH-1:0] wdata_q;
     bit [DATA_WIDTH/8-1:0] wstrb_q;
     bit                    wlast_q;
 
-    bit                    bready_q;
+    bit bready_q;
 
-    bit                    arvalid_q;
-    bit [ID_WIDTH-1:0]     arid_q;
-    bit [ADDR_WIDTH-1:0]   araddr_q;
-    bit [7:0]              arlen_q;
-    bit [2:0]              arsize_q;
-    bit [1:0]              arburst_q;
-    bit                    arlock_q;
-    bit [3:0]              arcache_q;
-    bit [2:0]              arprot_q;
-    bit [3:0]              arqos_q;
+    bit                  arvalid_q;
+    bit   [ID_WIDTH-1:0] arid_q;
+    bit [ADDR_WIDTH-1:0] araddr_q;
+    bit            [7:0] arlen_q;
+    bit            [2:0] arsize_q;
+    bit            [1:0] arburst_q;
+    bit                  arlock_q;
+    bit            [3:0] arcache_q;
+    bit            [2:0] arprot_q;
+    bit            [3:0] arqos_q;
 
-    bit                    rready_q;
+    bit rready_q;
 
     // -------------------------------------------------------------------------
-    // always_ff: sync-reset, 3-step DPI call, registered outputs, error check
+    // always: async-reset outputs, 3-step DPI call, registered outputs, error check
     // -------------------------------------------------------------------------
 
-    always_ff @(posedge clk_i) begin
-        if (!rst_ni) begin
-            rx_req_ready_q            <= '0;
-            tx_rsp_valid_q            <= '0;
-            tx_rsp_flit_q             <= '0;
-            tx_dat_valid_q            <= '0;
-            tx_dat_flit_q             <= '0;
-            rx_dat_crdvalid_q         <= '0;
-            awvalid_q                 <= '0;
-            awid_q                    <= '0;
-            awaddr_q                  <= '0;
-            awlen_q                   <= '0;
-            awsize_q                  <= '0;
-            awburst_q                 <= '0;
-            awlock_q                  <= '0;
-            awcache_q                 <= '0;
-            awprot_q                  <= '0;
-            awqos_q                   <= '0;
-            wvalid_q                  <= '0;
-            wdata_q                   <= '0;
-            wstrb_q                   <= '0;
-            wlast_q                   <= '0;
-            bready_q                  <= '0;
-            arvalid_q                 <= '0;
-            arid_q                    <= '0;
-            araddr_q                  <= '0;
-            arlen_q                   <= '0;
-            arsize_q                  <= '0;
-            arburst_q                 <= '0;
-            arlock_q                  <= '0;
-            arcache_q                 <= '0;
-            arprot_q                  <= '0;
-            arqos_q                   <= '0;
-            rready_q                  <= '0;
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
+            rx_req_ready_q    <= '0;
+            tx_rsp_valid_q    <= '0;
+            tx_rsp_flit_q     <= '0;
+            tx_dat_valid_q    <= '0;
+            tx_dat_flit_q     <= '0;
+            rx_dat_crdvalid_q <= '0;
+            awvalid_q         <= '0;
+            awid_q            <= '0;
+            awaddr_q          <= '0;
+            awlen_q           <= '0;
+            awsize_q          <= '0;
+            awburst_q         <= '0;
+            awlock_q          <= '0;
+            awcache_q         <= '0;
+            awprot_q          <= '0;
+            awqos_q           <= '0;
+            wvalid_q          <= '0;
+            wdata_q           <= '0;
+            wstrb_q           <= '0;
+            wlast_q           <= '0;
+            bready_q          <= '0;
+            arvalid_q         <= '0;
+            arid_q            <= '0;
+            araddr_q          <= '0;
+            arlen_q           <= '0;
+            arsize_q          <= '0;
+            arburst_q         <= '0;
+            arlock_q          <= '0;
+            arcache_q         <= '0;
+            arprot_q          <= '0;
+            arqos_q           <= '0;
+            rready_q          <= '0;
         end else begin
             // Step 1: push current wire values into C++ input latch.
             cmodel_nsu_set_inputs(
@@ -250,38 +249,38 @@ module nsu_wrap #(
             // Step 3: pull outputs into local temporaries (blocking to locals is
             // safe; avoids BLKANDNBLK with the nonblocking reset path above).
             begin : get_outputs_blk
-                bit                    t_rx_req_ready;
-                bit                    t_tx_rsp_valid;
+                bit                      t_rx_req_ready;
+                bit                      t_tx_rsp_valid;
                 bit [RSP_FLIT_WIDTH-1:0] t_tx_rsp_flit;
-                bit                    t_tx_dat_valid;
+                bit                      t_tx_dat_valid;
                 bit [DAT_FLIT_WIDTH-1:0] t_tx_dat_flit;
-                bit [NUM_DAT_VC-1:0]     t_rx_dat_crdvalid;
-                bit                    t_awvalid;
-                bit [ID_WIDTH-1:0]     t_awid;
-                bit [ADDR_WIDTH-1:0]   t_awaddr;
-                bit [7:0]              t_awlen;
-                bit [2:0]              t_awsize;
-                bit [1:0]              t_awburst;
-                bit                    t_awlock;
-                bit [3:0]              t_awcache;
-                bit [2:0]              t_awprot;
-                bit [3:0]              t_awqos;
-                bit                    t_wvalid;
-                bit [DATA_WIDTH-1:0]   t_wdata;
-                bit [DATA_WIDTH/8-1:0] t_wstrb;
-                bit                    t_wlast;
-                bit                    t_bready;
-                bit                    t_arvalid;
-                bit [ID_WIDTH-1:0]     t_arid;
-                bit [ADDR_WIDTH-1:0]   t_araddr;
-                bit [7:0]              t_arlen;
-                bit [2:0]              t_arsize;
-                bit [1:0]              t_arburst;
-                bit                    t_arlock;
-                bit [3:0]              t_arcache;
-                bit [2:0]              t_arprot;
-                bit [3:0]              t_arqos;
-                bit                    t_rready;
+                bit     [NUM_DAT_VC-1:0] t_rx_dat_crdvalid;
+                bit                      t_awvalid;
+                bit       [ID_WIDTH-1:0] t_awid;
+                bit     [ADDR_WIDTH-1:0] t_awaddr;
+                bit                [7:0] t_awlen;
+                bit                [2:0] t_awsize;
+                bit                [1:0] t_awburst;
+                bit                      t_awlock;
+                bit                [3:0] t_awcache;
+                bit                [2:0] t_awprot;
+                bit                [3:0] t_awqos;
+                bit                      t_wvalid;
+                bit     [DATA_WIDTH-1:0] t_wdata;
+                bit   [DATA_WIDTH/8-1:0] t_wstrb;
+                bit                      t_wlast;
+                bit                      t_bready;
+                bit                      t_arvalid;
+                bit       [ID_WIDTH-1:0] t_arid;
+                bit     [ADDR_WIDTH-1:0] t_araddr;
+                bit                [7:0] t_arlen;
+                bit                [2:0] t_arsize;
+                bit                [1:0] t_arburst;
+                bit                      t_arlock;
+                bit                [3:0] t_arcache;
+                bit                [2:0] t_arprot;
+                bit                [3:0] t_arqos;
+                bit                      t_rready;
                 cmodel_nsu_get_outputs(
                     ctx_i,
                     t_rx_req_ready,
@@ -296,7 +295,7 @@ module nsu_wrap #(
                     t_arlock, t_arcache, t_arprot, t_arqos,
                     t_rready
                 );
-                rx_req_ready_q          <= t_rx_req_ready;
+                rx_req_ready_q <= t_rx_req_ready;
                 // RSP egress hold register: the strobe loads it, the wire
                 // handshake frees it; a strobe may land on the freeing edge
                 // (load wins, the old flit was consumed at that edge). See
@@ -307,35 +306,35 @@ module nsu_wrap #(
                 end else if (tx_rsp_ready_i) begin
                     tx_rsp_valid_q <= 1'b0;
                 end
-                tx_dat_valid_q          <= t_tx_dat_valid;
-                tx_dat_flit_q           <= t_tx_dat_flit;
-                rx_dat_crdvalid_q       <= t_rx_dat_crdvalid;
-                awvalid_q               <= t_awvalid;
-                awid_q                  <= t_awid;
-                awaddr_q                <= t_awaddr;
-                awlen_q                 <= t_awlen;
-                awsize_q                <= t_awsize;
-                awburst_q               <= t_awburst;
-                awlock_q                <= t_awlock;
-                awcache_q               <= t_awcache;
-                awprot_q                <= t_awprot;
-                awqos_q                 <= t_awqos;
-                wvalid_q                <= t_wvalid;
-                wdata_q                 <= t_wdata;
-                wstrb_q                 <= t_wstrb;
-                wlast_q                 <= t_wlast;
-                bready_q                <= t_bready;
-                arvalid_q               <= t_arvalid;
-                arid_q                  <= t_arid;
-                araddr_q                <= t_araddr;
-                arlen_q                 <= t_arlen;
-                arsize_q                <= t_arsize;
-                arburst_q               <= t_arburst;
-                arlock_q                <= t_arlock;
-                arcache_q               <= t_arcache;
-                arprot_q                <= t_arprot;
-                arqos_q                 <= t_arqos;
-                rready_q                <= t_rready;
+                tx_dat_valid_q    <= t_tx_dat_valid;
+                tx_dat_flit_q     <= t_tx_dat_flit;
+                rx_dat_crdvalid_q <= t_rx_dat_crdvalid;
+                awvalid_q         <= t_awvalid;
+                awid_q            <= t_awid;
+                awaddr_q          <= t_awaddr;
+                awlen_q           <= t_awlen;
+                awsize_q          <= t_awsize;
+                awburst_q         <= t_awburst;
+                awlock_q          <= t_awlock;
+                awcache_q         <= t_awcache;
+                awprot_q          <= t_awprot;
+                awqos_q           <= t_awqos;
+                wvalid_q          <= t_wvalid;
+                wdata_q           <= t_wdata;
+                wstrb_q           <= t_wstrb;
+                wlast_q           <= t_wlast;
+                bready_q          <= t_bready;
+                arvalid_q         <= t_arvalid;
+                arid_q            <= t_arid;
+                araddr_q          <= t_araddr;
+                arlen_q           <= t_arlen;
+                arsize_q          <= t_arsize;
+                arburst_q         <= t_arburst;
+                arlock_q          <= t_arlock;
+                arcache_q         <= t_arcache;
+                arprot_q          <= t_arprot;
+                arqos_q           <= t_arqos;
+                rready_q          <= t_rready;
             end
         end
     end
@@ -344,25 +343,25 @@ module nsu_wrap #(
     // Drive interface outputs from registered state
     // -------------------------------------------------------------------------
 
-    assign rx_req_ready_o    = rx_req_ready_q;
+    assign rx_req_ready_o = rx_req_ready_q;
     // The C++ model emits a one-cycle RSP strobe after sampling ready; the
     // hold register above owns the RTL-facing held-valid contract, and the
     // model may pop when it is empty or its flit's handshake completes this
     // cycle (full rate, single stage).
     assign tx_rsp_model_ready = !tx_rsp_valid_q || tx_rsp_ready_i;
-    assign tx_rsp_valid_o = tx_rsp_valid_q;
-    assign tx_rsp_flit_o  = tx_rsp_flit_q;
+    assign tx_rsp_valid_o     = tx_rsp_valid_q;
+    assign tx_rsp_flit_o      = tx_rsp_flit_q;
 
     // Egress-hold checker, explicit sampled-history form (SVA $stable in a
     // |=> consequent false-fires under Verilator on the first backpressured
     // cycle — see router_wrap.sv).
-    logic chk_rsp_v_q, chk_rsp_r_q;
+    logic                      chk_rsp_v_q, chk_rsp_r_q;
     logic [RSP_FLIT_WIDTH-1:0] chk_rsp_flit_q;
-    always_ff @(posedge clk_i) begin
-        chk_rsp_v_q    <= rst_ni && tx_rsp_valid_o;
+    always @(posedge clk_i) begin
+        chk_rsp_v_q    <= rst_n_i && tx_rsp_valid_o;
         chk_rsp_r_q    <= tx_rsp_ready_i;
         chk_rsp_flit_q <= tx_rsp_flit_o;
-        if (rst_ni && chk_rsp_v_q && !chk_rsp_r_q &&
+        if (rst_n_i && chk_rsp_v_q && !chk_rsp_r_q &&
             (!tx_rsp_valid_o || tx_rsp_flit_o !== chk_rsp_flit_q))
             $error("nsu_wrap: RSP changed before valid/ready handshake");
     end
@@ -372,26 +371,26 @@ module nsu_wrap #(
     assign rx_dat_crdvalid_o = rx_dat_crdvalid_q;
 
     // AXI master side — Nsu drives request channels toward slave
-    assign axi_req_o.awvalid  = awvalid_q;
-    assign axi_req_o.awid     = awid_q;
-    assign axi_req_o.awaddr   = awaddr_q;
-    assign axi_req_o.awlen    = awlen_q;
-    assign axi_req_o.awsize   = awsize_q;
-    assign axi_req_o.awburst  = awburst_q;
-    assign axi_req_o.awlock   = awlock_q;
-    assign axi_req_o.awcache  = awcache_q;
-    assign axi_req_o.awprot   = awprot_q;
-    assign axi_req_o.awqos    = awqos_q;
+    assign axi_req_o.awvalid = awvalid_q;
+    assign axi_req_o.awid    = awid_q;
+    assign axi_req_o.awaddr  = awaddr_q;
+    assign axi_req_o.awlen   = awlen_q;
+    assign axi_req_o.awsize  = awsize_q;
+    assign axi_req_o.awburst = awburst_q;
+    assign axi_req_o.awlock  = awlock_q;
+    assign axi_req_o.awcache = awcache_q;
+    assign axi_req_o.awprot  = awprot_q;
+    assign axi_req_o.awqos   = awqos_q;
     // awregion/arregion are carried-but-unused (not marshalled by DPI); the
     // Nsu never drives them — tie to '0 so the field is not undriven.
     assign axi_req_o.awregion = '0;
 
-    assign axi_req_o.wvalid   = wvalid_q;
-    assign axi_req_o.wdata    = wdata_q;
-    assign axi_req_o.wstrb    = wstrb_q;
-    assign axi_req_o.wlast    = wlast_q;
+    assign axi_req_o.wvalid = wvalid_q;
+    assign axi_req_o.wdata  = wdata_q;
+    assign axi_req_o.wstrb  = wstrb_q;
+    assign axi_req_o.wlast  = wlast_q;
 
-    assign axi_req_o.bready   = bready_q;
+    assign axi_req_o.bready = bready_q;
 
     assign axi_req_o.arvalid  = arvalid_q;
     assign axi_req_o.arid     = arid_q;
@@ -405,7 +404,7 @@ module nsu_wrap #(
     assign axi_req_o.arqos    = arqos_q;
     assign axi_req_o.arregion = '0;
 
-    assign axi_req_o.rready   = rready_q;
+    assign axi_req_o.rready = rready_q;
 
 endmodule
 

@@ -11,16 +11,16 @@ module tb_nmu_request_packetize_stress #(
     localparam int unsigned BEATS = 3;
     localparam int unsigned CREDIT_DEPTH = 2;
     localparam int unsigned WRITE_VCS = DAT_VC_MODE == 1 ? NUM_DAT_VC/2 : NUM_DAT_VC;
-    logic clk_i = 0, rst_i = 1;
-    ni_types_pkg::nmu_aw_request_t s_aw_i;
-    ni_signals_pkg::axi_w_t s_w_i;
-    ni_types_pkg::nmu_ar_request_t s_ar_i;
-    ni_flit_pkg::req_flit_t m_req_o, previous_req;
-    ni_flit_pkg::dat_flit_t m_dat_o;
-    logic s_aw_valid_i, s_aw_ready_o, s_w_valid_i, s_w_ready_o;
-    logic s_ar_valid_i, s_ar_ready_o, m_req_valid_o, m_req_ready_i, m_dat_valid_o;
-    logic [NUM_DAT_VC-1:0] dat_credit_return_i;
-    logic [NUM_DAT_VC-1:0] credit_delay [3];
+    logic clk_i = 0, rst_n_i = 0;
+    ni_types_pkg::nmu_aw_request_t                  s_aw_i;
+    ni_signals_pkg::axi_w_t                         s_w_i;
+    ni_types_pkg::nmu_ar_request_t                  s_ar_i;
+    ni_flit_pkg::req_flit_t                         m_req_o, previous_req;
+    ni_flit_pkg::dat_flit_t                         m_dat_o;
+    logic                                           s_aw_valid_i, s_aw_ready_o, s_w_valid_i, s_w_ready_o;
+    logic                                           s_ar_valid_i, s_ar_ready_o, m_req_valid_o, m_req_ready_i, m_dat_valid_o;
+    logic                          [NUM_DAT_VC-1:0] dat_credit_return_i;
+    logic                          [NUM_DAT_VC-1:0] credit_delay [3];
     logic [31:0] random_reg = 32'hb7251309;
     logic req_stalled = 0;
     int narrow_count = 0, data_count = 0, read_count = 0;
@@ -32,8 +32,10 @@ module tb_nmu_request_packetize_stress #(
     bit writes_done = 0, reads_done = 0;
 
     nmu_request_inject_tb_dut #(
-        .FIFO_DEPTH (FIFO_DEPTH), .NUM_DAT_VC (NUM_DAT_VC),
-        .DAT_VC_MODE (DAT_VC_MODE), .ROUTER_VC_DEPTH (CREDIT_DEPTH)
+        .FIFO_DEPTH      (FIFO_DEPTH  ),
+        .NUM_DAT_VC      (NUM_DAT_VC  ),
+        .DAT_VC_MODE     (DAT_VC_MODE ),
+        .ROUTER_VC_DEPTH (CREDIT_DEPTH)
     ) dut (.*);
 
     always #5ns clk_i = !clk_i;
@@ -47,19 +49,19 @@ module tb_nmu_request_packetize_stress #(
 
     // Delayed credit returns model real occupied downstream slots.
     always @(negedge clk_i) begin
-        if (rst_i) begin
-            m_req_ready_i = 0;
+        if (~rst_n_i) begin
+            m_req_ready_i       = 0;
             dat_credit_return_i = '0;
-            random_reg = 32'hb7251309;
+            random_reg          = 32'hb7251309;
         end else begin
-            random_reg = {random_reg[30:0], random_reg[31] ^ random_reg[21] ^ random_reg[1] ^ random_reg[0]};
-            m_req_ready_i = cycle > 12 && random_reg[0];
+            random_reg          = {random_reg[30:0], random_reg[31] ^ random_reg[21] ^ random_reg[1] ^ random_reg[0]};
+            m_req_ready_i       = cycle > 12 && random_reg[0];
             dat_credit_return_i = credit_delay[2];
         end
     end
 
-    always @(posedge clk_i) begin
-        if (rst_i) begin
+    always @(posedge clk_i or negedge rst_n_i) begin
+        if (~rst_n_i) begin
             for (int vc = 0; vc < NUM_DAT_VC; vc++) credit[vc] = CREDIT_DEPTH;
             for (int n = 0; n < 3; n++) credit_delay[n] = '0;
             req_stalled = 0;
@@ -67,8 +69,8 @@ module tb_nmu_request_packetize_stress #(
             cycle++;
             if (req_stalled && (!m_req_valid_o || m_req_o !== previous_req))
                 $fatal(1, "REQ payload changed under randomized stalls");
-            req_stalled = m_req_valid_o && !m_req_ready_i;
-            previous_req = m_req_o;
+            req_stalled     = m_req_valid_o && !m_req_ready_i;
+            previous_req    = m_req_o;
             credit_delay[2] = credit_delay[1];
             credit_delay[1] = credit_delay[0];
             credit_delay[0] = '0;
@@ -130,24 +132,24 @@ module tb_nmu_request_packetize_stress #(
     end
 
     initial begin
-        s_aw_i = '0; s_w_i = '0; s_ar_i = '0;
-        s_aw_valid_i = 0; s_w_valid_i = 0; s_ar_valid_i = 0;
+        s_aw_i              = '0; s_w_i = '0; s_ar_i = '0;
+        s_aw_valid_i        = 0; s_w_valid_i = 0; s_ar_valid_i = 0;
         dat_credit_return_i = '0; m_req_ready_i = 0;
         repeat (4) @(negedge clk_i);
-        #1; rst_i = 0;
+        #1; rst_n_i = 1;
         fork
             begin
                 for (int txn = 0; txn < WRITES; txn++) begin
                     @(negedge clk_i); #1;
-                    s_aw_i = '0;
-                    s_aw_i.axi.awid = ni_params_pkg::NOC_ID_WIDTH'(txn % 8);
-                    s_aw_i.axi.awaddr = address(txn, txn[0]);
-                    s_aw_i.axi.awlen = ni_flit_pkg::AXI_LEN_WIDTH'(BEATS-1);
-                    s_aw_i.axi.awsize = txn[0] ? 3'd6 : 3'd3;
-                    s_aw_i.axi.awburst = 2'b01;
+                    s_aw_i                           = '0;
+                    s_aw_i.axi.awid                  = ni_params_pkg::NOC_ID_WIDTH'(txn % 8);
+                    s_aw_i.axi.awaddr                = address(txn, txn[0]);
+                    s_aw_i.axi.awlen                 = ni_flit_pkg::AXI_LEN_WIDTH'(BEATS-1);
+                    s_aw_i.axi.awsize                = txn[0] ? 3'd6 : 3'd3;
+                    s_aw_i.axi.awburst               = 2'b01;
                     s_aw_i.meta.route.domain.is_data = txn[0];
-                    s_aw_i.meta.route.domain.dst_id = ni_flit_pkg::DST_ID_WIDTH'(txn % 4);
-                    s_aw_valid_i = 1;
+                    s_aw_i.meta.route.domain.dst_id  = ni_flit_pkg::DST_ID_WIDTH'(txn % 4);
+                    s_aw_valid_i                     = 1;
                     do @(posedge clk_i); while (!s_aw_ready_o);
                     @(negedge clk_i); #1; s_aw_valid_i = 0;
                     for (int beat = 0; beat < BEATS; beat++) begin
@@ -166,11 +168,11 @@ module tb_nmu_request_packetize_stress #(
             begin
                 for (int txn = 0; txn < READS; txn++) begin
                     @(negedge clk_i); #1;
-                    s_ar_i = '0;
-                    s_ar_i.axi.arid = ni_params_pkg::NOC_ID_WIDTH'(txn % 8);
-                    s_ar_i.axi.araddr = address(txn, 1);
+                    s_ar_i                           = '0;
+                    s_ar_i.axi.arid                  = ni_params_pkg::NOC_ID_WIDTH'(txn % 8);
+                    s_ar_i.axi.araddr                = address(txn, 1);
                     s_ar_i.meta.route.domain.is_data = 1;
-                    s_ar_valid_i = 1;
+                    s_ar_valid_i                     = 1;
                     do @(posedge clk_i); while (!s_ar_ready_o);
                     @(negedge clk_i); #1; s_ar_valid_i = 0;
                 end
