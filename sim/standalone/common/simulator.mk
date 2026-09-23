@@ -8,6 +8,9 @@ package_dir := $(abspath $(script_dir)/..)
 include $(script_dir)/config.mk
 SIMULATOR ?= vcs
 CASE ?= ctrl_write_single
+MODE ?= auto
+SEED ?= 1
+PYTHON ?= python3
 VCS ?= vcs
 VERILATOR ?= verilator
 NWAVE ?= nWave
@@ -33,7 +36,7 @@ wave_ext := fsdb
 ifeq ($(SIMULATOR),verilator)
 wave_ext := fst
 endif
-case_label := $(if $(CASE),$(CASE),$(PATTERN))
+case_label := $(if $(CASE),$(CASE)_$(MODE)_s$(SEED),$(PATTERN))
 wave_file ?= $(wave_dir)/$(case_label).$(wave_ext)
 
 VCS_FLAGS := -full64 -sverilog -assert svaext -override_timescale=1ns/1ps -debug_access+all \
@@ -65,6 +68,7 @@ help:
 	 'make run_wave_view CASE=ctrl_write_single (run then open nWave)' \
 	 'make clean                         Remove all build/wave/log/GUI artifacts; retain signal RC files' \
 	 'make regress SIMULATOR=verilator    Same sources, cases and configuration' \
+	 'Shared scenarios: MODE=control|data|rand SEED=1 (default control)' \
 	 'Shared overrides: ID_WIDTH, NOC_HALF_PERIOD, BUFFER_DEPTH, R_ROB_EN' \
 	 'Patterns are generated for a specific ID_WIDTH; synchronize matching inputs before changing it.'
 
@@ -105,7 +109,11 @@ run: compile sim
 sim: sanity_check
 	@test -x "$(run_dir)/simv" || { echo 'No binary for this configuration. Run: make run CASE=$(CASE)'  >&2; exit 1; }
 	@args=(); stim="$(package_dir)/cases/$(PATTERN)"; if [[ -n "$(CASE)" ]]; then \
-	  stim="$(package_dir)/cases/standalone/$(CASE)"; mapfile -t args < "$$stim/schedule.txt"; \
+	  stim="$(run_dir)/patterns/$(MODE)_s$(SEED)/$(CASE)"; \
+	  $(PYTHON) "$(package_dir)/repo/sim/tools/gen_standalone_patterns.py" \
+	    --out "$$(dirname "$$stim")" --topology "$(package_dir)/cases/topology.json" \
+	    --catalog "$(package_dir)/repo/sim/test_patterns/standalone/cases.json" \
+	    --id-width $(ID_WIDTH) --case "$(CASE)" --mode "$(MODE)" --seed "$(SEED)"; mapfile -t args < "$$stim/schedule.txt"; \
 	elif [[ "$(PATTERN)" == directed ]]; then \
 	  args+=(+require_reorder); \
 	  if [[ $(BUFFER_DEPTH) == 8 && $(R_ROB_EN) == 1 ]]; then args+=(+require_pressure); fi; \
@@ -118,7 +126,8 @@ sim: sanity_check
 
 block_regress regress: compile
 	@while read -r name; do \
-	  $(MAKE) --no-print-directory -f "$(script_dir)/Makefile" sim CASE=$$name run_dir="$(run_dir)"; \
+	  case "$$name" in ctrl_*|data_*|request_rand) modes=auto ;; *) modes="control data rand" ;; esac; \
+	  for mode in $$modes; do $(MAKE) --no-print-directory -f "$(script_dir)/Makefile" sim CASE=$$name MODE=$$mode run_dir="$(run_dir)"; done; \
 	done < "$(package_dir)/cases/standalone/cases.list"
 	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" fault run_dir="$(run_dir)"
 
@@ -137,6 +146,13 @@ fault: sanity_check
 	  +wave_file="$(wave_dir)/corrupt.$(wave_ext)" 2>&1 | tee "$(report_dir)/corrupt.log" || :
 	@grep -q 'R data/lane/order/last mismatch' "$(report_dir)/corrupt.log"
 	@echo 'PASS: expected corruption was detected'
+	@args=(); mapfile -t args < "$(package_dir)/cases/standalone/data_read_burst/schedule.txt"; \
+	  cd "$(package_dir)"; "$(run_dir)/simv" "$${args[@]}" \
+	  +stim_dir="$(package_dir)/cases/standalone/data_read_burst" +corrupt_rsp \
+	  +wave_file="$(wave_dir)/corrupt_dat.$(wave_ext)" 2>&1 | tee "$(report_dir)/corrupt_dat.log" || :
+	@grep -q 'R data/lane/order/last mismatch' "$(report_dir)/corrupt_dat.log"
+	@echo 'PASS: expected DAT corruption was detected'
+
 
 run_wave:
 	@$(MAKE) --no-print-directory -f "$(script_dir)/Makefile" run WAVE=1 PATTERN=$(PATTERN) CASE=$(CASE)

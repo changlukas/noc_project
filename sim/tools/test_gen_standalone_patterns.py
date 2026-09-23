@@ -5,22 +5,22 @@ from test_gen_test_patterns_filemaster import _parse_read, _parse_write
 
 
 @pytest.mark.parametrize("width", [1, 3, 8])
-def test_cases_roundtrip_and_legal_bursts(tmp_path, width):
-    names = generate(tmp_path, REPO / "sim/configs/mesh_2x2.yml", width)
-    assert len(names) == 12
+@pytest.mark.parametrize("mode", ["control", "data", "rand"])
+def test_cases_roundtrip_and_legal_bursts(tmp_path, width, mode):
+    names = generate(tmp_path, REPO / "sim/configs/mesh_2x2.yml", width, mode=mode)
+    assert len(names) == 19
     for name in names:
         writes = _parse_write(tmp_path / name / "write.txt")
         reads = _parse_read(tmp_path / name / "read.txt")
         assert writes or reads
-        if name.startswith("ctrl_write"):
+        if name.startswith(("ctrl_write", "data_write")):
             assert not reads
-        if name.startswith("ctrl_read"):
+        if name.startswith(("ctrl_read", "data_read")):
             assert not writes
         for txn in writes + reads:
             assert 0 <= txn["id"] < (1 << width)
-            assert txn["size"] <= 3
+            assert txn["size"] <= (3 if txn["addr"] % (1 << 32) >= 0x2000000 else 6)
             assert txn["addr"] % (1 << txn["size"]) == 0
-            assert txn["addr"] % (1 << 32) >= 0x2000000
             if txn["burst"] == 2:
                 assert txn["len"] + 1 in (2, 4, 8, 16)
         for txn in writes:
@@ -45,5 +45,38 @@ def test_cases_roundtrip_and_legal_bursts(tmp_path, width):
         full = _parse_write(tmp_path / "outstanding_full_recover/write.txt")
         assert len({t["id"] for t in full}) > 8
     before = {f.relative_to(tmp_path): f.read_bytes() for f in tmp_path.rglob("*") if f.is_file()}
-    generate(tmp_path, REPO / "sim/configs/mesh_2x2.yml", width)
+    generate(tmp_path, REPO / "sim/configs/mesh_2x2.yml", width, mode=mode)
     assert before == {f.relative_to(tmp_path): f.read_bytes() for f in tmp_path.rglob("*") if f.is_file()}
+
+
+@pytest.mark.parametrize("mode", ["control", "data", "rand"])
+def test_shared_modes_preserve_scenario_and_seed(tmp_path, mode):
+    generate(tmp_path, REPO / "sim/configs/mesh_2x2.yml", mode=mode, seed=17)
+    for name in ("same_id_outstanding", "same_id_cross_dst_reorder"):
+        txns = _parse_write(tmp_path / name / "write.txt")
+        assert len({t["id"] for t in txns}) == 1
+        classes = {"control" if t["addr"] % (1 << 32) >= 0x2000000 else "data" for t in txns}
+        assert classes == ({"control", "data"} if mode == "rand" else {mode})
+    before = (tmp_path / "request_rand/write.txt").read_bytes()
+    generate(tmp_path, REPO / "sim/configs/mesh_2x2.yml", mode=mode, seed=18)
+    assert (tmp_path / "request_rand/write.txt").read_bytes() != before
+
+
+@pytest.mark.parametrize("name", ["ctrl_write_burst", "data_write_burst"])
+def test_burst_patterns_exercise_lanes_and_wrap(tmp_path, name):
+    generate(tmp_path, REPO / "sim/configs/mesh_2x2.yml")
+    txns = _parse_write(tmp_path / name / "write.txt")
+    assert len({t["addr"] % 64 for t in txns}) > 1
+    assert {t["size"] for t in txns} == set(range(7 if name.startswith("data") else 4))
+    assert {t["burst"] for t in txns} == {0, 1, 2}
+    assert any(t["burst"] == 2 and t["addr"] % ((t["len"]+1)*(1 << t["size"])) != 0 for t in txns)
+
+
+@pytest.mark.parametrize("width", [1, 3, 8])
+def test_control_capacity_preserves_existing_recipe(tmp_path, width):
+    from gen_nmu_standalone_patterns import generate as generate_legacy
+    topology = REPO / "sim/configs/mesh_2x2.yml"
+    generate_legacy(tmp_path / "legacy", topology, width)
+    generate(tmp_path / "new", topology, width, case_name="outstanding_full_recover")
+    for name in ("write.txt", "read.txt"):
+        assert (tmp_path / "legacy" / name).read_bytes() == (tmp_path / "new/outstanding_full_recover" / name).read_bytes()

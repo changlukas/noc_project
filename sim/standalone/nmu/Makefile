@@ -12,7 +12,7 @@ CASE ?= ctrl_write_single
 help:
 	@echo 'make run CASE=ctrl_write_single SIMULATOR=verilator'
 	@echo 'make regress  (all standalone cases; compile once)'
-	@echo 'make sim CASE=ctrl_read_burst  (reuse binary)'
+	@echo 'make sim CASE=same_id_outstanding MODE=rand SEED=7  (reuse binary)'
 	@echo 'make legacy_regress  (retained traffic/mixed regressions)'
 prepare:
 	NMU_TEST_OUTPUT="$(output)" NMU_ID_WIDTH=$(ID_WIDTH) NMU_NOC_HALF_PERIOD=$(NOC_HALF_PERIOD) NMU_BUFFER_DEPTH=$(BUFFER_DEPTH) NMU_READ_ROB=$(R_ROB_EN) bash "$(root)/rtl/nmu/top/test_nmu.sh" prepare

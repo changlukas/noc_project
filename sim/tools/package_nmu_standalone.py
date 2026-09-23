@@ -2,6 +2,7 @@
 """Prepare a generated standalone run for direct SSH synchronization or optional export."""
 import argparse
 import hashlib
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -75,6 +76,13 @@ def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
         else:
             generate_standalone(root / "cases/standalone", repo / "sim/configs/mesh_2x2.yml", id_width)
         copy_path(repo / "sim/test_patterns/standalone/cases.json")
+        for name in ("gen_standalone_patterns.py", "axi_file_format.py"):
+            copy_path(repo / "sim/tools" / name)
+        import yaml
+        from address_map import pack_config
+        _, entries = pack_config(yaml.safe_load((repo / "sim/configs/mesh_2x2.yml").read_text()))
+        (root / "cases/topology.json").write_text(json.dumps(entries))
+
         copy_path(repo / "rtl/nmu/top/nmu_lint.vlt")
         copy_path(repo / "rtl/nmu/response_depacketize/tb_response_depacketize.sv")
         copy_path(repo / "rtl/nmu/response_depacketize/test_response_depacketize.sh")
@@ -103,13 +111,24 @@ def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
             "outstanding_full_recover": "Capacity pressure and recovery, including ID remap reuse",
             "backpressure": "REQ and AXI response stalls",
             "reset_inflight": "Coordinated reset with transactions in flight",
+            "data_write_single": "Single data write",
+            "data_read_single": "Single data read",
+            "data_write_burst": "Data write bursts: SIZE, FIXED/INCR/WRAP, WSTRB, LAST",
+            "data_read_burst": "Data read bursts: full data bus, beat count, LAST",
+            "ctrl_rand": "Seeded control requests",
+            "data_rand": "Seeded data requests",
+            "request_rand": "Seeded mixed control/data requests",
+
         }
         names = (root / "cases/standalone/cases.list").read_text().splitlines()
         (root / "pattern_list.txt").write_text(
-            "NMU standalone directed patterns (REQ/RSP control plane)\n\n"
+            "NMU standalone control/data/random patterns\n\n"
             "First run (compile + simulate): make run CASE=ctrl_write_burst\n"
             "After compilation (reuse binary): make sim CASE=ctrl_write_burst\n"
-            "All directed patterns: make regress\n"
+            "Shared scenarios (5-12): MODE=control|data|rand, default control\n"
+            "Random example: make sim CASE=same_id_outstanding MODE=rand SEED=7\n"
+            "Fixed ctrl_*/data_* cases select their own mode; request_rand mixes both.\n"
+            "Full matrix: make regress\n"
             "Waveform: make run_wave CASE=ctrl_write_burst\n"
             "Display this list: make list\n\n"
             + "\n".join(f"{i:2d}. {name}\n    {descriptions[name]}" for i, name in enumerate(names, 1))
@@ -145,10 +164,10 @@ make regress SIMULATOR=verilator "$@"
             "Waveform template: script/nWaveLog/signals.rc (@FSDB@ is replaced for the selected CASE).\n"
             "Package logs: make report\n"
             "Clean all build/wave/log/GUI artifacts: make clean (retains signal RC files).\n"
-            "Requires an initialized VCS environment, GNU Make and Bash. No Git, Python or network needed.\n"
+            "Requires an initialized VCS environment, GNU Make and Bash. Python 3.6+ is used for seeded pattern generation. No Git or network needed.\n"
             "Default: external ID width 8, AXI clock 10ns, NoC clock 10ns, B/R depth 128.\n"
-            "No NSU, memory model or C++ DPI. DAT RX is covered by make dat_regress; AXI patterns remain control-only.\n"
-            "This package has not been validated with VCS until workstation results are returned.\n")
+            "No NSU, memory model or C++ DPI. REQ/RSP and DAT use the same standalone checker.\n"
+            "See the retrieved VCS reports for the verified case/mode/seed matrix.\n")
         checksums = []
         for file in sorted(root.rglob("*")):
             if file.is_file():

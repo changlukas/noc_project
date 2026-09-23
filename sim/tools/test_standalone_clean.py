@@ -65,6 +65,8 @@ def test_vcs_build_uses_local_cache_and_copies_runtime(tmp_path):
     cases = stage / "cases/standalone"
     cases.mkdir(parents=True)
     (cases / "cases.list").write_text("ctrl_write_single\n")
+    (cases / "data_read_burst").mkdir()
+    (cases / "data_read_burst/schedule.txt").write_text("+block_case\n")
     stub = tmp_path / "vcs"
     stub.write_text("#!/usr/bin/env python3\n"
                     "import pathlib, sys\n"
@@ -98,6 +100,8 @@ def test_fault_requires_checker_diagnostic_not_exit_status(tmp_path):
     cases = stage / "cases/standalone"
     cases.mkdir(parents=True)
     (cases / "cases.list").write_text("ctrl_write_single\n")
+    (cases / "data_read_burst").mkdir()
+    (cases / "data_read_burst/schedule.txt").write_text("+block_case\n")
     run = stage / "build/test"
     run.mkdir(parents=True)
     binary = run / "simv"
