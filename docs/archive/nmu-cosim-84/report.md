@@ -49,3 +49,5 @@ Local focused C++ tests: 6 passed. Full Python sim/tools suite: 598 passed. The 
 Final checks also passed: request_rand using the final result-marker logic, deliberate corruption with CORRUPTION_DETECTED and no PASS marker, and data_write_burst with FSDB enabled. The latter checked 694 bytes over 56 R beats. Waveform: /home/mingwei/noc_project/nmu-cosim/build/report_wave1/data_write_burst.fsdb. Raw VCS-generated make still reports clock skew; content-hashed directories prevent reuse across source/flag changes. No repeated C++ DPI compilation was needed.
 
 Issue #84 remains open for user review and the explicitly deferred coverage. Production RTL was not changed by this integration.
+
+Implementation commit: 23d38e8d. Formatting-test repair: 3e4d0b6d. Archived backpressure inputs were retained from preparation but are absent from cases.list and are not acceptance evidence.

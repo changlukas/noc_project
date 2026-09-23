@@ -1,0 +1,18 @@
+[0;36m=== [0mWelcome ICL.R BE Workstation [ [0;32mbe16[0m ] [0;36m===[0m
+
+[0;36m*[0m e-Photon C-Shell/Python Starter [ [0;33m2015.12.12[0m ][0m
+[0;36m*[0m Alias Name Loader [ [0;33m2015.11.17[0m ][0m
+[0;36m*[0m EDA Tools Manager [ [0;33m2018.05.08[0m ][0m
+[0;36m*[0m User's Define Tools Environment [ [0;33m2018.05.08[0m ][0m
+
+[0;36m*[0m Your space [0;36m[0m is under quota [0m
+
+
+CXX17_COMPILE=0
+CXX17_RUN=0
+mkdir: cannot create directory ‘/local/mingwei’: No such file or directory
+chmod: cannot access ‘/local/mingwei’: No such file or directory
+l: Command not found.
+ln: failed to create symbolic link ‘/home/mingwei/tmp’: File exists
+TERM environment variable not set.
+RuntimeError: Bad magic number in .pyc file

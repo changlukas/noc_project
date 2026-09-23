@@ -1,0 +1,24 @@
+Running main() from /workspace/build/cmodel/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 6 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 5 tests from NiRouterChain
+[ RUN      ] NiRouterChain.TwoMastersOneNsuConcurrentWritesDoNotCrossWire
+[       OK ] NiRouterChain.TwoMastersOneNsuConcurrentWritesDoNotCrossWire (9 ms)
+[ RUN      ] NiRouterChain.TwoNodeWriteThenReadbackMatches
+[       OK ] NiRouterChain.TwoNodeWriteThenReadbackMatches (4 ms)
+[ RUN      ] NiRouterChain.NonZeroRequesterPortCompletesAndTheEchoNamesItBack
+[       OK ] NiRouterChain.NonZeroRequesterPortCompletesAndTheEchoNamesItBack (5 ms)
+[ RUN      ] NiRouterChain.DeadFabricProducesNoResponses
+[       OK ] NiRouterChain.DeadFabricProducesNoResponses (1 ms)
+[ RUN      ] NiRouterChain.DualClassEndToEndAndCrossClassReadOrder
+[       OK ] NiRouterChain.DualClassEndToEndAndCrossClassReadOrder (5 ms)
+[----------] 5 tests from NiRouterChain (25 ms total)
+
+[----------] 1 test from NsuWrapCreditConfig
+[ RUN      ] NsuWrapCreditConfig.ReceiverDepthMustBeConfiguredBeforeTraffic
+[       OK ] NsuWrapCreditConfig.ReceiverDepthMustBeConfiguredBeforeTraffic (1 ms)
+[----------] 1 test from NsuWrapCreditConfig (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 2 test suites ran. (26 ms total)
+[  PASSED  ] 6 tests.

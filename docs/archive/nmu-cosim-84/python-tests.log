@@ -1,0 +1,71 @@
+........................................................................ [ 12%]
+........................................................................ [ 24%]
+........................................................................ [ 36%]
+........................................................................ [ 48%]
+........................................................................ [ 60%]
+...............................F...............FF....................... [ 72%]
+........................................................................ [ 84%]
+........................................................................ [ 96%]
+......................                                                   [100%]
+=================================== FAILURES ===================================
+___ test_mode4_uses_bounded_write_admission_without_awready_to_w_dependency ____
+
+    def test_mode4_uses_bounded_write_admission_without_awready_to_w_dependency():
+        source = ENDPOINT.read_text(encoding="utf-8")
+    
+        assert '$value$plusargs("source_outstanding_depth=%d", source_outstanding_depth)' in source
+        assert "task automatic run_aw_outstanding();" in source
+        assert "task automatic run_w_admitted();" in source
+        assert "source_aw_admitted - source_b_returned < source_outstanding_depth" in source
+        assert "source_aw_admitted += 1;" in source
+        assert "source_aw_accepted <= source_aw_accepted + 1;" in source
+>       assert "source_b_returned <= source_b_returned + 1;" in source
+E       assert 'source_b_returned <= source_b_returned + 1;' in "// user_node_endpoint — per-node test endpoint: pulp axi_file_master on the\n// master face, a pulp axi_xbar tile cro...st_flat_req.arvalid && mst_flat_rsp.arready);\n        end\n    end\n\nendmodule\n\n`endif  // USER_NODE_ENDPOINT_SV\n"
+
+sim/tools/test_outstanding_injection_mode.py:22: AssertionError
+__________ test_link_counters_are_gated_by_the_top_measurement_window __________
+
+    def test_link_counters_are_gated_by_the_top_measurement_window():
+        monitor = LINK_MONITOR.read_text(encoding="utf-8")
+        fabric = FABRIC.read_text(encoding="utf-8")
+        top = TOP.read_text(encoding="utf-8")
+    
+        assert "input logic measure_en" in monitor
+        assert "if (!measure_en)" in monitor
+        assert "flit_count <= 0;" in monitor
+        assert "stall_cyc  <= 0;" in monitor
+>       assert ".measure_en(measure_en)" in fabric
+E       AssertionError: assert '.measure_en(measure_en)' in '`timescale 1ns/1ps\n\n// NoC fabric: an X_DIM x Y_DIM router array plus N_PERIPH off-mesh NIs.\n//\n// Every node is ...                           )\n            );\n        end\n    end : g_node\n\nendmodule\n\n`endif  // NOC_FABRIC_SV\n'
+
+sim/tools/test_outstanding_injection_mode.py:202: AssertionError
+_______ test_fabric_monitors_every_local_injection_and_ejection_resource _______
+
+    def test_fabric_monitors_every_local_injection_and_ejection_resource():
+        source = FABRIC.read_text(encoding="utf-8")
+    
+        expected = {
+            'LINK_NAME($sformatf("req_inject_%0d", i))':
+                ".valid(rx_req_valid[i][RP_LOCAL])",
+            'LINK_NAME($sformatf("rsp_inject_%0d", i))':
+                ".valid(rx_rsp_valid[i][RP_LOCAL])",
+            'LINK_NAME($sformatf("dat_inject_%0d", i))':
+                ".valid(rx_dat_valid[i][RP_LOCAL])",
+            'LINK_NAME($sformatf("req_eject_%0d", i))':
+                ".valid(tx_req_valid[i][RP_LOCAL])",
+            'LINK_NAME($sformatf("rsp_eject_%0d", i))':
+                ".valid(tx_rsp_valid[i][RP_LOCAL])",
+            'LINK_NAME($sformatf("dat_eject_%0d", i))':
+                ".valid(tx_dat_valid[i][RP_LOCAL])",
+        }
+        for name, valid in expected.items():
+>           assert source.count(name) == 1
+E           assert 0 == 1
+E            +  where 0 = <built-in method count of str object at 0x3cb29c60>('LINK_NAME($sformatf("req_inject_%0d", i))')
+E            +    where <built-in method count of str object at 0x3cb29c60> = '`timescale 1ns/1ps\n\n// NoC fabric: an X_DIM x Y_DIM router array plus N_PERIPH off-mesh NIs.\n//\n// Every node is ...                           )\n            );\n        end\n    end : g_node\n\nendmodule\n\n`endif  // NOC_FABRIC_SV\n'.count
+
+sim/tools/test_outstanding_injection_mode.py:224: AssertionError
+=========================== short test summary info ============================
+FAILED sim/tools/test_outstanding_injection_mode.py::test_mode4_uses_bounded_write_admission_without_awready_to_w_dependency
+FAILED sim/tools/test_outstanding_injection_mode.py::test_link_counters_are_gated_by_the_top_measurement_window
+FAILED sim/tools/test_outstanding_injection_mode.py::test_fabric_monitors_every_local_injection_and_ejection_resource
+3 failed, 595 passed in 17.48s

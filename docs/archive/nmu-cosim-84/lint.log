@@ -1,0 +1,485 @@
+- V e r i l a t i o n   R e p o r t: Verilator 5.048 2026-04-26 rev v5.048
+- Verilator: Built from 11.661 MB sources in 93 modules, into 2.460 MB in 38 C++ files needing 0.000 MB
+- Verilator: Walltime 0.330 s (elab=0.062, cvt=0.191, bld=0.000); cpu 0.339 s on 1 threads; allocated 47.766 MB
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:1966:32: Operator VAR 'BUS_SIZE' expects 3 bits on the Initial value, but Initial value's CLOG2 generates 32 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim.i_noc_reset_sync'
+ 1966 |     localparam axi_pkg::size_t BUS_SIZE = $clog2(DW/8);
+      |                                ^~~~~~~~
+                     ... For warning description see https://verilator.org/warn/WIDTHTRUNC?v=5.048
+                     ... Use "/* verilator lint_off WIDTHTRUNC */" and lint_on around source to disable this message.
+%Warning-WIDTHTRUNC: repo/sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv:317:7: Logical operator ASSERT expects 1 bit on the Property, but Property's VARREF 'NumIn' generates 32 bits.
+                                                                             : ... note: In instance 'tb_nmu_cosim.dut.i_response_path.i_depacketize.i_buffer.i_r_arb'
+  317 |       assert(NumIn)
+      |       ^~~~~~
+%Warning-WIDTHTRUNC: deps/common_cells/src/cc_credit_counter.sv:45:16: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's VARREF 'InitNumCredits' generates 32 bits.
+                                                                     : ... note: In instance 'tb_nmu_cosim.dut.i_request_path.i_channel_assign.gen_credit[1].i_credit'
+   45 |       credit_q <= (InitNumCredits);                                                                       
+      |                ^~
+%Warning-WIDTHTRUNC: deps/common_cells/src/cc_credit_counter.sv:45:18: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's VARREF 'InitNumCredits' generates 32 bits.
+                                                                     : ... note: In instance 'tb_nmu_cosim.dut.i_request_path.i_channel_assign.gen_credit[1].i_credit'
+   45 |         credit_q <= (InitNumCredits);                                                                     
+      |                  ^~
+%Warning-WIDTHEXPAND: deps/common_cells/src/cc_credit_counter.sv:49:37: Operator EQ expects 32 bits on the LHS, but LHS's VARREF 'credit_q' generates 4 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.dut.i_request_path.i_channel_assign.gen_credit[1].i_credit'
+   49 |   assign credit_crit_o  = (credit_q == NumCredits-1);
+      |                                     ^~
+                      ... For warning description see https://verilator.org/warn/WIDTHEXPAND?v=5.048
+                      ... Use "/* verilator lint_off WIDTHEXPAND */" and lint_on around source to disable this message.
+%Warning-WIDTHEXPAND: deps/common_cells/src/cc_credit_counter.sv:50:37: Operator EQ expects 32 bits on the LHS, but LHS's VARREF 'credit_q' generates 4 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.dut.i_request_path.i_channel_assign.gen_credit[1].i_credit'
+   50 |   assign credit_full_o  = (credit_q == NumCredits);
+      |                                     ^~
+%Warning-WIDTHEXPAND: deps/common_cells/src/cc_credit_counter.sv:54:100: Operator EQ expects 32 bits on the LHS, but LHS's VARREF 'credit_o' generates 4 bits.
+                                                                       : ... note: In instance 'tb_nmu_cosim.dut.i_request_path.i_channel_assign.gen_credit[1].i_credit'
+   54 |   CreditOverflow: assert property (@(posedge  clk_i) disable iff (( !rst_ni) !== '0) not (credit_o == NumCredits && increment))                      
+      |                                                                                                    ^~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_id_remap.sv:534:57: Operator EQ expects 32 bits on the LHS, but LHS's SEL generates 6 bits.
+                                                                       : ... note: In instance 'tb_nmu_cosim.dut.i_request_path.i_id_remap.i_rd_table'
+  534 |     assign exists_full_o = table_q[exists_oup_id_o].cnt == MaxTxnsPerId;
+      |                                                         ^~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_pkg.sv:155:12: Operator CASE expects 8 bits on the Case Item, but Case Item's CONST '4'h1' generates 4 bits.
+                                                                  : ... note: In instance 'tb_nmu_cosim.i_memory'
+  155 |     unique case (len)
+      |            ^~~~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_pkg.sv:155:12: Operator CASE expects 8 bits on the Case Item, but Case Item's CONST '4'h3' generates 4 bits.
+                                                                  : ... note: In instance 'tb_nmu_cosim.i_memory'
+  155 |     unique case (len)
+      |            ^~~~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_pkg.sv:155:12: Operator CASE expects 8 bits on the Case Item, but Case Item's CONST '4'h7' generates 4 bits.
+                                                                  : ... note: In instance 'tb_nmu_cosim.i_memory'
+  155 |     unique case (len)
+      |            ^~~~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_pkg.sv:155:12: Operator CASE expects 8 bits on the Case Item, but Case Item's CONST '4'hf' generates 4 bits.
+                                                                  : ... note: In instance 'tb_nmu_cosim.i_memory'
+  155 |     unique case (len)
+      |            ^~~~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_pkg.sv:192:55: Operator ADD expects 128 bits on the LHS, but LHS's VARREF 'len' generates 8 bits.
+                                                                  : ... note: In instance 'tb_nmu_cosim.i_memory'
+  192 |         ret_addr = ret_addr - (num_bytes(size) * (len + 1));
+      |                                                       ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_pkg.sv:191:81: Operator ADD expects 128 bits on the LHS, but LHS's VARREF 'len' generates 8 bits.
+                                                                  : ... note: In instance 'tb_nmu_cosim.i_memory'
+  191 |       if (burst == BURST_WRAP && ret_addr >= wrp_bond + (num_bytes(size) * (len + 1))) begin
+      |                                                                                 ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:163:48: Operator FUNCREF 'beat_addr' expects 128 bits on the Function Argument, but Function Argument's SEL generates 48 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  163 |               automatic addr_t addr = axi_pkg::beat_addr(aw_queue[0].addr, size, len, burst,
+      |                                                ^~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:163:48: Operator ASSIGN expects 48 bits on the Assign RHS, but Assign RHS's FUNCREF 'beat_addr' generates 128 bits.
+                                                                     : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  163 |               automatic addr_t addr = axi_pkg::beat_addr(aw_queue[0].addr, size, len, burst,
+      |                                                ^~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:170:35: Operator ASSIGN expects 8 bits on the Assign RHS, but Assign RHS's VARREF 'w_cnt' generates 16 bits.
+                                                                     : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  170 |               mon_w[i].beat_count = w_cnt;
+      |                                   ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_pkg.sv:203:37: Operator DIV expects 128 bits on the RHS, but RHS's VARREF 'strobe_width' generates 16 bits.
+                                                                  : ... note: In instance 'tb_nmu_cosim.i_memory'
+  203 |     return shortint'(_addr - (_addr / strobe_width) * strobe_width);
+      |                                     ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:172:37: Operator FUNCREF 'beat_lower_byte' expects 128 bits on the Function Argument, but Function Argument's SEL generates 48 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  172 |                   i_byte = axi_pkg::beat_lower_byte(aw_queue[0].addr, size, len, burst, StrbWidth, w_cnt);
+      |                                     ^~~~~~~~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:172:37: Operator FUNCREF 'beat_lower_byte' expects 16 bits on the Function Argument, but Function Argument's VARREF 'StrbWidth' generates 32 bits.
+                                                                     : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  172 |                   i_byte = axi_pkg::beat_lower_byte(aw_queue[0].addr, size, len, burst, StrbWidth, w_cnt);
+      |                                     ^~~~~~~~~~~~~~~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_pkg.sv:211:58: Operator SUB expects 128 bits on the LHS, but LHS's FUNCREF 'num_bytes' generates 16 bits.
+                                                                  : ... note: In instance 'tb_nmu_cosim.i_memory'
+  211 |       return aligned_addr(addr, size) + (num_bytes(size) - 1) - (addr / strobe_width) * strobe_width;
+      |                                                          ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_pkg.sv:211:71: Operator DIV expects 128 bits on the RHS, but RHS's VARREF 'strobe_width' generates 16 bits.
+                                                                  : ... note: In instance 'tb_nmu_cosim.i_memory'
+  211 |       return aligned_addr(addr, size) + (num_bytes(size) - 1) - (addr / strobe_width) * strobe_width;
+      |                                                                       ^
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_pkg.sv:211:7: Operator ASSIGN expects 16 bits on the Assign RHS, but Assign RHS's SUB generates 128 bits.
+                                                                : ... note: In instance 'tb_nmu_cosim.i_memory'
+  211 |       return aligned_addr(addr, size) + (num_bytes(size) - 1) - (addr / strobe_width) * strobe_width;
+      |       ^~~~~~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:173:38: Operator FUNCREF 'beat_upper_byte' expects 128 bits on the Function Argument, but Function Argument's SEL generates 48 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  173 |                   i_byte <= axi_pkg::beat_upper_byte(aw_queue[0].addr, size, len, burst, StrbWidth, w_cnt);
+      |                                      ^~~~~~~~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:173:38: Operator FUNCREF 'beat_upper_byte' expects 16 bits on the Function Argument, but Function Argument's VARREF 'StrbWidth' generates 32 bits.
+                                                                     : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  173 |                   i_byte <= axi_pkg::beat_upper_byte(aw_queue[0].addr, size, len, burst, StrbWidth, w_cnt);
+      |                                      ^~~~~~~~~~~~~~~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:176:54: Operator DIV expects 48 bits on the RHS, but RHS's VARREF 'StrbWidth' generates 32 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  176 |                   automatic addr_t byte_addr = (addr / StrbWidth) * StrbWidth + i_byte;
+      |                                                      ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:176:79: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'i_byte' generates 16 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  176 |                   automatic addr_t byte_addr = (addr / StrbWidth) * StrbWidth + i_byte;
+      |                                                                               ^
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:175:40: Bit extraction of var[63:0] requires 6 bit index, not 16 bits.
+                                                                     : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  175 |                 if (axi_req_i[i].w.strb[i_byte]) begin
+      |                                        ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:183:25: Operator EQ expects 16 bits on the RHS, but RHS's SEL generates 8 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  183 |               if (w_cnt == aw_queue[0].len) begin
+      |                         ^~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:235:46: Operator FUNCREF 'beat_addr' expects 128 bits on the Function Argument, but Function Argument's SEL generates 48 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  235 |             automatic addr_t addr = axi_pkg::beat_addr(ar_queue[0].addr, size, len, burst, r_cnt);
+      |                                              ^~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:235:46: Operator ASSIGN expects 48 bits on the Assign RHS, but Assign RHS's FUNCREF 'beat_addr' generates 128 bits.
+                                                                     : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  235 |             automatic addr_t addr = axi_pkg::beat_addr(ar_queue[0].addr, size, len, burst, r_cnt);
+      |                                              ^~~~~~~~~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:242:35: Operator FUNCREF 'beat_lower_byte' expects 128 bits on the Function Argument, but Function Argument's SEL generates 48 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  242 |                 i_byte = axi_pkg::beat_lower_byte(ar_queue[0].addr, size, len, burst, StrbWidth, r_cnt);
+      |                                   ^~~~~~~~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:242:35: Operator FUNCREF 'beat_lower_byte' expects 16 bits on the Function Argument, but Function Argument's VARREF 'StrbWidth' generates 32 bits.
+                                                                     : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  242 |                 i_byte = axi_pkg::beat_lower_byte(ar_queue[0].addr, size, len, burst, StrbWidth, r_cnt);
+      |                                   ^~~~~~~~~~~~~~~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:243:36: Operator FUNCREF 'beat_upper_byte' expects 128 bits on the Function Argument, but Function Argument's SEL generates 48 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  243 |                 i_byte <= axi_pkg::beat_upper_byte(ar_queue[0].addr, size, len, burst, StrbWidth, r_cnt);
+      |                                    ^~~~~~~~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:243:36: Operator FUNCREF 'beat_upper_byte' expects 16 bits on the Function Argument, but Function Argument's VARREF 'StrbWidth' generates 32 bits.
+                                                                     : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  243 |                 i_byte <= axi_pkg::beat_upper_byte(ar_queue[0].addr, size, len, burst, StrbWidth, r_cnt);
+      |                                    ^~~~~~~~~~~~~~~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:245:50: Operator DIV expects 48 bits on the RHS, but RHS's VARREF 'StrbWidth' generates 32 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  245 |               automatic addr_t byte_addr = (addr / StrbWidth) * StrbWidth + i_byte;
+      |                                                  ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:245:75: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'i_byte' generates 16 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  245 |               automatic addr_t byte_addr = (addr / StrbWidth) * StrbWidth + i_byte;
+      |                                                                           ^
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:253:41: Operator ASSIGN expects 8 bits on the Assign RHS, but Assign RHS's RAND generates 32 bits.
+                                                                     : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  253 |                     r_data[i_byte*8+:8] = $urandom;
+      |                                         ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:270:23: Operator EQ expects 16 bits on the RHS, but RHS's SEL generates 8 bits.
+                                                                      : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  270 |             if (r_cnt == ar_queue[0].len) begin
+      |                       ^~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:281:33: Operator ASSIGN expects 8 bits on the Assign RHS, but Assign RHS's VARREF 'r_cnt' generates 16 bits.
+                                                                     : ... note: In instance 'tb_nmu_cosim.i_memory.i_sim_mem'
+  281 |             mon_r[i].beat_count = r_cnt;
+      |                                 ^
+%Warning-ASCRANGE: repo/sim/dv/axi-0.39.7/src/axi_intf.sv:483:17: Ascending bit range vector: left < right of bit range: [-1:0]
+                                                                : ... note: In instance 'tb_nmu_cosim.i_nsu'
+  483 |   typedef logic [AXI_ADDR_WIDTH-1:0] addr_t;
+      |                 ^
+                   ... For warning description see https://verilator.org/warn/ASCRANGE?v=5.048
+                   ... Use "/* verilator lint_off ASCRANGE */" and lint_on around source to disable this message.
+%Warning-ASCRANGE: repo/sim/dv/axi-0.39.7/src/axi_intf.sv:484:17: Ascending bit range vector: left < right of bit range: [-1:0]
+                                                                : ... note: In instance 'tb_nmu_cosim.i_nsu'
+  484 |   typedef logic [AXI_DATA_WIDTH-1:0] data_t;
+      |                 ^
+%Warning-ASCRANGE: repo/sim/dv/axi-0.39.7/src/axi_intf.sv:485:17: Ascending bit range vector: left < right of bit range: [-1:0]
+                                                                : ... note: In instance 'tb_nmu_cosim.i_nsu'
+  485 |   typedef logic [AXI_STRB_WIDTH-1:0] strb_t;
+      |                 ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2438:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2438 |         parse_ok = parse_ok & ($fscanf(this.write_fd, "%d\n",   current_aw.ax_id    ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2439:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2439 |         parse_ok = parse_ok & ($fscanf(this.write_fd, "0x%x\n", current_aw.ax_addr  ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2440:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2440 |         parse_ok = parse_ok & ($fscanf(this.write_fd, "%d\n",   current_aw.ax_len   ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2441:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2441 |         parse_ok = parse_ok & ($fscanf(this.write_fd, "%d\n",   current_aw.ax_size  ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2442:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2442 |         parse_ok = parse_ok & ($fscanf(this.write_fd, "%d\n",   current_aw.ax_burst ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2443:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2443 |         parse_ok = parse_ok & ($fscanf(this.write_fd, "%d\n",   current_aw.ax_lock  ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2444:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2444 |         parse_ok = parse_ok & ($fscanf(this.write_fd, "%d\n",   current_aw.ax_cache ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2445:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2445 |         parse_ok = parse_ok & ($fscanf(this.write_fd, "%d\n",   current_aw.ax_prot  ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2446:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2446 |         parse_ok = parse_ok & ($fscanf(this.write_fd, "%d\n",   current_aw.ax_qos   ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2447:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2447 |         parse_ok = parse_ok & ($fscanf(this.write_fd, "%d\n",   current_aw.ax_region) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2448:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2448 |         parse_ok = parse_ok & ($fscanf(this.write_fd, "%d\n",   current_aw.ax_atop  ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2449:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2449 |         parse_ok = parse_ok & ($fscanf(this.write_fd, "%d\n",   current_aw.ax_user  ) != -1);
+      |                             ^
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2450:9: Logical operator IF expects 1 bit on the If, but If's VARREF 'parse_ok' generates 32 bits.
+                                                                  : ... note: In instance 'tb_nmu_cosim'
+ 2450 |         if (parse_ok) begin
+      |         ^~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2461:31: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2461 |           parse_ok = parse_ok & ($fscanf(this.write_fd, "0x%x 0x%x %d\n", current_w.w_data, current_w.w_strb, current_w.w_user) != -1);
+      |                               ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2463:17: Operator EQ expects 32 bits on the RHS, but RHS's MEMBERSEL 'ax_len' generates 8 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2463 |           if (i == current_aw.ax_len) begin
+      |                 ^~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2466:11: Logical operator IF expects 1 bit on the If, but If's VARREF 'parse_ok' generates 32 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim'
+ 2466 |           if (parse_ok) begin
+      |           ^~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2488:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2488 |         parse_ok = parse_ok & ($fscanf(this.read_fd, "%d\n",   current_ar.ax_id    ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2489:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2489 |         parse_ok = parse_ok & ($fscanf(this.read_fd, "0x%x\n", current_ar.ax_addr  ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2490:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2490 |         parse_ok = parse_ok & ($fscanf(this.read_fd, "%d\n",   current_ar.ax_len   ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2491:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2491 |         parse_ok = parse_ok & ($fscanf(this.read_fd, "%d\n",   current_ar.ax_size  ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2492:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2492 |         parse_ok = parse_ok & ($fscanf(this.read_fd, "%d\n",   current_ar.ax_burst ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2493:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2493 |         parse_ok = parse_ok & ($fscanf(this.read_fd, "%d\n",   current_ar.ax_lock  ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2494:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2494 |         parse_ok = parse_ok & ($fscanf(this.read_fd, "%d\n",   current_ar.ax_cache ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2495:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2495 |         parse_ok = parse_ok & ($fscanf(this.read_fd, "%d\n",   current_ar.ax_prot  ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2496:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2496 |         parse_ok = parse_ok & ($fscanf(this.read_fd, "%d\n",   current_ar.ax_qos   ) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2497:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2497 |         parse_ok = parse_ok & ($fscanf(this.read_fd, "%d\n",   current_ar.ax_region) != -1);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2498:29: Operator AND expects 32 bits on the RHS, but RHS's NEQ generates 1 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2498 |         parse_ok = parse_ok & ($fscanf(this.read_fd, "%d\n",   current_ar.ax_user  ) != -1);
+      |                             ^
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2499:9: Logical operator IF expects 1 bit on the If, but If's VARREF 'parse_ok' generates 32 bits.
+                                                                  : ... note: In instance 'tb_nmu_cosim'
+ 2499 |         if (parse_ok) begin
+      |         ^~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2520:7: Logical operator IF expects 1 bit on the If, but If's VARREF 'read_fd' generates 32 bits.
+                                                                  : ... note: In instance 'tb_nmu_cosim'
+ 2520 |       if (this.read_fd) begin
+      |       ^~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2525:7: Logical operator IF expects 1 bit on the If, but If's VARREF 'write_fd' generates 32 bits.
+                                                                  : ... note: In instance 'tb_nmu_cosim'
+ 2525 |       if (this.write_fd) begin
+      |       ^~
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2044:40: Operator FUNCREF 'beat_addr' expects 128 bits on the Function Argument, but Function Argument's MEMBERSEL 'ax_addr' generates 48 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2044 |           beat_addresses[i] = axi_pkg::beat_addr(aw_beat.ax_addr, aw_beat.ax_size, aw_beat.ax_len,
+      |                                        ^~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2044:40: Operator FUNCREF 'beat_addr' expects 16 bits on the Function Argument, but Function Argument's VARREF 'i' generates 32 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim'
+ 2044 |           beat_addresses[i] = axi_pkg::beat_addr(aw_beat.ax_addr, aw_beat.ax_size, aw_beat.ax_len,
+      |                                        ^~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2044:29: Operator ASSIGN expects 48 bits on the Assign RHS, but Assign RHS's FUNCREF 'beat_addr' generates 128 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim'
+ 2044 |           beat_addresses[i] = axi_pkg::beat_addr(aw_beat.ax_addr, aw_beat.ax_size, aw_beat.ax_len,
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2046:40: Operator FUNCREF 'aligned_addr' expects 128 bits on the Function Argument, but Function Argument's CMETHODHARD 'at' generates 48 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2046 |           bus_address       = axi_pkg::aligned_addr(beat_addresses[i], BUS_SIZE);
+      |                                        ^~~~~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2046:29: Operator ASSIGN expects 48 bits on the Assign RHS, but Assign RHS's FUNCREF 'aligned_addr' generates 128 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim'
+ 2046 |           bus_address       = axi_pkg::aligned_addr(beat_addresses[i], BUS_SIZE);
+      |                             ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2050:40: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'j' generates 32 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2050 |               this.memory_q[bus_address+j].push_back(8'bxxxxxxxx);
+      |                                        ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2058:34: Operator FUNCREF 'aligned_addr' expects 128 bits on the Function Argument, but Function Argument's CMETHODHARD 'at' generates 48 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2058 |           bus_address = axi_pkg::aligned_addr(beat_addresses[i], BUS_SIZE);
+      |                                  ^~~~~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2058:23: Operator ASSIGN expects 48 bits on the Assign RHS, but Assign RHS's FUNCREF 'aligned_addr' generates 128 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim'
+ 2058 |           bus_address = axi_pkg::aligned_addr(beat_addresses[i], BUS_SIZE);
+      |                       ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2060:51: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'j' generates 32 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2060 |             write_data = this.memory_q[bus_address+j][$];
+      |                                                   ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2062:38: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'j' generates 32 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2062 |             this.memory_q[bus_address+j].push_back(write_data);
+      |                                      ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2087:24: Operator FUNCREF 'beat_addr' expects 128 bits on the Function Argument, but Function Argument's MEMBERSEL 'ax_addr' generates 48 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2087 |               axi_pkg::beat_addr(aw_beat.ax_addr, aw_beat.ax_size, aw_beat.ax_len, aw_beat.ax_burst,
+      |                        ^~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2087:24: Operator FUNCREF 'beat_addr' expects 16 bits on the Function Argument, but Function Argument's VARREF 'i' generates 32 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim'
+ 2087 |               axi_pkg::beat_addr(aw_beat.ax_addr, aw_beat.ax_size, aw_beat.ax_len, aw_beat.ax_burst,
+      |                        ^~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2086:23: Operator ASSIGN expects 48 bits on the Assign RHS, but Assign RHS's FUNCREF 'aligned_addr' generates 128 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim'
+ 2086 |           bus_address = axi_pkg::aligned_addr(
+      |                       ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2091:35: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'j' generates 32 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2091 |               memory_q[bus_address+j].delete(0);
+      |                                   ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2093:35: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'j' generates 32 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2093 |               memory_q[bus_address+j].delete(memory_q[bus_address+j].size() - 1);
+      |                                   ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2093:66: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'j' generates 32 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2093 |               memory_q[bus_address+j].delete(memory_q[bus_address+j].size() - 1);
+      |                                                                  ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2119:35: Operator FUNCREF 'beat_addr' expects 128 bits on the Function Argument, but Function Argument's MEMBERSEL 'ax_addr' generates 48 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2119 |           beat_address = axi_pkg::beat_addr(ar_beat.ax_addr, ar_beat.ax_size, ar_beat.ax_len,
+      |                                   ^~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2119:35: Operator FUNCREF 'beat_addr' expects 16 bits on the Function Argument, but Function Argument's VARREF 'i' generates 32 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim'
+ 2119 |           beat_address = axi_pkg::beat_addr(ar_beat.ax_addr, ar_beat.ax_size, ar_beat.ax_len,
+      |                                   ^~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2119:24: Operator ASSIGN expects 48 bits on the Assign RHS, but Assign RHS's FUNCREF 'beat_addr' generates 128 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim'
+ 2119 |           beat_address = axi_pkg::beat_addr(ar_beat.ax_addr, ar_beat.ax_size, ar_beat.ax_len,
+      |                        ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2121:35: Operator FUNCREF 'aligned_addr' expects 128 bits on the Function Argument, but Function Argument's VARREF 'beat_address' generates 48 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2121 |           beat_address = axi_pkg::aligned_addr(beat_address, ar_beat.ax_size);
+      |                                   ^~~~~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2121:24: Operator ASSIGN expects 48 bits on the Assign RHS, but Assign RHS's FUNCREF 'aligned_addr' generates 128 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim'
+ 2121 |           beat_address = axi_pkg::aligned_addr(beat_address, ar_beat.ax_size);
+      |                        ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2122:35: Operator FUNCREF 'aligned_addr' expects 128 bits on the Function Argument, but Function Argument's VARREF 'beat_address' generates 48 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2122 |           bus_address  = axi_pkg::aligned_addr(beat_address, BUS_SIZE);
+      |                                   ^~~~~~~~~~~~
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2122:24: Operator ASSIGN expects 48 bits on the Assign RHS, but Assign RHS's FUNCREF 'aligned_addr' generates 128 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim'
+ 2122 |           bus_address  = axi_pkg::aligned_addr(beat_address, BUS_SIZE);
+      |                        ^
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2126:33: Operator ASSIGN expects 32 bits on the Assign RHS, but Assign RHS's SUB generates 48 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim'
+ 2126 |             first_byte_to_check = ar_beat.ax_addr - beat_address;
+      |                                 ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2129:40: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'j' generates 32 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2129 |               this.memory_q[bus_address+j].push_back(8'bxxxxxxxx);
+      |                                        ^
+%Warning-WIDTHTRUNC: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2137:40: Bit extraction of var[511:0] requires 9 bit index, not 48 bits.
+                                                                   : ... note: In instance 'tb_nmu_cosim'
+ 2137 |               act_data  = r_beat.r_data[idx_data+:8];
+      |                                        ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2138:53: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'j' generates 32 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2138 |               exp_data  = this.memory_q[beat_address+j];
+      |                                                     ^
+%Warning-WIDTHEXPAND: repo/sim/dv/axi-0.39.7/src/axi_test.sv:2148:44: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'j' generates 32 bits.
+                                                                    : ... note: In instance 'tb_nmu_cosim'
+ 2148 |                   r_beat.r_id, beat_address+j, idx_data, exp_data, act_data, r_beat.r_data);
+      |                                            ^
+%Warning-UNSIGNED: repo/sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv:212:37: Comparison is constant due to unsigned arithmetic
+                                                                            : ... note: In instance 'tb_nmu_cosim.dut.i_response_path.i_depacketize.i_buffer.i_r_arb'
+  212 |           assign upper_mask[i] = (i >  rr_q) ? req_d[i] : 1'b0;
+      |                                     ^
+                   ... For warning description see https://verilator.org/warn/UNSIGNED?v=5.048
+                   ... Use "/* verilator lint_off UNSIGNED */" and lint_on around source to disable this message.
+%Warning-UNSIGNED: repo/sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv:213:37: Comparison is constant due to unsigned arithmetic
+                                                                            : ... note: In instance 'tb_nmu_cosim.dut.i_response_path.i_depacketize.i_buffer.i_r_arb'
+  213 |           assign lower_mask[i] = (i <= rr_q) ? req_d[i] : 1'b0;
+      |                                     ^~
+%Warning-UNSIGNED: repo/rtl/nmu/response_depacketize/response_buffer.sv:165:34: Comparison is constant due to unsigned arithmetic
+                                                                              : ... note: In instance 'tb_nmu_cosim.dut.i_response_path.i_depacketize.i_buffer'
+  165 |                     int'(dat_vc) < RD_VC_BASE || int'(dat_vc) >= NUM_DAT_VC)
+      |                                  ^
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:322:26: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  322 |         mon_w_valid_o[i] <= #(ApplDelay) mon_w[i].valid;
+      |                          ^~
+                     ... For warning description see https://verilator.org/warn/INITIALDLY?v=5.048
+                     ... Use "/* verilator lint_off INITIALDLY */" and lint_on around source to disable this message.
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:323:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  323 |         mon_w_addr_o[i] <= #(ApplDelay) mon_w[i].addr;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:324:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  324 |         mon_w_data_o[i] <= #(ApplDelay) mon_w[i].data;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:325:23: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  325 |         mon_w_id_o[i] <= #(ApplDelay) mon_w[i].id;
+      |                       ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:326:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  326 |         mon_w_user_o[i] <= #(ApplDelay) mon_w[i].user;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:327:31: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  327 |         mon_w_beat_count_o[i] <= #(ApplDelay) mon_w[i].beat_count;
+      |                               ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:328:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  328 |         mon_w_last_o[i] <= #(ApplDelay) mon_w[i].last;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:329:26: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  329 |         mon_r_valid_o[i] <= #(ApplDelay) mon_r[i].valid;
+      |                          ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:330:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  330 |         mon_r_addr_o[i] <= #(ApplDelay) mon_r[i].addr;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:331:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  331 |         mon_r_data_o[i] <= #(ApplDelay) mon_r[i].data;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:332:23: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  332 |         mon_r_id_o[i] <= #(ApplDelay) mon_r[i].id;
+      |                       ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:333:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  333 |         mon_r_user_o[i] <= #(ApplDelay) mon_r[i].user;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:334:31: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  334 |         mon_r_beat_count_o[i] <= #(ApplDelay) mon_r[i].beat_count;
+      |                               ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:335:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  335 |         mon_r_last_o[i] <= #(ApplDelay) mon_r[i].last;
+      |                         ^~

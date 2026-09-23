@@ -84,4 +84,4 @@ This is initial functional acceptance only. Partial-strobe holes, FIXED/WRAP bur
 
 Local focused C++ tests: 6 passed. Final Python sim/tools suite: 598 passed after correcting three existing whitespace-sensitive source assertions. No functional RTL or required check was removed. Final request_rand, corruption and FSDB-enabled data_write_burst checks also pass.
 
-Implementation and evidence: sim/cosim/nmu/ and docs/archive/nmu-cosim-84/report.md on local branch feat/nmu-cosim-84, synchronized to /home/mingwei/noc_project/nmu-cosim. Issue remains OPEN pending user acceptance and the remaining coverage.
+Implementation and evidence: sim/cosim/nmu/ and docs/archive/nmu-cosim-84/report.md on branch feat/nmu-cosim-84 (implementation commit 23d38e8d), synchronized to /home/mingwei/noc_project/nmu-cosim. Issue remains OPEN pending user acceptance and the remaining coverage.
