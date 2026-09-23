@@ -64,7 +64,9 @@ module tb_nmu_standalone #(
     bit block_case      = 0;
     bit perf_in_order   = 0;
     bit perf_out_of_order = 0;
-    wire perf_active = perf_in_order || perf_out_of_order;
+    bit perf_mixed = 0;
+    bit perf_split_response = 0;
+    wire perf_active = perf_in_order || perf_out_of_order || perf_mixed;
     string case_name    = "legacy";
     int response_order  = 1, response_delay = 12, startup_delay = 0;
     int stall_enable    = 1, reset_warmup = 1;
@@ -428,7 +430,7 @@ module tb_nmu_standalone #(
     endfunction
     // Select the latest tagged response first to exercise reorder storage.
     // Untagged same-ID responses retain their request order.
-    initial begin : response_stimulus
+    task automatic response_loop(input int direction);
         int        index, txn;
         bit        eligible;
         rsp_flit_t value;
@@ -438,9 +440,10 @@ module tb_nmu_standalone #(
         repeat (startup_delay) @(negedge noc_clk);
         forever begin
             if (perf_active) begin
-                while (pending_b.size() == 0 && pending_r.size() == 0) @(negedge noc_clk);
+                while ((direction == 1 || pending_b.size() == 0) &&
+                       (direction == 0 || pending_r.size() == 0)) @(negedge noc_clk);
             end else repeat (response_delay) @(negedge noc_clk);
-            if (pending_b.size() != 0) begin
+            if (direction != 1 && pending_b.size() != 0) begin
                 index = -1;
                 for (int i = 0; i < pending_b.size(); i++) begin
                     eligible = response_eligible(0, pending_b[i]);
@@ -471,7 +474,7 @@ module tb_nmu_standalone #(
                     send_rsp(value);
                 end
             end
-            if (pending_r.size() != 0) begin
+            if (direction != 0 && pending_r.size() != 0) begin
                 index = -1;
                 for (int i = 0; i < pending_r.size(); i++) begin
                     eligible = response_eligible(1, pending_r[i]);
@@ -519,6 +522,15 @@ module tb_nmu_standalone #(
                 end
             end
         end
+    endtask
+    initial begin : response_stimulus
+        wait(noc_rst_n && !warmup);
+        if (perf_split_response) begin
+            fork
+                response_loop(0);
+                response_loop(1);
+            join
+        end else response_loop(2);
     end
     initial begin : run
         string              stim_dir;
@@ -564,6 +576,18 @@ module tb_nmu_standalone #(
             $fclose(master.write_fd);
         end else begin
             master.load_files({stim_dir,"/read.txt"}, {stim_dir,"/write.txt"});
+        end
+        perf_mixed = $test$plusargs("perf_mixed");
+        perf_split_response = perf_mixed && master.ar_queue.size() != 0 && is_data(master.ar_queue[0]);
+        if (perf_mixed) begin
+            if (!block_case || response_order != 0 || startup_delay != 0 ||
+                stall_enable != 0 || reset_warmup != 0 || NOC_HALF_PERIOD != 5 ||
+                $test$plusargs("perf_in_order") || $test$plusargs("perf_out_of_order") ||
+                master.aw_queue.size() == 0 || master.ar_queue.size() == 0)
+                $fatal(1, "mixed measurement requires both directions, in-order, no stalls, equal clocks");
+            foreach (master.ar_queue[i])
+                if (is_data(master.ar_queue[i]) != perf_split_response)
+                    $fatal(1, "mixed measurement requires one read response channel");
         end
         perf_in_order = $test$plusargs("perf_in_order");
         perf_out_of_order = $test$plusargs("perf_out_of_order");
@@ -699,7 +723,7 @@ module tb_nmu_standalone #(
             $fatal(1, "out-of-order measurement did not reorder responses");
         if (perf_out_of_order && response_order == 1 && b_buffered == 0 && r_buffered == 0)
             $fatal(1, "out-of-order measurement did not exercise ROB storage");
-        if (perf_in_order && (b_buffered != 0 || r_buffered != 0 || reordered_sent != 0))
+        if ((perf_in_order || perf_mixed) && (b_buffered != 0 || r_buffered != 0 || reordered_sent != 0))
             $fatal(1, "performance baseline used response reordering");
         $display("COVER buffer full B=%0d R=%0d", b_full_cycles, r_full_cycles);
         $display("COVER ID exhaustion write=%0d read=%0d", id_exhaustion_w, id_exhaustion_r);
@@ -724,12 +748,12 @@ module tb_nmu_standalone #(
         if ($value$plusargs("perf_trace=%s", path)) begin
             perf_fd = $fopen(path, "w");
             if (perf_fd == 0) $fatal(1, "cannot open performance trace");
-            $fdisplay(perf_fd, "cycle,aw_v,aw_r,w_v,w_r,ar_v,ar_r,b_v,b_r,r_v,r_r,fifo_aw_v,fifo_aw_r,fifo_w_v,fifo_w_r,fifo_ar_v,fifo_ar_r,pkt_aw_v,pkt_aw_r,pkt_w_v,pkt_w_r,pkt_ar_v,pkt_ar_r,req_v,req_r,req_ch,dat_v,dat_ch,rsp_v,rsp_r,rx_dat_v,owner_empty,owner_full,cw_full,dw_full,ar_full,aw_admit,ar_admit,db_v,db_r,dr_v,dr_r,ob_v,ob_r,or_v,or_r,b_free,r_free,b_sel,r_sel,b_direct,r_direct,b_fill_ready,r_fill_ready,b_tagged,r_tagged,b_id,r_id,b_retire_id,r_retire_id,b_pending,r_pending");
+            $fdisplay(perf_fd, "cycle,aw_v,aw_r,w_v,w_r,ar_v,ar_r,b_v,b_r,r_v,r_r,fifo_aw_v,fifo_aw_r,fifo_w_v,fifo_w_r,fifo_ar_v,fifo_ar_r,pkt_aw_v,pkt_aw_r,pkt_w_v,pkt_w_r,pkt_ar_v,pkt_ar_r,req_v,req_r,req_ch,dat_v,dat_ch,rsp_v,rsp_r,rx_dat_v,owner_empty,owner_full,cw_full,dw_full,ar_full,aw_admit,ar_admit,db_v,db_r,dr_v,dr_r,ob_v,ob_r,or_v,or_r,b_free,r_free,b_sel,r_sel,b_direct,r_direct,b_fill_ready,r_fill_ready,b_tagged,r_tagged,b_id,r_id,b_retire_id,r_retire_id,b_pending,r_pending,remap_state,remap_aw_v,remap_aw_r,remap_ar_v,remap_ar_r,wr_exists,wr_exists_full,wr_full,rd_exists,rd_exists_full,rd_full");
         end
     end
     always @(posedge noc_clk) begin
         if (perf_active && noc_rst_n && !warmup) begin
-            if (perf_in_order && ((dut.i_response_path.i_ordering.aw_accept && dut.i_response_path.i_ordering.aw_reorder) ||
+            if ((perf_in_order || perf_mixed) && ((dut.i_response_path.i_ordering.aw_accept && dut.i_response_path.i_ordering.aw_reorder) ||
                 (dut.i_response_path.i_ordering.ar_accept && dut.i_response_path.i_ordering.ar_reorder)))
                 $fatal(1, "performance baseline allocated ROB storage");
             if (perf_out_of_order &&
@@ -738,7 +762,7 @@ module tb_nmu_standalone #(
                  (dut.i_response_path.i_ordering.s_ar_valid_i && dut.i_response_path.i_ordering.ar_reorder &&
                   dut.i_response_path.i_ordering.r_free_cnt < dut.i_response_path.i_ordering.ar_beat_cnt)))
                 $fatal(1, "out-of-order measurement encountered ROB allocation shortage");
-            if (perf_fd != 0) $fdisplay(perf_fd, "%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d",
+            if (perf_fd != 0) $fdisplay(perf_fd, "%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d",
                 perf_cycle, bus.awvalid,
                 bus.awready,
                 bus.wvalid,
@@ -799,7 +823,18 @@ module tb_nmu_standalone #(
                 dut.i_response_path.i_ordering.b_retire_id,
                 dut.i_response_path.i_ordering.r_retire_id,
                 |dut.i_response_path.i_ordering.b_complete,
-                |dut.i_response_path.i_ordering.r_complete);
+                |dut.i_response_path.i_ordering.r_complete,
+                dut.i_request_path.i_id_remap.state_q,
+                dut.i_request_path.i_id_remap.mst_req_o.aw_valid,
+                dut.i_request_path.i_id_remap.mst_resp_i.aw_ready,
+                dut.i_request_path.i_id_remap.mst_req_o.ar_valid,
+                dut.i_request_path.i_id_remap.mst_resp_i.ar_ready,
+                dut.i_request_path.i_id_remap.wr_exists,
+                dut.i_request_path.i_id_remap.wr_exists_full,
+                dut.i_request_path.i_id_remap.wr_full,
+                dut.i_request_path.i_id_remap.rd_exists,
+                dut.i_request_path.i_id_remap.rd_exists_full,
+                dut.i_request_path.i_id_remap.rd_full);
             perf_cycle++;
         end
     end

@@ -125,3 +125,22 @@ def test_out_of_order_performance_capacity(tmp_path):
         schedule = (tmp_path / name / "schedule.txt").read_text()
         for key in ("response_delay", "stall_enable", "reset_warmup"):
             assert "+" + key + "=0\n" in schedule
+
+
+def test_mixed_performance_inputs(tmp_path):
+    catalog = REPO / "sim/test_patterns/standalone/mixed_perf.json"
+    names = generate(tmp_path, REPO / "sim/configs/mesh_2x2.yml", catalog=catalog)
+    assert len(names) == 4
+    for name in names:
+        writes = _parse_write(tmp_path / name / "write.txt")
+        reads = _parse_read(tmp_path / name / "read.txt")
+        assert len(writes) == len(reads) == 128
+        txns = writes + reads
+        assert len({t["id"] for t in txns}) == 1
+        assert len({t["addr"] >> 32 for t in txns}) == 1
+        beats = 16 if name.endswith("burst") else 1
+        size = 6 if "data" in name else 3
+        assert all(t["len"] == beats-1 and t["size"] == size and t["burst"] == 1 for t in txns)
+        schedule = (tmp_path / name / "schedule.txt").read_text()
+        for key in ("response_order", "response_delay", "startup_delay", "stall_enable", "reset_warmup"):
+            assert "+" + key + "=0\n" in schedule

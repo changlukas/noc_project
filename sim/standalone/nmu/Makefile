@@ -45,3 +45,7 @@ in_order_perf: prepare
 .PHONY: out_of_order_perf
 out_of_order_perf: prepare
 	$(MAKE) -C "$(stage)/script" out_of_order_perf SIMULATOR=$(SIMULATOR)
+
+.PHONY: mixed_perf
+mixed_perf: prepare
+	$(MAKE) -C "$(stage)/script" mixed_perf SIMULATOR=$(SIMULATOR)

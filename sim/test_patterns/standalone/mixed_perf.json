@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "cases": [
+    {
+      "name": "mixed_control_single",
+      "mode": "control",
+      "operation": "both",
+      "count": 128,
+      "burst_beats": 1,
+      "response_delay": 0
+    },
+    {
+      "name": "mixed_control_burst",
+      "mode": "control",
+      "operation": "both",
+      "count": 128,
+      "burst_beats": 16,
+      "response_delay": 0
+    },
+    {
+      "name": "mixed_data_single",
+      "mode": "data",
+      "operation": "both",
+      "count": 128,
+      "burst_beats": 1,
+      "response_delay": 0
+    },
+    {
+      "name": "mixed_data_burst",
+      "mode": "data",
+      "operation": "both",
+      "count": 128,
+      "burst_beats": 16,
+      "response_delay": 0
+    }
+  ]
+}

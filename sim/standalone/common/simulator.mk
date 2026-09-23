@@ -189,3 +189,7 @@ in_order_perf: compile
 .PHONY: out_of_order_perf
 out_of_order_perf: compile
 	bash "$(script_dir)/perf.sh" "$(package_dir)" "$(run_dir)" "$(PYTHON)" "$(wave_ext)" "$(ID_WIDTH)" out_of_order
+
+.PHONY: mixed_perf
+mixed_perf: compile
+	bash "$(script_dir)/perf.sh" "$(package_dir)" "$(run_dir)" "$(PYTHON)" "$(wave_ext)" "$(ID_WIDTH)" mixed
