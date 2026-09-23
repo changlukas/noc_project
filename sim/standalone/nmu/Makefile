@@ -37,3 +37,7 @@ clean:
 .PHONY: dat_regress
 dat_regress: prepare
 	$(MAKE) -C "$(stage)/script" dat_regress SIMULATOR=$(SIMULATOR)
+
+.PHONY: in_order_perf
+in_order_perf: prepare
+	$(MAKE) -C "$(stage)/script" in_order_perf SIMULATOR=$(SIMULATOR)

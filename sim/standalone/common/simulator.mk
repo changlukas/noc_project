@@ -62,6 +62,7 @@ help:
 	 'make run CASE=ctrl_write_single     Compile and run (VCS default)' \
 	 'make sim CASE=ctrl_read_burst       Reuse existing executable' \
 	 'make regress                       Compile once, all standalone cases and fault check' \
+	 'make in_order_perf                 In-order read/write performance without ROB allocation' \
 	 'make legacy_regress                Retained topology traffic and mixed tests' \
 	 'make run_wave CASE=same_id_cross_dst_reorder' \
 	 'make nWave CASE=same_id_cross_dst_reorder  (load signal groups)' \
@@ -179,3 +180,7 @@ clean:
 .PHONY: dat_regress
 dat_regress:
 	NMU_DAT_STAGE="$(package_dir)" NMU_DAT_TEST_OUTPUT="$(package_dir)/build/dat_$(SIMULATOR)_wave$(WAVE)" SIMULATOR=$(SIMULATOR) WAVE=$(WAVE) bash "$(package_dir)/repo/rtl/nmu/response_depacketize/test_response_depacketize.sh"
+
+.PHONY: in_order_perf
+in_order_perf: compile
+	bash "$(script_dir)/in_order_perf.sh" "$(package_dir)" "$(run_dir)" "$(PYTHON)" "$(wave_ext)" "$(ID_WIDTH)"

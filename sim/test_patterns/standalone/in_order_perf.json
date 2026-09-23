@@ -1,0 +1,69 @@
+{
+  "version": 2,
+  "cases": [
+    {
+      "name": "perf_control_read_single",
+      "mode": "control",
+      "operation": "read",
+      "count": 128,
+      "burst_beats": 1,
+      "response_delay": 0
+    },
+    {
+      "name": "perf_control_read_burst",
+      "mode": "control",
+      "operation": "read",
+      "count": 128,
+      "burst_beats": 16,
+      "response_delay": 0
+    },
+    {
+      "name": "perf_control_write_single",
+      "mode": "control",
+      "operation": "write",
+      "count": 128,
+      "burst_beats": 1,
+      "response_delay": 0
+    },
+    {
+      "name": "perf_control_write_burst",
+      "mode": "control",
+      "operation": "write",
+      "count": 128,
+      "burst_beats": 16,
+      "response_delay": 0
+    },
+    {
+      "name": "perf_data_read_single",
+      "mode": "data",
+      "operation": "read",
+      "count": 128,
+      "burst_beats": 1,
+      "response_delay": 0
+    },
+    {
+      "name": "perf_data_read_burst",
+      "mode": "data",
+      "operation": "read",
+      "count": 128,
+      "burst_beats": 16,
+      "response_delay": 0
+    },
+    {
+      "name": "perf_data_write_single",
+      "mode": "data",
+      "operation": "write",
+      "count": 128,
+      "burst_beats": 1,
+      "response_delay": 0
+    },
+    {
+      "name": "perf_data_write_burst",
+      "mode": "data",
+      "operation": "write",
+      "count": 128,
+      "burst_beats": 16,
+      "response_delay": 0
+    }
+  ]
+}

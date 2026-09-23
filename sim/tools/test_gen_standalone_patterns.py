@@ -80,3 +80,25 @@ def test_control_capacity_preserves_existing_recipe(tmp_path, width):
     generate(tmp_path / "new", topology, width, case_name="outstanding_full_recover")
     for name in ("write.txt", "read.txt"):
         assert (tmp_path / "legacy" / name).read_bytes() == (tmp_path / "new/outstanding_full_recover" / name).read_bytes()
+
+
+def test_in_order_performance_inputs(tmp_path):
+    catalog = REPO / "sim/test_patterns/standalone/in_order_perf.json"
+    names = generate(tmp_path, REPO / "sim/configs/mesh_2x2.yml", catalog=catalog)
+    assert len(names) == 8
+    for name in names:
+        writes = _parse_write(tmp_path / name / "write.txt")
+        reads = _parse_read(tmp_path / name / "read.txt")
+        assert bool(writes) != bool(reads)
+        txns = writes + reads
+        assert len(txns) == 128
+        assert len({t["id"] for t in txns}) == 1
+        assert len({t["addr"] >> 32 for t in txns}) == 1
+        beats = 16 if name.endswith("burst") else 1
+        size = 6 if "data" in name else 3
+        assert all(t["len"] == beats-1 and t["size"] == size and t["burst"] == 1 for t in txns)
+        for t in txns:
+            assert t["addr"] >> 12 == (t["addr"] + beats*(1 << size)-1) >> 12
+        schedule = (tmp_path / name / "schedule.txt").read_text()
+        for key in ("response_order", "response_delay", "startup_delay", "stall_enable", "reset_warmup"):
+            assert "+" + key + "=0\n" in schedule

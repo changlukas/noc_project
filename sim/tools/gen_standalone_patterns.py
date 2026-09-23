@@ -70,6 +70,11 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
                       (1, 3, 7)[txn % 3] if case.get("burst_sweep") else 0)
             burst = ((1, 0, 2)[txn % 3] if capacity else
                      (0, 1, 2)[(txn // 4) % 3] if case.get("burst_sweep") else 1)
+            if "burst_beats" in case:
+                beats = case["burst_beats"]
+                if not isinstance(beats, int) or not 1 <= beats <= 256:
+                    raise ValueError("burst_beats must be in [1, 256]")
+                length = beats - 1
             if random_fields:
                 if case.get("random"):
                     axi_id = rng.randrange(min(8, 1 << id_width))

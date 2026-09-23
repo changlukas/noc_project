@@ -62,6 +62,7 @@ module tb_nmu_standalone #(
     end
     bit warmup          = 1;
     bit block_case      = 0;
+    bit perf_in_order   = 0;
     string case_name    = "legacy";
     int response_order  = 1, response_delay = 12, startup_delay = 0;
     int stall_enable    = 1, reset_warmup = 1;
@@ -389,14 +390,15 @@ module tb_nmu_standalone #(
         end
     end
     task automatic send_rsp(input rsp_flit_t value);
-        @(negedge noc_clk); rsp = value; rsp_valid = 1;
+        if (!perf_in_order || noc_clk !== 1'b0) @(negedge noc_clk);
+        rsp = value; rsp_valid = 1;
         do @(posedge noc_clk); while (!rsp_ready);
         @(negedge noc_clk); rsp_valid = 0;
     endtask
     task automatic send_dat(input dat_flit_t value);
         int vc;
         vc = int'(value.header[VC_ID_LSB +: VC_ID_WIDTH]);
-        @(negedge noc_clk);
+        if (!perf_in_order || noc_clk !== 1'b0) @(negedge noc_clk);
         while (rx_available[vc] == 0) @(negedge noc_clk);
         rx_dat       = value;
         rx_dat_valid = 1;
@@ -433,7 +435,9 @@ module tb_nmu_standalone #(
         wait(noc_rst_n && !warmup);
         repeat (startup_delay) @(negedge noc_clk);
         forever begin
-            repeat (response_delay) @(negedge noc_clk);
+            if (perf_in_order) begin
+                while (pending_b.size() == 0 && pending_r.size() == 0) @(negedge noc_clk);
+            end else repeat (response_delay) @(negedge noc_clk);
             if (pending_b.size() != 0) begin
                 index = -1;
                 for (int i = 0; i < pending_b.size(); i++) begin
@@ -559,6 +563,14 @@ module tb_nmu_standalone #(
         end else begin
             master.load_files({stim_dir,"/read.txt"}, {stim_dir,"/write.txt"});
         end
+        perf_in_order = $test$plusargs("perf_in_order");
+        if (perf_in_order) begin
+            if (!block_case || response_order != 0 || startup_delay != 0 ||
+                stall_enable != 0 || reset_warmup != 0 || NOC_HALF_PERIOD != 5)
+                $fatal(1, "performance baseline requires in-order, no stalls, equal clocks");
+            if ((master.aw_queue.size() == 0) == (master.ar_queue.size() == 0))
+                $fatal(1, "performance baseline requires one active direction");
+        end
         expected_aw = master.aw_queue;
         expected_ar = master.ar_queue;
         expected_w  = master.w_queue;
@@ -673,6 +685,8 @@ module tb_nmu_standalone #(
             $display("COVER case=%s peak_W=%0d peak_R=%0d unique_W=%0d unique_R=%0d blocked_AW=%0d blocked_AR=%0d ooo_B=%0d ooo_R=%0d",
                 case_name,peak_w,peak_r,peak_unique_w,peak_unique_r,blocked_aw,blocked_ar,reordered_b,reordered_r);
         end
+        if (perf_in_order && (b_buffered != 0 || r_buffered != 0 || reordered_sent != 0))
+            $fatal(1, "performance baseline used response reordering");
         $display("COVER buffer full B=%0d R=%0d", b_full_cycles, r_full_cycles);
         $display("COVER ID exhaustion write=%0d read=%0d", id_exhaustion_w, id_exhaustion_r);
         $display("PASS NMU standalone ID=%0d B=%0d R=%0d buffered_B=%0d buffered_R=%0d reordered=%0d stall=%0d",
@@ -688,5 +702,73 @@ module tb_nmu_standalone #(
     assert property (@(posedge axi_clk) disable iff (!axi_rst_n)
         bus.rvalid && !bus.rready |=> bus.rvalid && $stable({bus.rid,bus.rresp,bus.rdata,bus.rlast}))
         else $fatal(1, "R changed while stalled");
+    // Diagnostic trace is sampled before the transfer edge updates state.
+    integer perf_fd = 0;
+    int perf_cycle = 0;
+    initial begin : open_perf_trace
+        string path;
+        if ($value$plusargs("perf_trace=%s", path)) begin
+            perf_fd = $fopen(path, "w");
+            if (perf_fd == 0) $fatal(1, "cannot open performance trace");
+            $fdisplay(perf_fd, "cycle,aw_v,aw_r,w_v,w_r,ar_v,ar_r,b_v,b_r,r_v,r_r,fifo_aw_v,fifo_aw_r,fifo_w_v,fifo_w_r,fifo_ar_v,fifo_ar_r,pkt_aw_v,pkt_aw_r,pkt_w_v,pkt_w_r,pkt_ar_v,pkt_ar_r,req_v,req_r,req_ch,dat_v,dat_ch,rsp_v,rsp_r,rx_dat_v,owner_empty,owner_full,cw_full,dw_full,ar_full,aw_admit,ar_admit,db_v,db_r,dr_v,dr_r,ob_v,ob_r,or_v,or_r");
+        end
+    end
+    always @(posedge noc_clk) begin
+        if (perf_in_order && noc_rst_n && !warmup) begin
+            if ((dut.i_response_path.i_ordering.aw_accept && dut.i_response_path.i_ordering.aw_reorder) ||
+                (dut.i_response_path.i_ordering.ar_accept && dut.i_response_path.i_ordering.ar_reorder))
+                $fatal(1, "performance baseline allocated ROB storage");
+            if (perf_fd != 0) $fdisplay(perf_fd, "%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d",
+                perf_cycle, bus.awvalid,
+                bus.awready,
+                bus.wvalid,
+                bus.wready,
+                bus.arvalid,
+                bus.arready,
+                bus.bvalid,
+                bus.bready,
+                bus.rvalid,
+                bus.rready,
+                dut.i_request_path.i_request_fifo.m_aw_valid_o,
+                dut.i_request_path.i_request_fifo.m_aw_ready_i,
+                dut.i_request_path.i_request_fifo.m_w_valid_o,
+                dut.i_request_path.i_request_fifo.m_w_ready_i,
+                dut.i_request_path.i_request_fifo.m_ar_valid_o,
+                dut.i_request_path.i_request_fifo.m_ar_ready_i,
+                dut.i_request_path.i_packetize.s_aw_valid_i,
+                dut.i_request_path.i_packetize.s_aw_ready_o,
+                dut.i_request_path.i_packetize.s_w_valid_i,
+                dut.i_request_path.i_packetize.s_w_ready_o,
+                dut.i_request_path.i_packetize.s_ar_valid_i,
+                dut.i_request_path.i_packetize.s_ar_ready_o,
+                req_valid,
+                req_ready,
+                req.header[AXI_CH_LSB +: AXI_CH_WIDTH],
+                dat_valid,
+                tx_dat.header[AXI_CH_LSB +: AXI_CH_WIDTH],
+                rsp_valid,
+                rsp_ready,
+                rx_dat_valid,
+                dut.i_request_path.i_packetize.owner_empty,
+                dut.i_request_path.i_packetize.owner_full,
+                dut.i_request_path.i_packetize.narrow_w_full,
+                dut.i_request_path.i_packetize.data_w_full,
+                dut.i_request_path.i_packetize.ar_full,
+                dut.i_response_path.i_ordering.aw_can_accept,
+                dut.i_response_path.i_ordering.ar_can_accept,
+                dut.i_response_path.decoded_b_valid,
+                dut.i_response_path.decoded_b_ready,
+                dut.i_response_path.decoded_r_valid,
+                dut.i_response_path.decoded_r_ready,
+                dut.i_response_path.ordered_b_valid,
+                dut.i_response_path.ordered_b_ready,
+                dut.i_response_path.ordered_r_valid,
+                dut.i_response_path.ordered_r_ready);
+            perf_cycle++;
+        end
+    end
+    final begin
+        if (perf_fd != 0) $fclose(perf_fd);
+    end
     initial begin #2000000; $fatal(1, "NMU standalone timeout AW=%0d AR=%0d B=%0d R=%0d",aw_index,ar_index,b_count,r_count); end
 endmodule
