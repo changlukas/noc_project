@@ -8,29 +8,29 @@ task_sources=(
   "$task_root/specgen/generated/sv/ni_signals_pkg.sv"
   "$task_root/specgen/generated/sv/ni_flit_pkg.sv"
   "$task_root/rtl/common/ni_types_pkg.sv"
-  "$task_root/rtl/nmu/ordering/nmu_reorder_storage.sv"
-  "$task_root/rtl/nmu/ordering/nmu_ordering.sv"
+  "$task_root/rtl/nmu/ordering/reorder_storage.sv"
+  "$task_root/rtl/nmu/ordering/ordering.sv"
 )
 task_verilator=(verilator --timing --assert -Wall -Wno-fatal -Wno-DECLFILENAME
   -Wno-TIMESCALEMOD -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-PINCONNECTEMPTY
   -Werror-WIDTHTRUNC -Werror-WIDTHEXPAND -Werror-LATCH)
 "${task_verilator[@]}" --lint-only --top-module tb_nmu_ordering \
-  "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_nmu_ordering.sv"
+  "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_ordering.sv"
 "${task_verilator[@]}" --lint-only --top-module tb_nmu_ordering_robless \
-  "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_nmu_ordering_robless.sv"
+  "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_ordering_robless.sv"
 if [[ "${1:-test}" == test ]]; then
   "${task_verilator[@]}" --binary -j 1 --top-module tb_nmu_ordering \
     --Mdir "$task_tmp/obj_dir" -o nmu_ordering_tb \
-    "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_nmu_ordering.sv"
+    "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_ordering.sv"
   "$task_tmp/obj_dir/nmu_ordering_tb"
   "${task_verilator[@]}" --binary -j 1 --top-module tb_nmu_ordering_robless \
     --Mdir "$task_tmp/obj_dir_robless" -o nmu_ordering_robless_tb \
-    "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_nmu_ordering_robless.sv"
+    "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_ordering_robless.sv"
   "$task_tmp/obj_dir_robless/nmu_ordering_robless_tb"
 
   "${task_verilator[@]}" --binary -j 1 --top-module tb_nmu_ordering_stall \
     --Mdir "$task_tmp/obj_dir_stall" -o nmu_ordering_stall_tb \
-    "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_nmu_ordering_stall.sv"
+    "${task_sources[@]}" "$task_root/rtl/nmu/ordering/tb_ordering_stall.sv"
   "$task_tmp/obj_dir_stall/nmu_ordering_stall_tb"
 
   task_tag_w=$(sed -nE 's/.*ORDERING_TAG_WIDTH[[:space:]]*=[[:space:]]*([0-9]+);/\1/p' \

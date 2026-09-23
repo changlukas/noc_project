@@ -36,23 +36,23 @@ task_sources=(
     "$task_tech_cells/src/rtl/tc_sync.sv"
     "$task_common_cells/src/cc_cdc_fifo_gray.sv"
     "$task_root/rtl/common/axi_async_fifo.sv"
-    "$task_root/rtl/nmu/response_fifo/nmu_response_fifo.sv"
+    "$task_root/rtl/nmu/response_fifo/response_fifo.sv"
 )
 task_verilator=(verilator --timing --assert -Wall -Wno-fatal -Wno-DECLFILENAME
     -Wno-TIMESCALEMOD -Wno-UNUSEDPARAM -Wno-UNUSEDSIGNAL -Wno-SYNCASYNCNET
     -Wno-PINCONNECTEMPTY -I"$task_common_cells/include")
 
 "${task_verilator[@]}" --lint-only --top-module tb_nmu_response_path \
-    "${task_sources[@]}" "$task_root/rtl/nmu/response_path/tb_nmu_response_path.sv"
+    "${task_sources[@]}" "$task_root/rtl/nmu/response_path/tb_response_path.sv"
 if [[ "${1:-test}" == test ]]; then
     "${task_verilator[@]}" --binary --top-module tb_nmu_response_path \
         --Mdir "$task_tmp/obj_dir" -o nmu_response_path_tb \
-        "${task_sources[@]}" "$task_root/rtl/nmu/response_path/tb_nmu_response_path.sv"
+        "${task_sources[@]}" "$task_root/rtl/nmu/response_path/tb_response_path.sv"
     "$task_tmp/obj_dir/nmu_response_path_tb"
     task_log="$task_tmp/guard.log"
     "${task_verilator[@]}" --binary --top-module tb_nmu_response_fifo_guards \
         --Mdir "$task_tmp/obj_guard" -o nmu_response_fifo_guard_tb \
-        "${task_sources[@]}" "$task_root/rtl/nmu/response_fifo/tb_nmu_response_fifo_guards.sv"
+        "${task_sources[@]}" "$task_root/rtl/nmu/response_fifo/tb_response_fifo_guards.sv"
     if "$task_tmp/obj_guard/nmu_response_fifo_guard_tb" >"$task_log" 2>&1; then
         echo "response FIFO invalid depth did not fail" >&2
         exit 1

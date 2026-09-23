@@ -39,9 +39,9 @@ task_sources=(
     "$task_tech_cells/src/rtl/tc_sync.sv"
     "$task_common_cells/src/cc_cdc_fifo_gray.sv"
     "$task_root/rtl/common/axi_async_fifo.sv"
-    "$task_root/rtl/nmu/request_fifo/nmu_request_fifo.sv"
-    "$task_root/rtl/nmu/request_fifo/tb_nmu_request_fifo.sv"
-    "$task_root/rtl/nmu/request_fifo/tb_nmu_request_fifo_guards.sv"
+    "$task_root/rtl/nmu/request_fifo/request_fifo.sv"
+    "$task_root/rtl/nmu/request_fifo/tb_request_fifo.sv"
+    "$task_root/rtl/nmu/request_fifo/tb_request_fifo_guards.sv"
 )
 
 task_verilator=(

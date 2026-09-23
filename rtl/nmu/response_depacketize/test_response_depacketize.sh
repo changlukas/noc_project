@@ -22,8 +22,8 @@ task_sources=(
     repo/sim/dv/common_cells-1.37.0/src/cf_math_pkg.sv
     repo/sim/dv/common_cells-1.37.0/src/lzc.sv
     repo/sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv
-    repo/rtl/nmu/response_depacketize/nmu_response_buffer.sv
-    repo/rtl/nmu/response_depacketize/nmu_response_depacketize.sv
+    repo/rtl/nmu/response_depacketize/response_buffer.sv
+    repo/rtl/nmu/response_depacketize/response_depacketize.sv
 )
 task_compile() {
     task_name="v${task_vcs}_m${task_mode}_d${task_depth}"
@@ -36,7 +36,7 @@ task_compile() {
             --top-module tb_nmu_response_depacketize \
             -GNUM_DAT_VC="$task_vcs" -GDAT_VC_MODE="$task_mode" -GDAT_RX_VC_DEPTH="$task_depth" \
             -Ideps/common_cells/include "${task_sources[@]}" \
-            "$task_root/rtl/nmu/response_depacketize/tb_nmu_response_depacketize.sv" \
+            "$task_root/rtl/nmu/response_depacketize/tb_response_depacketize.sv" \
             ${task_wave[@]+"${task_wave[@]}"} --Mdir "$task_out/$task_name" > "$task_out/$task_name.compile.log" 2>&1
         task_binary="$task_out/$task_name/Vtb_nmu_response_depacketize"
         task_ext=fst
@@ -53,7 +53,7 @@ task_compile() {
         fi
         vcs -full64 -sverilog -assert svaext -override_timescale=1ns/1ps -debug_access+all \
             +incdir+deps/common_cells/include "${task_sources[@]}" \
-            "$task_root/rtl/nmu/response_depacketize/tb_nmu_response_depacketize.sv" \
+            "$task_root/rtl/nmu/response_depacketize/tb_response_depacketize.sv" \
             -top tb_nmu_response_depacketize \
             -pvalue+tb_nmu_response_depacketize.NUM_DAT_VC="$task_vcs" \
             -pvalue+tb_nmu_response_depacketize.DAT_VC_MODE="$task_mode" \

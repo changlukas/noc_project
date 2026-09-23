@@ -18,19 +18,19 @@ sources:
   - ../sim/dv/axi-0.39.7/src/axi_pkg.sv
   - ../sim/dv/axi-0.39.7/src/axi_id_remap.sv
   - common/axi_if.sv
-  - common/ni_child_types_pkg.sv
+  - common/ni_types_pkg.sv
   - common/ni_sam.sv
   - common/stream_register.sv
   - common/axi_async_fifo.sv
-  - nmu/sam/nmu_sam.sv
-  - nmu/request_path/nmu_request_path.sv
-  - nmu/response_fifo/nmu_response_fifo.sv
-  - nmu/ordering/nmu_reorder_storage.sv
-  - nmu/ordering/nmu_ordering.sv
-  - nmu/channel_assign/nmu_channel_assign.sv
-  - nmu/request_packetize/nmu_request_packetize.sv
-  - nmu/response_depacketize/nmu_response_buffer.sv
-  - nmu/response_depacketize/nmu_response_depacketize.sv
-  - nmu/response_path/nmu_response_path.sv
+  - nmu/sam/sam.sv
+  - nmu/request_path/request_path.sv
+  - nmu/response_fifo/response_fifo.sv
+  - nmu/ordering/reorder_storage.sv
+  - nmu/ordering/ordering.sv
+  - nmu/channel_assign/channel_assign.sv
+  - nmu/request_packetize/request_packetize.sv
+  - nmu/response_depacketize/response_buffer.sv
+  - nmu/response_depacketize/response_depacketize.sv
+  - nmu/response_path/response_path.sv
   - nmu/top/nmu.sv
-  - nmu/request_fifo/nmu_request_fifo.sv
+  - nmu/request_fifo/request_fifo.sv

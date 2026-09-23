@@ -76,7 +76,7 @@ def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
             generate_standalone(root / "cases/standalone", repo / "sim/configs/mesh_2x2.yml", id_width)
         copy_path(repo / "sim/test_patterns/standalone/cases.json")
         copy_path(repo / "rtl/nmu/top/nmu_lint.vlt")
-        copy_path(repo / "rtl/nmu/response_depacketize/tb_nmu_response_depacketize.sv")
+        copy_path(repo / "rtl/nmu/response_depacketize/tb_response_depacketize.sv")
         copy_path(repo / "rtl/nmu/response_depacketize/test_response_depacketize.sh")
         (root / "script").mkdir()
         shutil.copy2(repo / "sim/standalone/common/simulator.mk", root / "script/Makefile")
