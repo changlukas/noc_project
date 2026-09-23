@@ -1,0 +1,13 @@
+{
+  "case": "data_read_burst",
+  "mode": "data",
+  "seed": 1,
+  "id_width": 3,
+  "coverage": {
+    "control_write": 0,
+    "control_read": 0,
+    "data_write": 12,
+    "data_read": 12
+  },
+  "profile": "cosim"
+}

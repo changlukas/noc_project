@@ -148,6 +148,13 @@ class NsuWrap {
 
     void set_inputs(const NsuInputs& in) { in_ = in; }
 
+    void set_dat_credit_depth(std::size_t depth) {
+        if (ticked_ || depth < 2 || (depth & (depth - 1)) != 0) {
+            throw std::invalid_argument("NsuWrap: configure a power-of-two DAT receiver depth before tick");
+        }
+        nsu_->enable_dat_noc_credit(depth);
+    }
+
     void set_channel_mode(::ni::cmodel::ni::ChannelMode mode) {
         if (ticked_) {
             throw std::logic_error("NsuWrap::set_channel_mode: must be configured before first tick");

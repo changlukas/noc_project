@@ -1,0 +1,19 @@
+# Only router (0,0) is instantiated; bounds retain existing XY routing semantics.
+name: nmu_cosim
+network_type: axi
+routing: {route_algo: XY, use_id_table: true}
+endpoints:
+  - name: nmu
+    num: 1
+    mgr_port_protocol: [axi]
+  - name: nsu
+    num: 1
+    sbr_port_protocol: [axi]
+    addr_range:
+      - {base: 0x0, size: 0x2000000, space: memory}
+      - {base: 0x2000000, size: 0x1000, space: config}
+routers:
+  - {name: router, array: [2, 2], degree: 5, auto_connect: false}
+connections:
+  - {src: nmu, dst: router, src_idx: [0], dst_idx: [0], dst_dir: 4}
+  - {src: nsu, dst: router, src_idx: [0], dst_idx: [0], dst_dir: 3}

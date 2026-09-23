@@ -834,3 +834,14 @@ TEST(NiRouterChain, DualClassEndToEndAndCrossClassReadOrder) {
         << "same-ID cross-class read order violated: the config-class read arrived out of "
            "submission order";
 }
+
+TEST(NsuWrapCreditConfig, ReceiverDepthMustBeConfiguredBeforeTraffic) {
+    NsuWrap nsu;
+    nsu.init();
+    EXPECT_NO_THROW(nsu.set_dat_credit_depth(32));
+    EXPECT_THROW(nsu.set_dat_credit_depth(0), std::invalid_argument);
+    EXPECT_THROW(nsu.set_dat_credit_depth(3), std::invalid_argument);
+    nsu.set_inputs(NsuInputs{});
+    nsu.tick();
+    EXPECT_THROW(nsu.set_dat_credit_depth(32), std::invalid_argument);
+}

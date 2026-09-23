@@ -220,6 +220,7 @@ void cmodel_nmu_admission_stats(unsigned long long ctx, unsigned int* aw_idle_by
 unsigned long long cmodel_nsu_create(const char* name, int src_id, int dat_num_vc,
                                      int max_unique_ids, int max_outstanding, int port_id,
                                      const char* config_path);
+void cmodel_nsu_set_dat_credit_depth(unsigned long long ctx, int depth);
 void cmodel_nsu_set_channel_mode(unsigned long long ctx, int mode);
 void cmodel_nsu_set_inputs(unsigned long long ctx, svBit rx_req_valid, svBitVecVal* rx_req_flit,
                            svBit tx_rsp_ready, svBit rx_dat_valid, svBitVecVal* rx_dat_flit,

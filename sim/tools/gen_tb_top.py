@@ -1414,6 +1414,63 @@ def _sam_rules(topo: dict):
         })
     return rules
 
+def _emit_sam_declarations(sam_rules):
+    lines = []
+    w = lines.append
+    w("    localparam int unsigned ADDR_WIDTH = ni_flit_pkg::AXI_ADDR_WIDTH;")
+    w(f"    localparam int unsigned SAM_NUM_RULES = {len(sam_rules)};")
+    w("    localparam int unsigned SAM_MASK_SEL_FIELD_W = $clog2(ADDR_WIDTH + 1);")
+    w("")
+    w("    typedef logic [ADDR_WIDTH-1:0] sam_addr_t;")
+    w("    typedef struct packed {")
+    w("        logic [SAM_MASK_SEL_FIELD_W-1:0] offset;")
+    w("        logic [SAM_MASK_SEL_FIELD_W-1:0] len;")
+    w("    } sam_mask_sel_t;")
+    w("    typedef struct packed {")
+    w("        logic [ni_flit_pkg::DST_ID_WIDTH-1:0] dst_id;")
+    w("        logic [ni_flit_pkg::DST_PORT_ID_WIDTH-1:0] dst_port_id;")
+    w("        logic is_data;")
+    w("        logic collective_en;")
+    w("        sam_mask_sel_t mask_x;")
+    w("        sam_mask_sel_t mask_y;")
+    w("    } sam_result_t;")
+    w("    typedef struct packed {")
+    w("        sam_result_t idx;")
+    w("        sam_addr_t start_addr;")
+    w("        sam_addr_t end_addr;")
+    w("    } sam_rule_t;")
+    w("    localparam sam_rule_t [SAM_NUM_RULES-1:0] SAM = '{")
+    for authored_index, rule in enumerate(sam_rules):
+        generated_index = len(sam_rules) - 1 - authored_index
+        comma = "," if generated_index else ""
+        w(f"        // Authored rule {authored_index}: SAM[{generated_index}]")
+        w("        " +
+          f"{generated_index}: '{{idx: '{{dst_id: "
+          f"ni_flit_pkg::DST_ID_WIDTH'({rule['dst_id']}), "
+          f"dst_port_id: ni_flit_pkg::DST_PORT_ID_WIDTH'({rule['port']}), "
+          f"is_data: 1'b{int(rule['space'] != 'config')}, "
+          f"collective_en: 1'b{int(rule['collective_en'])}, "
+          f"mask_x: '{{offset: SAM_MASK_SEL_FIELD_W'({rule['mask_x'][0]}), "
+          f"len: SAM_MASK_SEL_FIELD_W'({rule['mask_x'][1]})}}, "
+          f"mask_y: '{{offset: SAM_MASK_SEL_FIELD_W'({rule['mask_y'][0]}), "
+          f"len: SAM_MASK_SEL_FIELD_W'({rule['mask_y'][1]})}}}}, "
+          f"start_addr: ADDR_WIDTH'(64'h{rule['base']:012X}), "
+          f"end_addr: ADDR_WIDTH'(64'h{rule['base'] + rule['size']:012X})}}{comma}")
+    w("    };")
+    return lines
+
+
+def emit_sam_pkg(topo):
+    """SAM-only package for block co-simulation without mesh/tile crossbars."""
+    return "\n".join([
+        "`timescale 1ns/1ps",
+        "// Generated from the co-simulation topology; do not edit.",
+        "package topology_pkg;",
+        *_emit_sam_declarations(_sam_rules(topo)),
+        "endpackage : topology_pkg", "",
+    ])
+
+
 def emit_topology_pkg(topo: dict) -> str:
     """Address-map package for the selected configuration: TILE_BASE_ADDR /
     TILE_SIZE / NOC_EGRESS_BASE / the peripheral table, computed exactly as
@@ -1478,46 +1535,7 @@ def emit_topology_pkg(topo: dict) -> str:
     w(f"    localparam int unsigned Y_DIM = {y_dim};")
     w(f"    localparam int unsigned NUM_NODES     = {n};")
     w(f"    localparam int unsigned NUM_ENDPOINTS = {n_ep};")
-    w("    localparam int unsigned ADDR_WIDTH = ni_flit_pkg::AXI_ADDR_WIDTH;")
-    w(f"    localparam int unsigned SAM_NUM_RULES = {len(sam_rules)};")
-    w("    localparam int unsigned SAM_MASK_SEL_FIELD_W = $clog2(ADDR_WIDTH + 1);")
-    w("")
-    w("    typedef logic [ADDR_WIDTH-1:0] sam_addr_t;")
-    w("    typedef struct packed {")
-    w("        logic [SAM_MASK_SEL_FIELD_W-1:0] offset;")
-    w("        logic [SAM_MASK_SEL_FIELD_W-1:0] len;")
-    w("    } sam_mask_sel_t;")
-    w("    typedef struct packed {")
-    w("        logic [ni_flit_pkg::DST_ID_WIDTH-1:0] dst_id;")
-    w("        logic [ni_flit_pkg::DST_PORT_ID_WIDTH-1:0] dst_port_id;")
-    w("        logic is_data;")
-    w("        logic collective_en;")
-    w("        sam_mask_sel_t mask_x;")
-    w("        sam_mask_sel_t mask_y;")
-    w("    } sam_result_t;")
-    w("    typedef struct packed {")
-    w("        sam_result_t idx;")
-    w("        sam_addr_t start_addr;")
-    w("        sam_addr_t end_addr;")
-    w("    } sam_rule_t;")
-    w("    localparam sam_rule_t [SAM_NUM_RULES-1:0] SAM = '{")
-    for authored_index, rule in enumerate(sam_rules):
-        generated_index = len(sam_rules) - 1 - authored_index
-        comma = "," if generated_index else ""
-        w(f"        // Authored rule {authored_index}: SAM[{generated_index}]")
-        w("        " +
-          f"{generated_index}: '{{idx: '{{dst_id: "
-          f"ni_flit_pkg::DST_ID_WIDTH'({rule['dst_id']}), "
-          f"dst_port_id: ni_flit_pkg::DST_PORT_ID_WIDTH'({rule['port']}), "
-          f"is_data: 1'b{int(rule['space'] != 'config')}, "
-          f"collective_en: 1'b{int(rule['collective_en'])}, "
-          f"mask_x: '{{offset: SAM_MASK_SEL_FIELD_W'({rule['mask_x'][0]}), "
-          f"len: SAM_MASK_SEL_FIELD_W'({rule['mask_x'][1]})}}, "
-          f"mask_y: '{{offset: SAM_MASK_SEL_FIELD_W'({rule['mask_y'][0]}), "
-          f"len: SAM_MASK_SEL_FIELD_W'({rule['mask_y'][1]})}}}}, "
-          f"start_addr: ADDR_WIDTH'(64'h{rule['base']:012X}), "
-          f"end_addr: ADDR_WIDTH'(64'h{rule['base'] + rule['size']:012X})}}{comma}")
-    w("    };")
+    lines.extend(_emit_sam_declarations(sam_rules))
     w(f"    localparam int unsigned TILE_TARGETS = {n_targets};")
     w(f"    localparam logic [{n_ep - 1}:0][TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_BASE_ADDR = "
       f"{{{tile_base_addr}}};")

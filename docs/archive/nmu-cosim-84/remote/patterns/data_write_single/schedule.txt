@@ -1,0 +1,5 @@
++case_name=data_write_single
++seed=1
++min_outstanding=1
++min_unique=1
++backpressure=0

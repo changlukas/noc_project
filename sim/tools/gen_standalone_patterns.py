@@ -13,7 +13,7 @@ SCHEDULE = ("response_order", "response_delay", "startup_delay",
             "require_ooo", "require_buffered", "require_capacity", "require_stall")
 
 
-def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, case_name=None):
+def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, case_name=None, profile="standalone"):
     out = Path(out)
     topology = Path(topology)
     if topology.suffix == ".json":
@@ -24,7 +24,10 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
         _, entries = pack_config(yaml.safe_load(topology.read_text()))
     routes = {m: [e for e in entries if e["space"] == space]
               for m, space in (("control", "config"), ("data", "memory"))}
-    if any(len(v) < 2 for v in routes.values()):
+    if profile not in ("standalone", "cosim"):
+        raise ValueError("unknown verification profile")
+    required_destinations = 2 if profile == "standalone" else 1
+    if any(len(v) < required_destinations for v in routes.values()):
         raise ValueError("standalone suite needs two control/data destinations")
     if id_width not in (1, 3, 8) or mode not in ("auto", "control", "data", "rand"):
         raise ValueError("invalid ID width or MODE")
@@ -38,6 +41,12 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
             raise ValueError("unknown CASE: " + case_name)
     for case in cases:
         name = case["name"]
+        if profile == "cosim" and (case.get("destinations") == "alternate" or
+                                    case.get("require_ooo") or case.get("legacy_mixed") or
+                                    case.get("require_stall")):
+            if case_name is not None:
+                raise ValueError(name + " requires focused standalone response scheduling")
+            continue
         if name in names or not name.replace("_", "").isalnum():
             raise ValueError("invalid or duplicate case name")
         names.append(name)
@@ -89,16 +98,23 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
             dest = (txn % len(routes[classes[txn]]) if capacity else
                     txn % 2 if case.get("destinations") == "alternate" else
                     rng.randrange(2) if case.get("destinations") == "random" else 0)
-            route = routes[classes[txn]][dest]
+            route = routes[classes[txn]][0 if profile == "cosim" else dest]
             step = 1 << size
             offset = 256 + (txn % 8)*max(8, step)
             if random_fields:
                 offset = 256 + rng.randrange(16)*64 + rng.randrange(64 // step)*step
+            if profile == "cosim":
+                # Disjoint transactions make the batch write/read barrier unambiguous.
+                # The existing memory scoreboard supports INCR and single beats.
+                burst = 1
+                offset = txn * (512 if is_data else 64)
             address = route["base"] + offset
             operation = case.get("operation", "both")
             if case.get("random"):
                 # Paired directions keep every class/single/burst category non-vacuous.
                 operation = "both"
+            if profile == "cosim":
+                operation = "both"  # read cases initialize through the real write path
             if operation in ("write", "both"):
                 fields = _ax_fields(axi_id, address, length, size, True, user=txn)
                 fields[4] = str(burst)
@@ -117,6 +133,10 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
                         strobe = hex(int(strobe, 16) & rng.getrandbits(64))
                     elif (case.get("burst_sweep") and txn % 3 == 0) or (capacity and txn % 5 == 0):
                         strobe = hex(int(strobe, 16) & 0x5555555555555555)
+                    if profile == "cosim":
+                        # Initialize every byte read by this profile. Partial-strobe
+                        # coverage remains in standalone until an init phase is added.
+                        strobe = encode_write_beats(addr, size, 0, 512)[0].split()[1]
                     writes.append(f"{data} {strobe} {user}")
             if operation in ("read", "both"):
                 fields = _ax_fields(axi_id, address, length, size, False)
@@ -129,9 +149,15 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
         args = ["+block_case", f"+case_id_width={id_width}", f"+case_name={name}",
                 f"+mode={selected}", f"+seed={seed}", f"+random_case={int(case.get('random', False))}"]
         args += [f"+{key}={case.get(key, defaults.get(key, 0))}" for key in SCHEDULE]
+        if profile == "cosim":
+            args = [f"+case_name={name}", f"+seed={seed}",
+                    f"+min_outstanding={case.get('min_outstanding', 1)}",
+                    f"+min_unique={case.get('min_unique', 1)}",
+                    f"+backpressure={int(name == 'backpressure')}"]
         (target / "schedule.txt").write_text("\n".join(args) + "\n")
         (target / "manifest.json").write_text(json.dumps(dict(case=name, mode=selected, seed=seed,
-                                                              id_width=id_width, coverage=coverage), indent=2)+"\n")
+                                                              id_width=id_width, coverage=coverage,
+                                                              **({"profile": profile} if profile == "cosim" else {})), indent=2)+"\n")
     (out / "cases.list").write_text("\n".join(names) + "\n")
     return names
 
@@ -145,5 +171,6 @@ if __name__ == "__main__":
     parser.add_argument("--case", dest="case_name")
     parser.add_argument("--mode", choices=("auto", "control", "data", "rand"), default="auto")
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--profile", choices=("standalone", "cosim"), default="standalone")
     args = parser.parse_args()
-    generate(args.out, args.topology, args.id_width, args.catalog, args.mode, args.seed, args.case_name)
+    generate(args.out, args.topology, args.id_width, args.catalog, args.mode, args.seed, args.case_name, args.profile)

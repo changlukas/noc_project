@@ -1,0 +1,44 @@
+[
+  {
+    "path": "build/dpi_3d223268b2ff/libnmu_cmodel.so",
+    "sha256": "b4eacba6139b468691c890de702c5ec92a712b5f470b7f5f08653c7a42f99196",
+    "size": 12988400,
+    "mtime": 1790170879.3665185
+  },
+  {
+    "path": "build/dpi/libnmu_cmodel.so",
+    "sha256": "b4eacba6139b468691c890de702c5ec92a712b5f470b7f5f08653c7a42f99196",
+    "size": 12988400,
+    "mtime": 1790170879.3665185
+  },
+  {
+    "path": "build/vcs_wave0_bb7b95d73e37/simv",
+    "sha256": "673829fdeeb049adcaff95ed2a23e34daf06d4ba334488901a7a4cb910fb398c",
+    "size": 848384,
+    "mtime": 1790172732.4174993
+  },
+  {
+    "path": "build/vcs_wave0_fa4f6c58f245/simv",
+    "sha256": "b70349cb907abbb54462756baff52b23bf0b386a10961b9cae1cee45529041ac",
+    "size": 848384,
+    "mtime": 1790171688.63451
+  },
+  {
+    "path": "build/vcs_wave1_04afc24109e6/simv",
+    "sha256": "9479ea8df0db8a58b5186472c70fb48aa505ea8733ded7e3ab14362b2e570b73",
+    "size": 937200,
+    "mtime": 1790172900.2134974
+  },
+  {
+    "path": "build/vcs_wave0/simv",
+    "sha256": "e2328d478f4aea6df02e6f56bdf0dbcd4ec12265b298429696b80bf7202249b4",
+    "size": 848384,
+    "mtime": 1790171185.4175153
+  },
+  {
+    "path": "build/report_wave1/data_write_burst.fsdb",
+    "sha256": "19631d4130ea5ae076a19f77768e7ac7e8fd76d804e61e1183690824c1223927",
+    "size": 156437,
+    "mtime": 1790172941.274497
+  }
+]

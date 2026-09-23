@@ -144,3 +144,34 @@ def test_mixed_performance_inputs(tmp_path):
         schedule = (tmp_path / name / "schedule.txt").read_text()
         for key in ("response_order", "response_delay", "startup_delay", "stall_enable", "reset_warmup"):
             assert "+" + key + "=0\n" in schedule
+
+
+@pytest.mark.parametrize("mode", ["control", "data", "rand"])
+def test_cosim_memory_dependencies(tmp_path, mode):
+    topology = REPO / "sim/cosim/nmu/topology.yml"
+    names = generate(tmp_path, topology, 3, mode=mode, profile="cosim")
+    assert "request_rand" in names
+    assert "same_id_cross_dst_reorder" not in names
+    assert "cross_id_out_of_order" not in names
+    for name in names:
+        writes = _parse_write(tmp_path / name / "write.txt")
+        reads = _parse_read(tmp_path / name / "read.txt")
+        assert len(writes) == len(reads) > 0
+        initialized = set()
+        for write, read in zip(writes, reads):
+            assert all(write[k] == read[k] for k in ("id", "addr", "len", "size", "burst"))
+            assert write["burst"] == 1
+            step = 1 << write["size"]
+            for beat, line in enumerate(write["beats"]):
+                address = write["addr"] + beat * step
+                assert address >> 12 == write["addr"] >> 12
+                byte_addresses = set(range(address, address + step))
+                assert not (initialized & byte_addresses)
+                initialized.update(byte_addresses)
+                strobe = int(line.split()[1], 16)
+                assert strobe == ((1 << step) - 1) << (address % 64)
+            assert write["addr"] + (write["len"] + 1) * step <= (
+                0x2001000 if write["addr"] >= 0x2000000 else 0x2000000)
+        schedule = (tmp_path / name / "schedule.txt").read_text()
+        assert "response_delay" not in schedule
+        assert f"+backpressure={int(name == 'backpressure')}" in schedule

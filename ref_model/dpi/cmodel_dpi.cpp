@@ -674,6 +674,15 @@ extern "C" unsigned long long cmodel_nsu_create(const char* name, int src_id, in
     DPI_BOUNDARY_END_R(cmodel_nsu_create);
 }
 
+extern "C" void cmodel_nsu_set_dat_credit_depth(unsigned long long ctx, int depth) {
+    DPI_BOUNDARY_BEGIN(cmodel_nsu_set_dat_credit_depth) {
+        REQUIRE_HANDLE(ctx, WrapType::Nsu, "cmodel_nsu_set_dat_credit_depth");
+        if (depth < 2) throw std::invalid_argument("DAT credit depth must be at least 2");
+        static_cast<NsuWrap*>(_h->adapter.get())->set_dat_credit_depth(static_cast<std::size_t>(depth));
+    }
+    DPI_BOUNDARY_END(cmodel_nsu_set_dat_credit_depth);
+}
+
 extern "C" void cmodel_nsu_set_channel_mode(unsigned long long ctx, int mode) {
     DPI_BOUNDARY_BEGIN(cmodel_nsu_set_channel_mode) {
         REQUIRE_HANDLE(ctx, WrapType::Nsu, "cmodel_nsu_set_channel_mode");
