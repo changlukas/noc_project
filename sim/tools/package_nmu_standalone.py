@@ -77,6 +77,7 @@ def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
             generate_standalone(root / "cases/standalone", repo / "sim/configs/mesh_2x2.yml", id_width)
         copy_path(repo / "sim/test_patterns/standalone/cases.json")
         copy_path(repo / "sim/test_patterns/standalone/in_order_perf.json")
+        copy_path(repo / "sim/test_patterns/standalone/out_of_order_perf.json")
         for name in ("gen_standalone_patterns.py", "axi_file_format.py"):
             copy_path(repo / "sim/tools" / name)
         import yaml
@@ -90,14 +91,14 @@ def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
         (root / "script").mkdir()
         shutil.copy2(repo / "sim/standalone/common/simulator.mk", root / "script/Makefile")
         shutil.copy2(repo / "sim/standalone/common/clean.sh", root / "script/clean.sh")
-        shutil.copy2(repo / "sim/standalone/nmu/in_order_perf.sh", root / "script/in_order_perf.sh")
+        shutil.copy2(repo / "sim/standalone/nmu/perf.sh", root / "script/perf.sh")
         shutil.copy2(repo / "sim/standalone/nmu/config.mk", root / "script/config.mk")
         (root / "script/nWaveLog").mkdir()
         shutil.copy2(repo / "sim/standalone/nmu/signals.rc", root / "script/nWaveLog/signals.rc")
         (root / "Makefile").write_text(
             ".DEFAULT_GOAL := help\n"
-            ".PHONY: help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report clean dat_regress in_order_perf list\n"
-            "help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report clean dat_regress in_order_perf:\n"
+            ".PHONY: help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report clean dat_regress in_order_perf out_of_order_perf list\n"
+            "help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report clean dat_regress in_order_perf out_of_order_perf:\n"
             "\t$(MAKE) --no-print-directory -C script $@\n"
             "list:\n\t@cat pattern_list.txt\n")
         descriptions = {

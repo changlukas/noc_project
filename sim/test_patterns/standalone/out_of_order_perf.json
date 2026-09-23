@@ -1,0 +1,141 @@
+{
+  "version": 2,
+  "cases": [
+    {
+      "name": "ooo_control_read_cross_id",
+      "mode": "control",
+      "operation": "read",
+      "count": 8,
+      "burst_beats": 8,
+      "response_delay": 0,
+      "startup_delay": 200,
+      "response_order": 2,
+      "ids": "multiple"
+    },
+    {
+      "name": "ooo_control_read_same_id",
+      "mode": "control",
+      "operation": "read",
+      "count": 8,
+      "burst_beats": 8,
+      "response_delay": 0,
+      "startup_delay": 200,
+      "response_order": 1,
+      "destinations": "alternate"
+    },
+    {
+      "name": "ooo_control_read_mixed_id",
+      "mode": "control",
+      "operation": "read",
+      "count": 16,
+      "burst_beats": 8,
+      "response_delay": 0,
+      "startup_delay": 200,
+      "response_order": 1,
+      "ids": "multiple",
+      "destinations": "random"
+    },
+    {
+      "name": "ooo_control_write_cross_id",
+      "mode": "control",
+      "operation": "write",
+      "count": 8,
+      "burst_beats": 8,
+      "response_delay": 0,
+      "startup_delay": 200,
+      "response_order": 2,
+      "ids": "multiple"
+    },
+    {
+      "name": "ooo_control_write_same_id",
+      "mode": "control",
+      "operation": "write",
+      "count": 8,
+      "burst_beats": 8,
+      "response_delay": 0,
+      "startup_delay": 200,
+      "response_order": 1,
+      "destinations": "alternate"
+    },
+    {
+      "name": "ooo_control_write_mixed_id",
+      "mode": "control",
+      "operation": "write",
+      "count": 16,
+      "burst_beats": 8,
+      "response_delay": 0,
+      "startup_delay": 200,
+      "response_order": 1,
+      "ids": "multiple",
+      "destinations": "random"
+    },
+    {
+      "name": "ooo_data_read_cross_id",
+      "mode": "data",
+      "operation": "read",
+      "count": 8,
+      "burst_beats": 8,
+      "response_delay": 0,
+      "startup_delay": 200,
+      "response_order": 2,
+      "ids": "multiple"
+    },
+    {
+      "name": "ooo_data_read_same_id",
+      "mode": "data",
+      "operation": "read",
+      "count": 8,
+      "burst_beats": 8,
+      "response_delay": 0,
+      "startup_delay": 200,
+      "response_order": 1,
+      "destinations": "alternate"
+    },
+    {
+      "name": "ooo_data_read_mixed_id",
+      "mode": "data",
+      "operation": "read",
+      "count": 16,
+      "burst_beats": 8,
+      "response_delay": 0,
+      "startup_delay": 200,
+      "response_order": 1,
+      "ids": "multiple",
+      "destinations": "random"
+    },
+    {
+      "name": "ooo_data_write_cross_id",
+      "mode": "data",
+      "operation": "write",
+      "count": 8,
+      "burst_beats": 8,
+      "response_delay": 0,
+      "startup_delay": 200,
+      "response_order": 2,
+      "ids": "multiple"
+    },
+    {
+      "name": "ooo_data_write_same_id",
+      "mode": "data",
+      "operation": "write",
+      "count": 8,
+      "burst_beats": 8,
+      "response_delay": 0,
+      "startup_delay": 200,
+      "response_order": 1,
+      "destinations": "alternate"
+    },
+    {
+      "name": "ooo_data_write_mixed_id",
+      "mode": "data",
+      "operation": "write",
+      "count": 16,
+      "burst_beats": 8,
+      "response_delay": 0,
+      "startup_delay": 200,
+      "response_order": 1,
+      "ids": "multiple",
+      "destinations": "random"
+    }
+  ]
+}

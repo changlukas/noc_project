@@ -63,6 +63,8 @@ module tb_nmu_standalone #(
     bit warmup          = 1;
     bit block_case      = 0;
     bit perf_in_order   = 0;
+    bit perf_out_of_order = 0;
+    wire perf_active = perf_in_order || perf_out_of_order;
     string case_name    = "legacy";
     int response_order  = 1, response_delay = 12, startup_delay = 0;
     int stall_enable    = 1, reset_warmup = 1;
@@ -390,7 +392,7 @@ module tb_nmu_standalone #(
         end
     end
     task automatic send_rsp(input rsp_flit_t value);
-        if (!perf_in_order || noc_clk !== 1'b0) @(negedge noc_clk);
+        if (!perf_active || noc_clk !== 1'b0) @(negedge noc_clk);
         rsp = value; rsp_valid = 1;
         do @(posedge noc_clk); while (!rsp_ready);
         @(negedge noc_clk); rsp_valid = 0;
@@ -398,7 +400,7 @@ module tb_nmu_standalone #(
     task automatic send_dat(input dat_flit_t value);
         int vc;
         vc = int'(value.header[VC_ID_LSB +: VC_ID_WIDTH]);
-        if (!perf_in_order || noc_clk !== 1'b0) @(negedge noc_clk);
+        if (!perf_active || noc_clk !== 1'b0) @(negedge noc_clk);
         while (rx_available[vc] == 0) @(negedge noc_clk);
         rx_dat       = value;
         rx_dat_valid = 1;
@@ -435,7 +437,7 @@ module tb_nmu_standalone #(
         wait(noc_rst_n && !warmup);
         repeat (startup_delay) @(negedge noc_clk);
         forever begin
-            if (perf_in_order) begin
+            if (perf_active) begin
                 while (pending_b.size() == 0 && pending_r.size() == 0) @(negedge noc_clk);
             end else repeat (response_delay) @(negedge noc_clk);
             if (pending_b.size() != 0) begin
@@ -564,6 +566,14 @@ module tb_nmu_standalone #(
             master.load_files({stim_dir,"/read.txt"}, {stim_dir,"/write.txt"});
         end
         perf_in_order = $test$plusargs("perf_in_order");
+        perf_out_of_order = $test$plusargs("perf_out_of_order");
+        if (perf_out_of_order) begin
+            if (!block_case || perf_in_order || stall_enable != 0 || reset_warmup != 0 ||
+                NOC_HALF_PERIOD != 5 || !R_ROB_EN || response_order == 0)
+                $fatal(1, "out-of-order measurement requires reordering, no stalls, equal clocks");
+            if ((master.aw_queue.size() == 0) == (master.ar_queue.size() == 0))
+                $fatal(1, "out-of-order measurement requires one active direction");
+        end
         if (perf_in_order) begin
             if (!block_case || response_order != 0 || startup_delay != 0 ||
                 stall_enable != 0 || reset_warmup != 0 || NOC_HALF_PERIOD != 5)
@@ -685,6 +695,10 @@ module tb_nmu_standalone #(
             $display("COVER case=%s peak_W=%0d peak_R=%0d unique_W=%0d unique_R=%0d blocked_AW=%0d blocked_AR=%0d ooo_B=%0d ooo_R=%0d",
                 case_name,peak_w,peak_r,peak_unique_w,peak_unique_r,blocked_aw,blocked_ar,reordered_b,reordered_r);
         end
+        if (perf_out_of_order && reordered_sent == 0)
+            $fatal(1, "out-of-order measurement did not reorder responses");
+        if (perf_out_of_order && response_order == 1 && b_buffered == 0 && r_buffered == 0)
+            $fatal(1, "out-of-order measurement did not exercise ROB storage");
         if (perf_in_order && (b_buffered != 0 || r_buffered != 0 || reordered_sent != 0))
             $fatal(1, "performance baseline used response reordering");
         $display("COVER buffer full B=%0d R=%0d", b_full_cycles, r_full_cycles);
@@ -710,15 +724,21 @@ module tb_nmu_standalone #(
         if ($value$plusargs("perf_trace=%s", path)) begin
             perf_fd = $fopen(path, "w");
             if (perf_fd == 0) $fatal(1, "cannot open performance trace");
-            $fdisplay(perf_fd, "cycle,aw_v,aw_r,w_v,w_r,ar_v,ar_r,b_v,b_r,r_v,r_r,fifo_aw_v,fifo_aw_r,fifo_w_v,fifo_w_r,fifo_ar_v,fifo_ar_r,pkt_aw_v,pkt_aw_r,pkt_w_v,pkt_w_r,pkt_ar_v,pkt_ar_r,req_v,req_r,req_ch,dat_v,dat_ch,rsp_v,rsp_r,rx_dat_v,owner_empty,owner_full,cw_full,dw_full,ar_full,aw_admit,ar_admit,db_v,db_r,dr_v,dr_r,ob_v,ob_r,or_v,or_r");
+            $fdisplay(perf_fd, "cycle,aw_v,aw_r,w_v,w_r,ar_v,ar_r,b_v,b_r,r_v,r_r,fifo_aw_v,fifo_aw_r,fifo_w_v,fifo_w_r,fifo_ar_v,fifo_ar_r,pkt_aw_v,pkt_aw_r,pkt_w_v,pkt_w_r,pkt_ar_v,pkt_ar_r,req_v,req_r,req_ch,dat_v,dat_ch,rsp_v,rsp_r,rx_dat_v,owner_empty,owner_full,cw_full,dw_full,ar_full,aw_admit,ar_admit,db_v,db_r,dr_v,dr_r,ob_v,ob_r,or_v,or_r,b_free,r_free,b_sel,r_sel,b_direct,r_direct,b_fill_ready,r_fill_ready,b_tagged,r_tagged,b_id,r_id,b_retire_id,r_retire_id,b_pending,r_pending");
         end
     end
     always @(posedge noc_clk) begin
-        if (perf_in_order && noc_rst_n && !warmup) begin
-            if ((dut.i_response_path.i_ordering.aw_accept && dut.i_response_path.i_ordering.aw_reorder) ||
-                (dut.i_response_path.i_ordering.ar_accept && dut.i_response_path.i_ordering.ar_reorder))
+        if (perf_active && noc_rst_n && !warmup) begin
+            if (perf_in_order && ((dut.i_response_path.i_ordering.aw_accept && dut.i_response_path.i_ordering.aw_reorder) ||
+                (dut.i_response_path.i_ordering.ar_accept && dut.i_response_path.i_ordering.ar_reorder)))
                 $fatal(1, "performance baseline allocated ROB storage");
-            if (perf_fd != 0) $fdisplay(perf_fd, "%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d",
+            if (perf_out_of_order &&
+                ((dut.i_response_path.i_ordering.s_aw_valid_i && dut.i_response_path.i_ordering.aw_reorder &&
+                  dut.i_response_path.i_ordering.b_free_cnt == 0) ||
+                 (dut.i_response_path.i_ordering.s_ar_valid_i && dut.i_response_path.i_ordering.ar_reorder &&
+                  dut.i_response_path.i_ordering.r_free_cnt < dut.i_response_path.i_ordering.ar_beat_cnt)))
+                $fatal(1, "out-of-order measurement encountered ROB allocation shortage");
+            if (perf_fd != 0) $fdisplay(perf_fd, "%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d",
                 perf_cycle, bus.awvalid,
                 bus.awready,
                 bus.wvalid,
@@ -763,7 +783,23 @@ module tb_nmu_standalone #(
                 dut.i_response_path.ordered_b_valid,
                 dut.i_response_path.ordered_b_ready,
                 dut.i_response_path.ordered_r_valid,
-                dut.i_response_path.ordered_r_ready);
+                dut.i_response_path.ordered_r_ready,
+                dut.i_response_path.i_ordering.b_free_cnt,
+                dut.i_response_path.i_ordering.r_free_cnt,
+                dut.i_response_path.i_ordering.b_sel_valid,
+                dut.i_response_path.i_ordering.r_sel_valid,
+                dut.i_response_path.i_ordering.b_direct,
+                dut.i_response_path.i_ordering.r_direct,
+                dut.i_response_path.i_ordering.b_storage_wr_ready,
+                dut.i_response_path.i_ordering.r_storage_wr_ready,
+                dut.i_response_path.i_ordering.s_b_i.meta.ordering_req,
+                dut.i_response_path.i_ordering.s_r_i.meta.ordering_req,
+                dut.i_response_path.i_ordering.s_b_i.axi.bid,
+                dut.i_response_path.i_ordering.s_r_i.axi.rid,
+                dut.i_response_path.i_ordering.b_retire_id,
+                dut.i_response_path.i_ordering.r_retire_id,
+                |dut.i_response_path.i_ordering.b_complete,
+                |dut.i_response_path.i_ordering.r_complete);
             perf_cycle++;
         end
     end

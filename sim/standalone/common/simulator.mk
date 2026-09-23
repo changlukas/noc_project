@@ -63,6 +63,7 @@ help:
 	 'make sim CASE=ctrl_read_burst       Reuse existing executable' \
 	 'make regress                       Compile once, all standalone cases and fault check' \
 	 'make in_order_perf                 In-order read/write performance without ROB allocation' \
+	 'make out_of_order_perf             Reordering with ROB allocation-space checks' \
 	 'make legacy_regress                Retained topology traffic and mixed tests' \
 	 'make run_wave CASE=same_id_cross_dst_reorder' \
 	 'make nWave CASE=same_id_cross_dst_reorder  (load signal groups)' \
@@ -183,4 +184,8 @@ dat_regress:
 
 .PHONY: in_order_perf
 in_order_perf: compile
-	bash "$(script_dir)/in_order_perf.sh" "$(package_dir)" "$(run_dir)" "$(PYTHON)" "$(wave_ext)" "$(ID_WIDTH)"
+	bash "$(script_dir)/perf.sh" "$(package_dir)" "$(run_dir)" "$(PYTHON)" "$(wave_ext)" "$(ID_WIDTH)"
+
+.PHONY: out_of_order_perf
+out_of_order_perf: compile
+	bash "$(script_dir)/perf.sh" "$(package_dir)" "$(run_dir)" "$(PYTHON)" "$(wave_ext)" "$(ID_WIDTH)" out_of_order

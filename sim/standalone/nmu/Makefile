@@ -41,3 +41,7 @@ dat_regress: prepare
 .PHONY: in_order_perf
 in_order_perf: prepare
 	$(MAKE) -C "$(stage)/script" in_order_perf SIMULATOR=$(SIMULATOR)
+
+.PHONY: out_of_order_perf
+out_of_order_perf: prepare
+	$(MAKE) -C "$(stage)/script" out_of_order_perf SIMULATOR=$(SIMULATOR)

@@ -102,3 +102,26 @@ def test_in_order_performance_inputs(tmp_path):
         schedule = (tmp_path / name / "schedule.txt").read_text()
         for key in ("response_order", "response_delay", "startup_delay", "stall_enable", "reset_warmup"):
             assert "+" + key + "=0\n" in schedule
+
+
+def test_out_of_order_performance_capacity(tmp_path):
+    catalog = REPO / "sim/test_patterns/standalone/out_of_order_perf.json"
+    names = generate(tmp_path, REPO / "sim/configs/mesh_2x2.yml", catalog=catalog)
+    assert len(names) == 12
+    for name in names:
+        writes = _parse_write(tmp_path / name / "write.txt")
+        reads = _parse_read(tmp_path / name / "read.txt")
+        assert bool(writes) != bool(reads)
+        txns = writes + reads
+        assert len(txns) == (16 if name.endswith("mixed_id") else 8)
+        assert all(t["len"] == 7 and t["burst"] == 1 for t in txns)
+        ids = {t["id"] for t in txns}
+        assert len(ids) == (1 if name.endswith("same_id") else 8)
+        # At most all but the first request per ID need ROB entries.
+        assert (len(txns) - len(ids))*8 < 128
+        assert max(sum(t["id"] == i for t in txns) for i in ids) < 32
+        if name.endswith("mixed_id"):
+            assert any(txns[i]["addr"] >> 32 != txns[i+8]["addr"] >> 32 for i in range(8))
+        schedule = (tmp_path / name / "schedule.txt").read_text()
+        for key in ("response_delay", "stall_enable", "reset_warmup"):
+            assert "+" + key + "=0\n" in schedule
