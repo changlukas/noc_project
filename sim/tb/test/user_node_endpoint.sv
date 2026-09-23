@@ -28,10 +28,10 @@
 
 module user_node_endpoint #(
     parameter int unsigned NODE_ID      = 0,
-    parameter int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_ID_WIDTH_DFLT,
-    parameter int unsigned NOC_ID_WIDTH = ni_params_pkg::NOC_ID_WIDTH_DFLT,
-    parameter int unsigned ADDR_WIDTH   = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
-    parameter int unsigned DATA_WIDTH   = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
+    parameter int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_ID_WIDTH,
+    parameter int unsigned NOC_ID_WIDTH = ni_params_pkg::NOC_ID_WIDTH,
+    parameter int unsigned ADDR_WIDTH   = ni_params_pkg::AXI_ADDR_WIDTH,
+    parameter int unsigned DATA_WIDTH   = ni_params_pkg::AXI_DATA_WIDTH,
     // THIS node's own crossbar windows, stamped by gen_tb_top.py from the
     // config file (address_map.node_windows). Port order and field packing
     // are ONE coupled invariant: field t is target t, m0 = config, LAST = data.
@@ -74,7 +74,7 @@ module user_node_endpoint #(
     // AWUSER width (see nmu_wrap.sv AWUSER_WIDTH). Master-side DV interfaces
     // carry it (stimulus user field = AWUSER); the flat axi_req_t struct has no
     // awuser member, so it leaves on the dedicated port below.
-    parameter int unsigned AWUSER_WIDTH = ni_params_pkg::AXI_AWUSER_WIDTH_DFLT
+    parameter int unsigned AWUSER_WIDTH = ni_params_pkg::AXI_AWUSER_WIDTH
 ) (
     input  logic                       clk_i,
     input  logic                       rst_ni,
@@ -437,7 +437,7 @@ module user_node_endpoint #(
     // Crossbar sizing. Testbench limits, provisioned so none of them becomes the
     // bottleneck: the pressure is supposed to come from the fabric, or from the
     // tile memory's delayer. MaxMstTrans 64 is what one initiator may have in flight, above
-    // NMU_MAX_TXNS_PER_ID (32): under hotspot every node targets one tile, so sizing at that
+    // MAX_OUTSTANDING_PER_ID (32): under hotspot every node targets one tile, so sizing at that
     // depth would throttle; overflow stalls, it never errors. MaxSlvTrans 32 is the
     // per-target in-flight limit -- deliberately NOT 1 on the config port: the
     // memory backpressures itself and the crossbar should not second-guess a
@@ -597,7 +597,7 @@ module user_node_endpoint #(
     axi_id_remap_intf #(
         .AXI_SLV_PORT_ID_WIDTH(XBAR_MST_ID_W),
         .AXI_SLV_PORT_MAX_UNIQ_IDS(NOC_MAX_UNIQ_IDS),
-        .AXI_MAX_TXNS_PER_ID(ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT),
+        .AXI_MAX_TXNS_PER_ID(ni_params_pkg::NMU_MAX_OUTSTANDING_PER_ID),
         .AXI_MST_PORT_ID_WIDTH(NOC_ID_WIDTH),
         .AXI_ADDR_WIDTH(ADDR_WIDTH),
         .AXI_DATA_WIDTH(DATA_WIDTH),

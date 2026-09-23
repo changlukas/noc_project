@@ -3,7 +3,7 @@ module tb_nmu_standalone #(
     parameter int ID_WIDTH = 8,
     parameter int NOC_HALF_PERIOD = 5,
     parameter int BUFFER_DEPTH = 128,
-    parameter bit READ_ROB_ENABLED = 1
+    parameter bit R_ROB_EN = 1
 );
     import ni_flit_pkg::*;
 `ifdef DUMP_WAVE
@@ -125,8 +125,8 @@ module tb_nmu_standalone #(
     assign vip.r_resp = bus.rresp;
     assign vip.r_last = bus.rlast;
     assign vip.r_user = '0;
-    nmu #(.AXI_ID_WIDTH(ID_WIDTH), .READ_ROB_ENABLED(READ_ROB_ENABLED),
-        .NMU_ROB_B_DEPTH(BUFFER_DEPTH), .NMU_ROB_R_DEPTH(BUFFER_DEPTH)) dut (
+    nmu #(.AXI_ID_WIDTH(ID_WIDTH), .R_ROB_EN(R_ROB_EN),
+        .B_ROB_DEPTH(BUFFER_DEPTH), .R_ROB_DEPTH(BUFFER_DEPTH)) dut (
         .ACLK(axi_clk), .ARESETn(axi_rst_n), .noc_clk(noc_clk), .noc_rst_n(noc_rst_n),
         .axi_wr_i(bus), .axi_rd_i(bus), .tx_req_valid_o(req_valid),
         .tx_req_flit_o(req), .tx_req_ready_i(req_ready),
@@ -195,7 +195,7 @@ module tb_nmu_standalone #(
         if (noc_rst_n && !warmup) begin
 
             if (dut.i_response_path.i_ordering.b_free_cnt == 0) b_full_cycles++;
-            if (READ_ROB_ENABLED && dut.i_response_path.i_ordering.r_free_cnt == 0) r_full_cycles++;
+            if (R_ROB_EN && dut.i_response_path.i_ordering.r_free_cnt == 0) r_full_cycles++;
             if (dat_valid) $fatal(1, "control-plane test unexpectedly used DAT");
             if (dut.i_response_path.i_ordering.s_b_valid_i && dut.i_response_path.i_ordering.s_b_ready_o && !dut.i_response_path.i_ordering.b_direct)
                 b_buffered = b_buffered + 1;
@@ -454,7 +454,7 @@ module tb_nmu_standalone #(
         warm_aw.ax_size = 3; warm_aw.ax_burst = 1;
         warm_ar.ax_size = 3; warm_ar.ax_burst = 1;
         warm_w.w_last = 1;
-        if (READ_ROB_ENABLED) begin
+        if (R_ROB_EN) begin
             fork
                 master.drv.send_aw(warm_aw);
                 master.drv.send_w(warm_w);
@@ -477,7 +477,7 @@ module tb_nmu_standalone #(
             send_rsp(warm_rsp);
         end
         repeat (40) @(negedge noc_clk);
-        if (READ_ROB_ENABLED &&
+        if (R_ROB_EN &&
             (dut.i_response_path.i_ordering.b_complete == '0 || dut.i_response_path.i_ordering.r_complete == '0))
             $fatal(1, "reset did not cover occupied B/R reorder storage");
         if (warm_requests == 0) $fatal(1, "reset warmup did not reach NMU egress");
@@ -496,7 +496,7 @@ module tb_nmu_standalone #(
             w_index != expected_w.size() || pending_b.size() != 0 || pending_r.size() != 0)
             $fatal(1, "incomplete transaction drain");
         if ($test$plusargs("require_reorder") &&
-            (b_buffered == 0 || (READ_ROB_ENABLED && r_buffered == 0)))
+            (b_buffered == 0 || (R_ROB_EN && r_buffered == 0)))
             $fatal(1, "reorder coverage was vacuous B=%0d R=%0d", b_buffered, r_buffered);
         for (int i = 0; i < 256; i++)
             if (live_w[i] != 0 || live_r[i] != 0) $fatal(1, "live ID leaked");
@@ -510,14 +510,14 @@ module tb_nmu_standalone #(
                 $fatal(1, "outstanding coverage missing");
             if (require_ooo != 0 && (reordered_b == 0 || reordered_r == 0))
                 $fatal(1, "cross-ID out-of-order coverage missing");
-            if (require_buffered != 0 && (b_buffered == 0 || (READ_ROB_ENABLED && r_buffered == 0)))
+            if (require_buffered != 0 && (b_buffered == 0 || (R_ROB_EN && r_buffered == 0)))
                 $fatal(1, "B/R reorder coverage missing");
             if (require_stall != 0 && stall_cycles == 0) $fatal(1, "response stall coverage missing");
             if (require_capacity != 0) begin
                 if (blocked_aw == 0 || blocked_ar == 0) $fatal(1, "admission pressure missing");
                 if (ID_WIDTH == 8 && (id_exhaustion_w == 0 || id_exhaustion_r == 0))
                     $fatal(1, "ID exhaustion/recovery coverage missing");
-                if (BUFFER_DEPTH == 8 && READ_ROB_ENABLED && (b_full_cycles == 0 || r_full_cycles == 0))
+                if (BUFFER_DEPTH == 8 && R_ROB_EN && (b_full_cycles == 0 || r_full_cycles == 0))
                     $fatal(1, "B/R pool capacity coverage missing");
             end
             $display("COVER case=%s peak_W=%0d peak_R=%0d unique_W=%0d unique_R=%0d blocked_AW=%0d blocked_AR=%0d ooo_B=%0d ooo_R=%0d",

@@ -660,7 +660,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
     # tile owns two, and tile_targets pads the short rows out to this width.
     n_targets = max(len(w) for w in per_node.values())
     # ADDR_WIDTH'(...) casts, not sized literals: the field width has to follow
-    # ni_params_pkg::AXI_ADDR_WIDTH_DFLT, or a width change would silently
+    # ni_params_pkg::AXI_ADDR_WIDTH, or a width change would silently
     # mis-align the concatenation.
     def _rows(key):
         return ", ".join(
@@ -716,25 +716,25 @@ def emit_tb_top(topo: dict, dma: bool = False,
         w("    // endpoint but no router. Each carries stimulus of its own, so the exit")
         w("    // logic gates on all of them.")
         w(f"    localparam int unsigned NUM_ENDPOINTS = {n_ep};")
-    w("    localparam int unsigned AXI_ID_WIDTH  = ni_params_pkg::AXI_ID_WIDTH_DFLT;")
-    w("    localparam int unsigned NOC_ID_WIDTH  = ni_params_pkg::NOC_ID_WIDTH_DFLT;")
-    w("    localparam int unsigned ADDR_WIDTH    = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;")
-    w("    localparam int unsigned DATA_WIDTH    = ni_params_pkg::AXI_DATA_WIDTH_DFLT;")
-    w(f"    localparam int unsigned DAT_NUM_VC     = {dat_num_vc};"
+    w("    localparam int unsigned AXI_ID_WIDTH  = ni_params_pkg::AXI_ID_WIDTH;")
+    w("    localparam int unsigned NOC_ID_WIDTH  = ni_params_pkg::NOC_ID_WIDTH;")
+    w("    localparam int unsigned ADDR_WIDTH    = ni_params_pkg::AXI_ADDR_WIDTH;")
+    w("    localparam int unsigned DATA_WIDTH    = ni_params_pkg::AXI_DATA_WIDTH;")
+    w(f"    localparam int unsigned NUM_DAT_VC     = {dat_num_vc};"
       "  // specgen constants.yaml noc.DAT_NUM_VC")
     w("    // NMU read reorder buffer: 1 = the reorder-buffer response path")
     w("    // docs/noc-target-spec.md section 3 describes, 0 = the RoBless bypass with")
     w("    // its per-id single-outstanding interlock. int unsigned, not bit: it goes")
     w("    // straight into cmodel_nmu_create_ex's `input int rob_enabled`.")
-    w(f"    localparam int unsigned READ_ROB_ENABLED = {1 if rob_enabled else 0};"
+    w(f"    localparam int unsigned R_ROB_EN = {1 if rob_enabled else 0};"
       "  // specgen constants.yaml nmu.READ_ROB_ENABLED")
-    w("    localparam int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT;")
-    w("    localparam int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT;")
-    w("    localparam int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT;")
+    w("    localparam int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH;")
+    w("    localparam int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH;")
+    w("    localparam int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH;")
     w("    // ROUTER_VC_DEPTH: credit window for inter-router links; passed to fabric so")
     w("    // link_perf_monitor tracks the actual receiving buffer depth.")
     w("    localparam int unsigned ROUTER_VC_DEPTH       = "
-      "ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT;")
+      "ni_params_pkg::NOC_ROUTER_VC_DEPTH;")
     w("    // Tile crossbar windows, one field per target in port order (m0 =")
     w("    // config, last = data), one row per node. Each endpoint decodes on its")
     w("    // OWN windows: a hit is tile-local and never touches the NoC, a miss")
@@ -926,14 +926,14 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w("    // NSU knobs. max_unique_ids=1 collapses every master onto one downstream")
     w("    // AXI id (FlooNoC default); 2**AXI_ID_WIDTH passes the master's id through.")
     w("    // max_outstanding is the shared MetaBuffer pool per direction.")
-    w("    int unsigned max_unique_ids  = ni_params_pkg::NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT;")
-    w("    int unsigned max_outstanding = ni_params_pkg::NSU_META_BUFFER_MAX_OUTSTANDING_DFLT;")
+    w("    int unsigned max_unique_ids  = ni_params_pkg::NSU_META_BUFFER_MAX_UNIQUE_IDS;")
+    w("    int unsigned max_outstanding = ni_params_pkg::NSU_META_BUFFER_MAX_OUTSTANDING;")
     w("")
     w("    // NMU RoB pool depths, per direction. Both <= 256 (ordering_tag is 8 bits).")
-    w("    int unsigned b_rob_depth = ni_params_pkg::NMU_ROB_B_DEPTH_DFLT;")
-    w("    int unsigned r_rob_depth = ni_params_pkg::NMU_ROB_R_DEPTH_DFLT;")
+    w("    int unsigned b_rob_depth = ni_params_pkg::NMU_ROB_B_DEPTH;")
+    w("    int unsigned r_rob_depth = ni_params_pkg::NMU_ROB_R_DEPTH;")
     w("    // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId).")
-    w("    int unsigned max_txns_per_id = ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT;")
+    w("    int unsigned max_txns_per_id = ni_params_pkg::NMU_MAX_OUTSTANDING_PER_ID;")
     w("")
 
     # cmodel_init (no-arg) + per-node router/nmu/nsu create.
@@ -951,7 +951,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
         w('        void\'($value$plusargs("max_txns_per_id=%d", max_txns_per_id));')
     for (i, x, y, _c) in nodes:
         w(f'        router_ctx[{i}] = cmodel_router_create("router_{i}", {x}, {y}, '
-          f'{x_dim}, {y_dim}, DAT_NUM_VC);')
+          f'{x_dim}, {y_dim}, NUM_DAT_VC);')
     # NI creates cover the ENDPOINT space: the routers first, then one per
     # peripheral. src_id is the route coordinate the topology states for it --
     # that id is stamped into every request the endpoint emits and is what its
@@ -960,13 +960,13 @@ def emit_tb_top(topo: dict, dma: bool = False,
     # port the SAM entry for this endpoint's region carries.
     for (i, x, y, c, port) in endpoints:
         which = f"node{i}, port 0 = LOCAL" if port == 0 else f"peripheral{i - n}, port {port}"
-        w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, DAT_NUM_VC, '
-          f'READ_ROB_ENABLED, b_rob_depth, r_rob_depth, max_txns_per_id, {port}, '
+        w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, NUM_DAT_VC, '
+          f'R_ROB_EN, b_rob_depth, r_rob_depth, max_txns_per_id, {port}, '
           f'sam_config_path);  '
           f'// src_id = coord {c}, {which}')
-        w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, DAT_NUM_VC, max_unique_ids, '
+        w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, NUM_DAT_VC, max_unique_ids, '
           f'max_outstanding, {port}, sam_config_path);')
-        w(f'        dat_merge_ctx[{i}] = cmodel_dat_merge_create("dat_merge_{i}", DAT_NUM_VC);')
+        w(f'        dat_merge_ctx[{i}] = cmodel_dat_merge_create("dat_merge_{i}", NUM_DAT_VC);')
     w("    end")
     w("")
 
@@ -976,7 +976,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w("    // Per-node AXI buses (struct arrays): master-side into NMU, slave-side out of NSU")
     w("    // -------------------------------------------------------------------------")
     w(f"    ni_signals_pkg::axi_req_t  master_axi_req [{n_ep}];  // tb master -> NMU")
-    w(f"    logic [ni_params_pkg::AXI_AWUSER_WIDTH_DFLT-1:0] master_awuser [{n_ep}];  // AWUSER sideband")
+    w(f"    logic [ni_params_pkg::AXI_AWUSER_WIDTH-1:0] master_awuser [{n_ep}];  // AWUSER sideband")
     w(f"    ni_signals_pkg::axi_rsp_t  master_axi_rsp [{n_ep}];  // NMU -> tb master")
     w(f"    ni_signals_pkg::axi_req_t  slave_axi_req  [{n_ep}];  // NSU -> tb slave")
     w(f"    ni_signals_pkg::axi_rsp_t  slave_axi_rsp  [{n_ep}];  // tb slave -> NSU")
@@ -990,7 +990,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w("    noc_fabric #(")
     w(f"        .X_DIM({x_dim}), .Y_DIM({y_dim}),")
     w("        .ID_WIDTH(NOC_ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
-    w("        .DAT_NUM_VC(DAT_NUM_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),")
+    w("        .NUM_DAT_VC(NUM_DAT_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),")
     w("        .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH),")
     if peripherals:
         w("        .ROUTER_VC_DEPTH(ROUTER_VC_DEPTH),")
@@ -1480,12 +1480,12 @@ def emit_topology_pkg(topo: dict) -> str:
     w(f"    localparam int unsigned NUM_ENDPOINTS = {n_ep};")
     w("    localparam int unsigned ADDR_WIDTH = ni_flit_pkg::AXI_ADDR_WIDTH;")
     w(f"    localparam int unsigned SAM_NUM_RULES = {len(sam_rules)};")
-    w("    localparam int unsigned SAM_MASK_SEL_WIDTH = $clog2(ADDR_WIDTH + 1);")
+    w("    localparam int unsigned SAM_MASK_SEL_FIELD_W = $clog2(ADDR_WIDTH + 1);")
     w("")
     w("    typedef logic [ADDR_WIDTH-1:0] sam_addr_t;")
     w("    typedef struct packed {")
-    w("        logic [SAM_MASK_SEL_WIDTH-1:0] offset;")
-    w("        logic [SAM_MASK_SEL_WIDTH-1:0] len;")
+    w("        logic [SAM_MASK_SEL_FIELD_W-1:0] offset;")
+    w("        logic [SAM_MASK_SEL_FIELD_W-1:0] len;")
     w("    } sam_mask_sel_t;")
     w("    typedef struct packed {")
     w("        logic [ni_flit_pkg::DST_ID_WIDTH-1:0] dst_id;")
@@ -1494,9 +1494,9 @@ def emit_topology_pkg(topo: dict) -> str:
     w("        logic collective_en;")
     w("        sam_mask_sel_t mask_x;")
     w("        sam_mask_sel_t mask_y;")
-    w("    } sam_idx_t;")
+    w("    } sam_result_t;")
     w("    typedef struct packed {")
-    w("        sam_idx_t idx;")
+    w("        sam_result_t idx;")
     w("        sam_addr_t start_addr;")
     w("        sam_addr_t end_addr;")
     w("    } sam_rule_t;")
@@ -1511,10 +1511,10 @@ def emit_topology_pkg(topo: dict) -> str:
           f"dst_port_id: ni_flit_pkg::DST_PORT_ID_WIDTH'({rule['port']}), "
           f"is_data: 1'b{int(rule['space'] != 'config')}, "
           f"collective_en: 1'b{int(rule['collective_en'])}, "
-          f"mask_x: '{{offset: SAM_MASK_SEL_WIDTH'({rule['mask_x'][0]}), "
-          f"len: SAM_MASK_SEL_WIDTH'({rule['mask_x'][1]})}}, "
-          f"mask_y: '{{offset: SAM_MASK_SEL_WIDTH'({rule['mask_y'][0]}), "
-          f"len: SAM_MASK_SEL_WIDTH'({rule['mask_y'][1]})}}}}, "
+          f"mask_x: '{{offset: SAM_MASK_SEL_FIELD_W'({rule['mask_x'][0]}), "
+          f"len: SAM_MASK_SEL_FIELD_W'({rule['mask_x'][1]})}}, "
+          f"mask_y: '{{offset: SAM_MASK_SEL_FIELD_W'({rule['mask_y'][0]}), "
+          f"len: SAM_MASK_SEL_FIELD_W'({rule['mask_y'][1]})}}}}, "
           f"start_addr: ADDR_WIDTH'(64'h{rule['base']:012X}), "
           f"end_addr: ADDR_WIDTH'(64'h{rule['base'] + rule['size']:012X})}}{comma}")
     w("    };")

@@ -13,30 +13,30 @@ module nmu_sam #(
     parameter int unsigned SAM_NUM_RULES,
     parameter type         addr_t,
     parameter type         sam_mask_sel_t,
-    parameter type         sam_idx_t,
+    parameter type         sam_result_t,
     parameter type         sam_rule_t,
     parameter sam_rule_t [SAM_NUM_RULES-1:0] SAM
 ) (
-    input  wire logic                                  noc_clk_i,
-    input  wire logic                                  noc_rst_ni,
-    input  wire logic                                  s_aw_valid_i,
-    output wire logic                                  s_aw_ready_o,
-    input  wire ni_signals_pkg::axi_aw_t              s_aw_i,
-    output wire logic                                  m_aw_valid_o,
-    input  wire logic                                  m_aw_ready_i,
-    output wire ni_child_types_pkg::nmu_sam_aw_result_t m_aw_o,
-    input  wire logic                                  s_ar_valid_i,
-    output wire logic                                  s_ar_ready_o,
-    input  wire ni_signals_pkg::axi_ar_t               s_ar_i,
-    output wire logic                                  m_ar_valid_o,
-    input  wire logic                                  m_ar_ready_i,
-    output wire ni_child_types_pkg::nmu_sam_ar_result_t m_ar_o
+    input  wire logic                              noc_clk_i,
+    input  wire logic                              noc_rst_ni,
+    input  wire logic                              s_aw_valid_i,
+    output wire logic                              s_aw_ready_o,
+    input  wire ni_signals_pkg::axi_aw_t           s_aw_i,
+    output wire logic                              m_aw_valid_o,
+    input  wire logic                              m_aw_ready_i,
+    output wire ni_types_pkg::nmu_sam_aw_result_t  m_aw_o,
+    input  wire logic                              s_ar_valid_i,
+    output wire logic                              s_ar_ready_o,
+    input  wire ni_signals_pkg::axi_ar_t           s_ar_i,
+    output wire logic                              m_ar_valid_o,
+    input  wire logic                              m_ar_ready_i,
+    output wire ni_types_pkg::nmu_sam_ar_result_t  m_ar_o
 );
 
-    localparam int unsigned AXI_ADDR_W = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;
+    localparam int unsigned AXI_ADDR_W        = ni_params_pkg::AXI_ADDR_WIDTH;
     localparam int unsigned COLLECTIVE_MASK_W = ni_flit_pkg::COLLECTIVE_MASK_WIDTH;
     // Generated SAM ranges are 4 KiB aligned and sized.
-    localparam int unsigned SAM_REGION_ALIGN_W = 12;
+    localparam int unsigned SAM_ALIGN_BITS = 12;
 
     if (AW_SAM_REG_TYPE > 2) begin : gen_invalid_aw_reg_type
         initial $fatal(0, "Error: AW_SAM_REG_TYPE must be 0, 1, or 2 (instance %m)");
@@ -71,7 +71,7 @@ module nmu_sam #(
 
     function automatic logic [COLLECTIVE_MASK_W-1:0] collective_mask_from_address_mask(
         input logic [AXI_ADDR_W-1:0] address_mask,
-        input sam_idx_t               sam_idx
+        input sam_result_t               sam_idx
     );
         logic [COLLECTIVE_MASK_W-1:0] collective_mask;
 
@@ -116,14 +116,14 @@ module nmu_sam #(
 
         last_byte = burst_last_byte(addr, len, size, burst);
         return last_byte[AXI_ADDR_W] ||
-            last_byte[AXI_ADDR_W-1:SAM_REGION_ALIGN_W] !=
-                addr[AXI_ADDR_W-1:SAM_REGION_ALIGN_W];
+            last_byte[AXI_ADDR_W-1:SAM_ALIGN_BITS] !=
+                addr[AXI_ADDR_W-1:SAM_ALIGN_BITS];
     endfunction
 
     function automatic logic collective_error(
-        input logic [ni_params_pkg::AXI_AWUSER_WIDTH_DFLT-1:0] awuser,
+        input logic [ni_params_pkg::AXI_AWUSER_WIDTH-1:0] awuser,
         input logic                                            awlock,
-        input sam_idx_t                                        sam_idx
+        input sam_result_t                                        sam_idx
     );
         logic [AXI_ADDR_W-1:0] address_mask;
         logic [AXI_ADDR_W-1:0] allowed_address_mask;
@@ -140,47 +140,47 @@ module nmu_sam #(
         endcase
     endfunction
 
-    sam_idx_t aw_sam_idx;
+    sam_result_t aw_sam_idx;
     logic     aw_lookup_valid;
     logic     aw_lookup_error;
-    sam_idx_t ar_sam_idx;
+    sam_result_t ar_sam_idx;
     logic     ar_lookup_valid;
     logic     ar_lookup_error;
 
     logic aw_slice_ready;
     logic ar_slice_ready;
 
-    wire ni_child_types_pkg::nmu_sam_aw_result_t aw_decoded;
-    wire ni_child_types_pkg::nmu_sam_ar_result_t ar_decoded;
+    wire ni_types_pkg::nmu_sam_aw_result_t aw_decoded;
+    wire ni_types_pkg::nmu_sam_ar_result_t ar_decoded;
 
     ni_sam #(
-        .SAM_NUM_RULES  ( SAM_NUM_RULES  ),
-        .addr_t         ( addr_t         ),
-        .sam_mask_sel_t ( sam_mask_sel_t ),
-        .sam_idx_t      ( sam_idx_t      ),
-        .sam_rule_t     ( sam_rule_t     ),
-        .SAM            ( SAM            )
+        .SAM_NUM_RULES  (SAM_NUM_RULES ),
+        .addr_t         (addr_t        ),
+        .sam_mask_sel_t (sam_mask_sel_t),
+        .sam_result_t   (sam_result_t  ),
+        .sam_rule_t     (sam_rule_t    ),
+        .SAM            (SAM           )
     ) i_aw_ni_sam (
-        .addr_i         ( s_aw_i.awaddr ),
-        .lookup_en_i    ( noc_rst_ni && s_aw_valid_i ),
-        .sam_idx_o      ( aw_sam_idx        ),
-        .lookup_valid_o ( aw_lookup_valid   ),
-        .lookup_error_o ( aw_lookup_error   )
+        .addr_i         (s_aw_i.awaddr             ),
+        .lookup_en_i    (noc_rst_ni && s_aw_valid_i),
+        .sam_idx_o      (aw_sam_idx                ),
+        .lookup_valid_o (aw_lookup_valid           ),
+        .lookup_error_o (aw_lookup_error           )
     );
 
     ni_sam #(
-        .SAM_NUM_RULES  ( SAM_NUM_RULES  ),
-        .addr_t         ( addr_t         ),
-        .sam_mask_sel_t ( sam_mask_sel_t ),
-        .sam_idx_t      ( sam_idx_t      ),
-        .sam_rule_t     ( sam_rule_t     ),
-        .SAM            ( SAM            )
+        .SAM_NUM_RULES  (SAM_NUM_RULES ),
+        .addr_t         (addr_t        ),
+        .sam_mask_sel_t (sam_mask_sel_t),
+        .sam_result_t   (sam_result_t  ),
+        .sam_rule_t     (sam_rule_t    ),
+        .SAM            (SAM           )
     ) i_ar_ni_sam (
-        .addr_i         ( s_ar_i.araddr ),
-        .lookup_en_i    ( noc_rst_ni && s_ar_valid_i ),
-        .sam_idx_o      ( ar_sam_idx    ),
-        .lookup_valid_o ( ar_lookup_valid ),
-        .lookup_error_o ( ar_lookup_error )
+        .addr_i         (s_ar_i.araddr             ),
+        .lookup_en_i    (noc_rst_ni && s_ar_valid_i),
+        .sam_idx_o      (ar_sam_idx                ),
+        .lookup_valid_o (ar_lookup_valid           ),
+        .lookup_error_o (ar_lookup_error           )
     );
 
     assign s_aw_ready_o = noc_rst_ni && aw_slice_ready;
@@ -201,31 +201,31 @@ module nmu_sam #(
     assign ar_decoded.route.domain.is_data = ar_sam_idx.is_data;
 
     stream_register #(
-        .REG_TYPE ( AW_SAM_REG_TYPE ),
-        .T        ( ni_child_types_pkg::nmu_sam_aw_result_t )
+        .REG_TYPE (AW_SAM_REG_TYPE                  ),
+        .data_t   (ni_types_pkg::nmu_sam_aw_result_t)
     ) i_aw_reg_slice (
-        .clk_i     ( noc_clk_i                            ),
-        .rst_ni    ( noc_rst_ni                           ),
-        .s_valid_i ( noc_rst_ni && s_aw_valid_i && aw_lookup_valid ),
-        .s_ready_o ( aw_slice_ready                       ),
-        .s_data_i  ( aw_decoded                           ),
-        .m_valid_o ( m_aw_valid_o                         ),
-        .m_ready_i ( m_aw_ready_i                         ),
-        .m_data_o  ( m_aw_o                               )
+        .clk_i     (noc_clk_i                                    ),
+        .rst_ni    (noc_rst_ni                                   ),
+        .s_valid_i (noc_rst_ni && s_aw_valid_i && aw_lookup_valid),
+        .s_ready_o (aw_slice_ready                               ),
+        .s_data_i  (aw_decoded                                   ),
+        .m_valid_o (m_aw_valid_o                                 ),
+        .m_ready_i (m_aw_ready_i                                 ),
+        .m_data_o  (m_aw_o                                       )
     );
 
     stream_register #(
-        .REG_TYPE ( AR_SAM_REG_TYPE ),
-        .T        ( ni_child_types_pkg::nmu_sam_ar_result_t )
+        .REG_TYPE (AR_SAM_REG_TYPE                  ),
+        .data_t   (ni_types_pkg::nmu_sam_ar_result_t)
     ) i_ar_reg_slice (
-        .clk_i     ( noc_clk_i                            ),
-        .rst_ni    ( noc_rst_ni                           ),
-        .s_valid_i ( noc_rst_ni && s_ar_valid_i && ar_lookup_valid ),
-        .s_ready_o ( ar_slice_ready                       ),
-        .s_data_i  ( ar_decoded                           ),
-        .m_valid_o ( m_ar_valid_o                         ),
-        .m_ready_i ( m_ar_ready_i                         ),
-        .m_data_o  ( m_ar_o                               )
+        .clk_i     (noc_clk_i                                    ),
+        .rst_ni    (noc_rst_ni                                   ),
+        .s_valid_i (noc_rst_ni && s_ar_valid_i && ar_lookup_valid),
+        .s_ready_o (ar_slice_ready                               ),
+        .s_data_i  (ar_decoded                                   ),
+        .m_valid_o (m_ar_valid_o                                 ),
+        .m_ready_i (m_ar_ready_i                                 ),
+        .m_data_o  (m_ar_o                                       )
     );
 
     always_ff @(posedge noc_clk_i) begin

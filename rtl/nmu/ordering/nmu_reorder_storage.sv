@@ -6,51 +6,51 @@
 
 /* Contiguous response storage with independent fill and retire access. */
 module nmu_reorder_storage #(
-    parameter int unsigned DEPTH = 8,
-    parameter int unsigned TAG_W = ni_flit_pkg::ORDERING_TAG_WIDTH,
-    parameter type T = logic
+    parameter int unsigned DEPTH  = 8,
+    parameter int unsigned TAG_W  = ni_flit_pkg::ORDERING_TAG_WIDTH,
+    parameter type         data_t = logic
 ) (
-    input wire logic clk_i,
-    input wire logic rst_i,
-    input wire logic alloc_valid_i,
-    input wire logic [TAG_W-1:0] alloc_base_i,
-    input wire logic [TAG_W:0] alloc_cnt_i,
-    output wire logic [TAG_W-1:0] next_base_o,
-    output wire logic [TAG_W:0] free_cnt_o,
-    input wire logic wr_valid_i,
-    input wire logic wr_bypass_i,
-    output wire logic wr_ready_o,
-    input wire logic [TAG_W-1:0] wr_base_i,
-    input wire logic wr_last_i,
-    input wire T wr_data_i,
-    input wire logic rd_en_i,
-    input wire logic [TAG_W-1:0] rd_addr_i,
-    output wire logic rd_entry_complete_o,
-    output wire T rd_data_o,
-    input wire logic free_valid_i,
-    input wire logic [TAG_W-1:0] free_addr_i,
-    output wire logic [DEPTH-1:0] complete_o
+    input  wire logic              clk_i,
+    input  wire logic              rst_i,
+    input  wire logic              alloc_valid_i,
+    input  wire logic  [TAG_W-1:0] alloc_base_i,
+    input  wire logic    [TAG_W:0] alloc_cnt_i,
+    output wire logic  [TAG_W-1:0] next_base_o,
+    output wire logic    [TAG_W:0] free_cnt_o,
+    input  wire logic              wr_valid_i,
+    input  wire logic              wr_bypass_i,
+    output wire logic              wr_ready_o,
+    input  wire logic  [TAG_W-1:0] wr_base_i,
+    input  wire logic              wr_last_i,
+    input  wire data_t             wr_data_i,
+    input  wire logic              rd_en_i,
+    input  wire logic  [TAG_W-1:0] rd_addr_i,
+    output wire logic              rd_entry_complete_o,
+    output wire data_t             rd_data_o,
+    input  wire logic              free_valid_i,
+    input  wire logic  [TAG_W-1:0] free_addr_i,
+    output wire logic  [DEPTH-1:0] complete_o
 );
 
-    localparam int unsigned TAG_SPACE = 1 << TAG_W;
-    localparam int unsigned CL_DEPTH = DEPTH > 1 ? $clog2(DEPTH) : 1;
+    localparam int unsigned NUM_TAGS = 1 << TAG_W;
+    localparam int unsigned ADDR_W   = DEPTH > 1 ? $clog2(DEPTH) : 1;
 
-    if (DEPTH < 1 || DEPTH > TAG_SPACE) begin : gen_invalid_depth
-        initial $fatal(0, "Error: DEPTH must be in [1, TAG_SPACE] (instance %m)");
+    if (DEPTH < 1 || DEPTH > NUM_TAGS) begin : gen_invalid_depth
+        initial $fatal(0, "Error: DEPTH must be in [1, NUM_TAGS] (instance %m)");
     end
 
-    T data_reg [DEPTH];
+    data_t data_reg [DEPTH];
     logic [DEPTH-1:0] alloc_reg, alloc_next;
     logic [DEPTH-1:0] complete_reg, complete_next;
-    logic [TAG_W-1:0] wr_offset_reg [TAG_SPACE], wr_offset_next [TAG_SPACE];
+    logic [TAG_W-1:0] wr_offset_reg [NUM_TAGS], wr_offset_next [NUM_TAGS];
     logic [TAG_W:0] free_cnt;
     logic [TAG_W-1:0] next_base;
     wire logic [TAG_W:0] wr_addr =
         {1'b0, wr_base_i} + {1'b0, wr_offset_reg[wr_base_i]};
     wire logic wr_accept = wr_valid_i && wr_ready_o;
-    wire logic [CL_DEPTH-1:0] wr_idx = CL_DEPTH'(wr_addr);
-    wire logic [CL_DEPTH-1:0] rd_idx = CL_DEPTH'(rd_addr_i);
-    wire logic [CL_DEPTH-1:0] free_idx = CL_DEPTH'(free_addr_i);
+    wire logic [ADDR_W-1:0] wr_idx = ADDR_W'(wr_addr);
+    wire logic [ADDR_W-1:0] rd_idx = ADDR_W'(rd_addr_i);
+    wire logic [ADDR_W-1:0] free_idx = ADDR_W'(free_addr_i);
 
     always_comb begin
         free_cnt = (TAG_W+1)'(DEPTH);
@@ -70,13 +70,13 @@ module nmu_reorder_storage #(
     assign rd_entry_complete_o = !rst_i && rd_en_i &&
         int'(rd_addr_i) < DEPTH && complete_reg[rd_idx];
     // Payload memory is intentionally unreset; expose only completed entries.
-    assign rd_data_o = rd_entry_complete_o ? data_reg[rd_idx] : T'('0);
+    assign rd_data_o = rd_entry_complete_o ? data_reg[rd_idx] : data_t'('0);
     assign complete_o = complete_reg;
 
     always_comb begin
         alloc_next = alloc_reg;
         complete_next = complete_reg;
-        for (int tag = 0; tag < TAG_SPACE; tag++) begin
+        for (int tag = 0; tag < NUM_TAGS; tag++) begin
             wr_offset_next[tag] = wr_offset_reg[tag];
         end
 
@@ -106,13 +106,13 @@ module nmu_reorder_storage #(
         if (rst_i) begin
             alloc_reg <= '0;
             complete_reg <= '0;
-            for (int tag = 0; tag < TAG_SPACE; tag++) begin
+            for (int tag = 0; tag < NUM_TAGS; tag++) begin
                 wr_offset_reg[tag] <= '0;
             end
         end else begin
             alloc_reg <= alloc_next;
             complete_reg <= complete_next;
-            for (int tag = 0; tag < TAG_SPACE; tag++) begin
+            for (int tag = 0; tag < NUM_TAGS; tag++) begin
                 wr_offset_reg[tag] <= wr_offset_next[tag];
             end
             if (wr_accept && !wr_bypass_i) begin

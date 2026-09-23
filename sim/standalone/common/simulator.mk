@@ -21,11 +21,11 @@ VCS_EXTRA ?=
 VERILATOR_EXTRA ?=
 SIM_EXTRA ?=
 top := tb_nmu_standalone
-run_dir ?= $(package_dir)/build/$(SIMULATOR)_i$(ID_WIDTH)_n$(NOC_HALF_PERIOD)_b$(BUFFER_DEPTH)_r$(READ_ROB_ENABLED)_wave$(WAVE)
+run_dir ?= $(package_dir)/build/$(SIMULATOR)_i$(ID_WIDTH)_n$(NOC_HALF_PERIOD)_b$(BUFFER_DEPTH)_r$(R_ROB_EN)_wave$(WAVE)
 run_dir := $(abspath $(run_dir))
 # Generated compilation files must use the workstation's local clock, not NFS mtime.
 vcs_cache_root := /tmp/noc-vcs-$(shell id -u)-$(shell cd "$(package_dir)" && pwd -P | tr -d '\n' | cksum | cut -d' ' -f1)
-vcs_work_dir := $(vcs_cache_root)/i$(ID_WIDTH)_n$(NOC_HALF_PERIOD)_b$(BUFFER_DEPTH)_r$(READ_ROB_ENABLED)_wave$(WAVE)
+vcs_work_dir := $(vcs_cache_root)/i$(ID_WIDTH)_n$(NOC_HALF_PERIOD)_b$(BUFFER_DEPTH)_r$(R_ROB_EN)_wave$(WAVE)
 report_dir := $(run_dir)/report
 wave_dir := $(run_dir)/waves
 filelist := $(package_dir)/files.f
@@ -41,13 +41,13 @@ VCS_FLAGS := -full64 -sverilog -assert svaext -override_timescale=1ns/1ps -debug
     -pvalue+$(top).ID_WIDTH=$(ID_WIDTH) \
     -pvalue+$(top).NOC_HALF_PERIOD=$(NOC_HALF_PERIOD) \
     -pvalue+$(top).BUFFER_DEPTH=$(BUFFER_DEPTH) \
-    -pvalue+$(top).READ_ROB_ENABLED=$(READ_ROB_ENABLED) -o $(vcs_work_dir)/simv
+    -pvalue+$(top).R_ROB_EN=$(R_ROB_EN) -o $(vcs_work_dir)/simv
 VERILATOR_FLAGS := --binary --timing --assert -j 1 -Wno-fatal \
     -Werror-WIDTHEXPAND -Werror-WIDTHTRUNC -Werror-LATCH \
     $(package_dir)/repo/rtl/nmu/top/nmu_lint.vlt \
     --top-module $(top) -f $(filelist) --Mdir $(run_dir)/csrc -o $(run_dir)/simv \
     -GID_WIDTH=$(ID_WIDTH) -GNOC_HALF_PERIOD=$(NOC_HALF_PERIOD) \
-    -GBUFFER_DEPTH=$(BUFFER_DEPTH) -GREAD_ROB_ENABLED=$(READ_ROB_ENABLED)
+    -GBUFFER_DEPTH=$(BUFFER_DEPTH) -GR_ROB_EN=$(R_ROB_EN)
 ifeq ($(WAVE),1)
 VCS_FLAGS += +define+DUMP_WAVE -P $(PLI_DIR)/novas.tab $(PLI_DIR)/pli.a
 VERILATOR_FLAGS += +define+DUMP_WAVE --trace-fst
@@ -65,7 +65,7 @@ help:
 	 'make run_wave_view CASE=ctrl_write_single (run then open nWave)' \
 	 'make clean                         Remove all build/wave/log/GUI artifacts; retain signal RC files' \
 	 'make regress SIMULATOR=verilator    Same sources, cases and configuration' \
-	 'Shared overrides: ID_WIDTH, NOC_HALF_PERIOD, BUFFER_DEPTH, READ_ROB_ENABLED' \
+	 'Shared overrides: ID_WIDTH, NOC_HALF_PERIOD, BUFFER_DEPTH, R_ROB_EN' \
 	 'Patterns are generated for a specific ID_WIDTH; synchronize matching inputs before changing it.'
 
 sanity_check:
@@ -79,7 +79,7 @@ sanity_check:
 compile: sanity_check
 	@printf '%s\n' 'SIMULATOR=$(SIMULATOR)' 'WAVE=$(WAVE)' 'ID_WIDTH=$(ID_WIDTH)' \
 	 'NOC_HALF_PERIOD=$(NOC_HALF_PERIOD)' 'BUFFER_DEPTH=$(BUFFER_DEPTH)' \
-	 'READ_ROB_ENABLED=$(READ_ROB_ENABLED)' 'VCS_FLAGS=$(VCS_FLAGS)' \
+	 'R_ROB_EN=$(R_ROB_EN)' 'VCS_FLAGS=$(VCS_FLAGS)' \
 	 'VERILATOR_FLAGS=$(VERILATOR_FLAGS)' 'VCS_EXTRA=$(VCS_EXTRA)' \
 	 'VERILATOR_EXTRA=$(VERILATOR_EXTRA)' > "$(report_dir)/build-config.txt"
 	@cp "$(package_dir)/SHA256SUMS" "$(report_dir)/source-SHA256SUMS"
@@ -108,7 +108,7 @@ sim: sanity_check
 	  stim="$(package_dir)/cases/standalone/$(CASE)"; mapfile -t args < "$$stim/schedule.txt"; \
 	elif [[ "$(PATTERN)" == directed ]]; then \
 	  args+=(+require_reorder); \
-	  if [[ $(BUFFER_DEPTH) == 8 && $(READ_ROB_ENABLED) == 1 ]]; then args+=(+require_pressure); fi; \
+	  if [[ $(BUFFER_DEPTH) == 8 && $(R_ROB_EN) == 1 ]]; then args+=(+require_pressure); fi; \
 	fi; cd "$(package_dir)"; "$(run_dir)/simv" \
 	  +stim_dir="$$stim" +run_dir="$(run_dir)" \
 	  +wave_file="$(wave_file)" "$${args[@]}" $(SIM_EXTRA) \

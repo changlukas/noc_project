@@ -8,23 +8,23 @@
 
 // Request transport and ID ownership. Ordering is supplied by the response path.
 module nmu_request_path #(
-    parameter int unsigned AXI_ID_WIDTH        = ni_params_pkg::AXI_ID_WIDTH_DFLT,
-    parameter int unsigned NOC_ID_WIDTH        = ni_params_pkg::NOC_ID_WIDTH_DFLT,
-    parameter int unsigned AXI_ADDR_WIDTH      = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
-    parameter int unsigned AXI_DATA_WIDTH      = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
-    parameter int unsigned AXI_AWUSER_WIDTH    = ni_params_pkg::AXI_AWUSER_WIDTH_DFLT,
-    parameter int unsigned AXI_FIFO_DEPTH      = ni_params_pkg::AXI_FIFO_DEPTH_DFLT,
-    parameter int unsigned NOC_DAT_NUM_VC      = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
-    parameter int unsigned NOC_DAT_VC_MODE     = ni_params_pkg::NOC_DAT_VC_MODE_DFLT,
-    parameter int unsigned NOC_FIFO_DEPTH      = ni_params_pkg::NOC_FIFO_DEPTH_DFLT,
-    parameter int unsigned NOC_ROUTER_VC_DEPTH = ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT,
-    parameter int unsigned NMU_MAX_TXNS_PER_ID = ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT,
-    parameter int unsigned AW_SAM_REG_TYPE     = 0,
-    parameter int unsigned AR_SAM_REG_TYPE     = 0,
+    parameter int unsigned AXI_ID_WIDTH           = ni_params_pkg::AXI_ID_WIDTH,
+    parameter int unsigned NOC_ID_WIDTH           = ni_params_pkg::NOC_ID_WIDTH,
+    parameter int unsigned AXI_ADDR_WIDTH         = ni_params_pkg::AXI_ADDR_WIDTH,
+    parameter int unsigned AXI_DATA_WIDTH         = ni_params_pkg::AXI_DATA_WIDTH,
+    parameter int unsigned AXI_AWUSER_WIDTH       = ni_params_pkg::AXI_AWUSER_WIDTH,
+    parameter int unsigned AXI_FIFO_DEPTH         = ni_params_pkg::AXI_FIFO_DEPTH,
+    parameter int unsigned NUM_DAT_VC             = ni_params_pkg::NUM_DAT_VC,
+    parameter int unsigned NOC_DAT_VC_MODE        = ni_params_pkg::NOC_DAT_VC_MODE,
+    parameter int unsigned REQ_FIFO_DEPTH         = ni_params_pkg::NOC_FIFO_DEPTH,
+    parameter int unsigned NOC_ROUTER_VC_DEPTH    = ni_params_pkg::NOC_ROUTER_VC_DEPTH,
+    parameter int unsigned MAX_OUTSTANDING_PER_ID = ni_params_pkg::NMU_MAX_OUTSTANDING_PER_ID,
+    parameter int unsigned AW_SAM_REG_TYPE        = 0,
+    parameter int unsigned AR_SAM_REG_TYPE        = 0,
     parameter int unsigned SAM_NUM_RULES,
     parameter type addr_t,
     parameter type sam_mask_sel_t,
-    parameter type sam_idx_t,
+    parameter type sam_result_t,
     parameter type sam_rule_t,
     parameter sam_rule_t [SAM_NUM_RULES-1:0] SAM,
     parameter logic [ni_flit_pkg::SRC_ID_WIDTH-1:0]      SRC_ID      = '0,
@@ -36,42 +36,42 @@ module nmu_request_path #(
     input  wire logic  noc_rst_ni,
     axi_if.wr_slv axi_wr_i,
     axi_if.rd_slv axi_rd_i,
-    output wire ni_child_types_pkg::nmu_sam_aw_result_t                                              m_aw_o,
-    output wire logic                                                                                m_aw_valid_o,
-    input  wire logic                                                                                m_aw_ready_i,
-    output wire ni_signals_pkg::axi_w_t                                                              m_w_o,
-    output wire logic                                                                                m_w_valid_o,
-    input  wire logic                                                                                m_w_ready_i,
-    output wire ni_child_types_pkg::nmu_sam_ar_result_t                                              m_ar_o,
-    output wire logic                                                                                m_ar_valid_o,
-    input  wire logic                                                                                m_ar_ready_i,
-    input  wire ni_child_types_pkg::nmu_aw_request_t                                                 s_ordered_aw_i,
-    input  wire logic                                                                                s_ordered_aw_valid_i,
-    output wire logic                                                                                s_ordered_aw_ready_o,
-    input  wire ni_signals_pkg::axi_w_t                                                              s_ordered_w_i,
-    input  wire logic                                                                                s_ordered_w_valid_i,
-    output wire logic                                                                                s_ordered_w_ready_o,
-    input  wire ni_child_types_pkg::nmu_ar_request_t                                                 s_ordered_ar_i,
-    input  wire logic                                                                                s_ordered_ar_valid_i,
-    output wire logic                                                                                s_ordered_ar_ready_o,
-    input  wire ni_signals_pkg::axi_b_t                                                              s_b_i,
-    input  wire logic                                                                                s_b_valid_i,
-    output wire logic                                                                                s_b_ready_o,
-    input  wire ni_signals_pkg::axi_r_t                                                              s_r_i,
-    input  wire logic                                                                                s_r_valid_i,
-    output wire logic                                                                                s_r_ready_o,
-    output wire logic                                                                                tx_req_valid_o,
-    output wire logic                                   [ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT-1:0] tx_req_flit_o,
-    input  wire logic                                                                                tx_req_ready_i,
-    output wire logic                                                                                tx_dat_valid_o,
-    output wire logic                                   [ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT-1:0] tx_dat_flit_o,
-    input  wire logic                                                           [NOC_DAT_NUM_VC-1:0] tx_dat_crdvalid_i
+    output wire ni_types_pkg::nmu_sam_aw_result_t                                         m_aw_o,
+    output wire logic                                                                     m_aw_valid_o,
+    input  wire logic                                                                     m_aw_ready_i,
+    output wire ni_signals_pkg::axi_w_t                                                   m_w_o,
+    output wire logic                                                                     m_w_valid_o,
+    input  wire logic                                                                     m_w_ready_i,
+    output wire ni_types_pkg::nmu_sam_ar_result_t                                         m_ar_o,
+    output wire logic                                                                     m_ar_valid_o,
+    input  wire logic                                                                     m_ar_ready_i,
+    input  wire ni_types_pkg::nmu_aw_request_t                                            s_ordered_aw_i,
+    input  wire logic                                                                     s_ordered_aw_valid_i,
+    output wire logic                                                                     s_ordered_aw_ready_o,
+    input  wire ni_signals_pkg::axi_w_t                                                   s_ordered_w_i,
+    input  wire logic                                                                     s_ordered_w_valid_i,
+    output wire logic                                                                     s_ordered_w_ready_o,
+    input  wire ni_types_pkg::nmu_ar_request_t                                            s_ordered_ar_i,
+    input  wire logic                                                                     s_ordered_ar_valid_i,
+    output wire logic                                                                     s_ordered_ar_ready_o,
+    input  wire ni_signals_pkg::axi_b_t                                                   s_b_i,
+    input  wire logic                                                                     s_b_valid_i,
+    output wire logic                                                                     s_b_ready_o,
+    input  wire ni_signals_pkg::axi_r_t                                                   s_r_i,
+    input  wire logic                                                                     s_r_valid_i,
+    output wire logic                                                                     s_r_ready_o,
+    output wire logic                                                                     tx_req_valid_o,
+    output wire logic                             [ni_params_pkg::NOC_REQ_FLIT_WIDTH-1:0] tx_req_flit_o,
+    input  wire logic                                                                     tx_req_ready_i,
+    output wire logic                                                                     tx_dat_valid_o,
+    output wire logic                             [ni_params_pkg::NOC_DAT_FLIT_WIDTH-1:0] tx_dat_flit_o,
+    input  wire logic                                                    [NUM_DAT_VC-1:0] tx_dat_crdvalid_i
 );
-    import ni_child_types_pkg::*;
+    import ni_types_pkg::*;
 
     // External ID ownership belongs to NMU. This boundary stays in axi_clk_i;
     // downstream request and response CDC carry only fixed-width NoC IDs.
-    localparam int unsigned MAX_UNIQUE_IDS =
+    localparam int unsigned MAX_ACTIVE_IDS =
         1 << (AXI_ID_WIDTH < NOC_ID_WIDTH ? AXI_ID_WIDTH : NOC_ID_WIDTH);
 
     typedef logic [AXI_ID_WIDTH-1:0] external_id_t;
@@ -151,14 +151,14 @@ module nmu_request_path #(
     assign axi_rd_i.rvalid  = external_rsp.r_valid;
 
     axi_id_remap #(
-        .AxiSlvPortIdWidth    (AXI_ID_WIDTH       ),
-        .AxiSlvPortMaxUniqIds (MAX_UNIQUE_IDS     ),
-        .AxiMaxTxnsPerId      (NMU_MAX_TXNS_PER_ID),
-        .AxiMstPortIdWidth    (NOC_ID_WIDTH       ),
-        .slv_req_t            (external_req_t     ),
-        .slv_resp_t           (external_resp_t    ),
-        .mst_req_t            (internal_req_t     ),
-        .mst_resp_t           (internal_resp_t    )
+        .AxiSlvPortIdWidth    (AXI_ID_WIDTH          ),
+        .AxiSlvPortMaxUniqIds (MAX_ACTIVE_IDS        ),
+        .AxiMaxTxnsPerId      (MAX_OUTSTANDING_PER_ID),
+        .AxiMstPortIdWidth    (NOC_ID_WIDTH          ),
+        .slv_req_t            (external_req_t        ),
+        .slv_resp_t           (external_resp_t       ),
+        .mst_req_t            (internal_req_t        ),
+        .mst_resp_t           (internal_resp_t       )
     ) i_id_remap (
         .clk_i      (axi_clk_i   ),
         .rst_ni     (axi_rst_ni  ),
@@ -214,9 +214,9 @@ module nmu_request_path #(
     nmu_request_fifo #(
         .AXI_FIFO_DEPTH (AXI_FIFO_DEPTH          ),
         .AXI_ID_WIDTH   (NOC_ID_WIDTH            ),
-        .AW_T           (ni_signals_pkg::axi_aw_t),
-        .W_T            (ni_signals_pkg::axi_w_t ),
-        .AR_T           (ni_signals_pkg::axi_ar_t)
+        .aw_t           (ni_signals_pkg::axi_aw_t),
+        .w_t            (ni_signals_pkg::axi_w_t ),
+        .ar_t           (ni_signals_pkg::axi_ar_t)
     ) i_request_fifo (
         .axi_clk_i    (axi_clk_i            ),
         .axi_rst_ni   (axi_rst_ni           ),
@@ -248,7 +248,7 @@ module nmu_request_path #(
         .SAM_NUM_RULES   (SAM_NUM_RULES  ),
         .addr_t          (addr_t         ),
         .sam_mask_sel_t  (sam_mask_sel_t ),
-        .sam_idx_t       (sam_idx_t      ),
+        .sam_result_t    (sam_result_t   ),
         .sam_rule_t      (sam_rule_t     ),
         .SAM             (SAM            )
     ) i_sam (
@@ -268,12 +268,12 @@ module nmu_request_path #(
         .m_ar_o       (m_ar_o       )
     );
 
-    wire ni_flit_pkg::req_flit_t [NMU_REQ_COUNT-1:0] req_candidates;
-    wire ni_flit_pkg::dat_flit_t [NMU_DAT_COUNT-1:0] dat_candidates;
-    wire                         [NMU_REQ_COUNT-1:0] req_valid, req_ready;
-    wire                         [NMU_DAT_COUNT-1:0] dat_valid, dat_ready;
+    wire ni_flit_pkg::req_flit_t [NUM_NMU_REQ_CH-1:0] req_candidates;
+    wire ni_flit_pkg::dat_flit_t [NUM_NMU_DAT_CH-1:0] dat_candidates;
+    wire                         [NUM_NMU_REQ_CH-1:0] req_valid, req_ready;
+    wire                         [NUM_NMU_DAT_CH-1:0] dat_valid, dat_ready;
     nmu_request_packetize #(
-        .FIFO_DEPTH  (NOC_FIFO_DEPTH),
+        .FIFO_DEPTH  (REQ_FIFO_DEPTH),
         .SRC_ID      (SRC_ID        ),
         .SRC_PORT_ID (SRC_PORT_ID   )
     ) i_packetize (
@@ -296,7 +296,7 @@ module nmu_request_path #(
         .m_dat_ready_i (dat_ready           )
     );
     nmu_channel_assign #(
-        .DAT_NUM_VC      (NOC_DAT_NUM_VC     ),
+        .NUM_DAT_VC      (NUM_DAT_VC         ),
         .DAT_VC_MODE     (NOC_DAT_VC_MODE    ),
         .ROUTER_VC_DEPTH (NOC_ROUTER_VC_DEPTH)
     ) i_channel_assign (

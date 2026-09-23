@@ -18,23 +18,23 @@ module tb_nmu_sam;
     ni_signals_pkg::axi_aw_t [NUM_MODE_PAIRS-1:0] s_aw;
     logic [NUM_MODE_PAIRS-1:0] m_aw_valid;
     logic [NUM_MODE_PAIRS-1:0] m_aw_ready;
-    ni_child_types_pkg::nmu_sam_aw_result_t [NUM_MODE_PAIRS-1:0] m_aw;
+    ni_types_pkg::nmu_sam_aw_result_t [NUM_MODE_PAIRS-1:0] m_aw;
 
     logic [NUM_MODE_PAIRS-1:0] s_ar_valid;
     logic [NUM_MODE_PAIRS-1:0] s_ar_ready;
     ni_signals_pkg::axi_ar_t [NUM_MODE_PAIRS-1:0] s_ar;
     logic [NUM_MODE_PAIRS-1:0] m_ar_valid;
     logic [NUM_MODE_PAIRS-1:0] m_ar_ready;
-    ni_child_types_pkg::nmu_sam_ar_result_t [NUM_MODE_PAIRS-1:0] m_ar;
+    ni_types_pkg::nmu_sam_ar_result_t [NUM_MODE_PAIRS-1:0] m_ar;
 
     logic [NUM_MODE_PAIRS-1:0] sampled_s_aw_ready;
     logic [NUM_MODE_PAIRS-1:0] sampled_m_aw_valid;
     logic [NUM_MODE_PAIRS-1:0] sampled_m_aw_ready;
-    ni_child_types_pkg::nmu_sam_aw_result_t [NUM_MODE_PAIRS-1:0] sampled_m_aw;
+    ni_types_pkg::nmu_sam_aw_result_t [NUM_MODE_PAIRS-1:0] sampled_m_aw;
     logic [NUM_MODE_PAIRS-1:0] sampled_s_ar_ready;
     logic [NUM_MODE_PAIRS-1:0] sampled_m_ar_valid;
     logic [NUM_MODE_PAIRS-1:0] sampled_m_ar_ready;
-    ni_child_types_pkg::nmu_sam_ar_result_t [NUM_MODE_PAIRS-1:0] sampled_m_ar;
+    ni_types_pkg::nmu_sam_ar_result_t [NUM_MODE_PAIRS-1:0] sampled_m_ar;
 
     for (genvar n = 0; n < NUM_MODE_PAIRS; n++) begin : gen_mode_pairs
         nmu_sam #(
@@ -43,7 +43,7 @@ module tb_nmu_sam;
             .SAM_NUM_RULES   ( SAM_NUM_RULES  ),
             .addr_t          ( sam_addr_t     ),
             .sam_mask_sel_t  ( sam_mask_sel_t ),
-            .sam_idx_t       ( sam_idx_t      ),
+            .sam_result_t       ( sam_result_t      ),
             .sam_rule_t      ( sam_rule_t     ),
             .SAM             ( SAM            )
         ) dut (
@@ -83,7 +83,7 @@ module tb_nmu_sam;
         ni_signals_pkg::axi_aw_t value;
 
         value = '0;
-        value.awid = index[ni_params_pkg::NOC_ID_WIDTH_DFLT-1:0];
+        value.awid = index[ni_params_pkg::NOC_ID_WIDTH-1:0];
         value.awlen = index[0] ? 8'd3 : 8'd1;
         value.awsize = 3'd3;
         value.awburst = 2'(index % 3);
@@ -100,7 +100,7 @@ module tb_nmu_sam;
         ni_signals_pkg::axi_ar_t value;
 
         value = '0;
-        value.arid = index[ni_params_pkg::NOC_ID_WIDTH_DFLT-1:0];
+        value.arid = index[ni_params_pkg::NOC_ID_WIDTH-1:0];
         value.arlen = index[0] ? 8'd3 : 8'd1;
         value.arsize = 3'd3;
         value.arburst = 2'(index % 3);
@@ -141,10 +141,10 @@ module tb_nmu_sam;
         s_ar[n].arqos = value.arqos;
     endtask
 
-    function automatic ni_child_types_pkg::nmu_sam_aw_result_t expected_aw(
+    function automatic ni_types_pkg::nmu_sam_aw_result_t expected_aw(
         input int unsigned index
     );
-        ni_child_types_pkg::nmu_sam_aw_result_t value;
+        ni_types_pkg::nmu_sam_aw_result_t value;
         ni_signals_pkg::axi_aw_t input_value;
         int unsigned rule_index;
 
@@ -161,10 +161,10 @@ module tb_nmu_sam;
         return value;
     endfunction
 
-    function automatic ni_child_types_pkg::nmu_sam_ar_result_t expected_ar(
+    function automatic ni_types_pkg::nmu_sam_ar_result_t expected_ar(
         input int unsigned index
     );
-        ni_child_types_pkg::nmu_sam_ar_result_t value;
+        ni_types_pkg::nmu_sam_ar_result_t value;
         int unsigned rule_index;
 
         value = '0;
@@ -184,8 +184,8 @@ module tb_nmu_sam;
         int unsigned ar_received [NUM_MODE_PAIRS];
         logic [NUM_MODE_PAIRS-1:0] aw_was_stalled;
         logic [NUM_MODE_PAIRS-1:0] ar_was_stalled;
-        ni_child_types_pkg::nmu_sam_aw_result_t [NUM_MODE_PAIRS-1:0] stalled_aw;
-        ni_child_types_pkg::nmu_sam_ar_result_t [NUM_MODE_PAIRS-1:0] stalled_ar;
+        ni_types_pkg::nmu_sam_aw_result_t [NUM_MODE_PAIRS-1:0] stalled_aw;
+        ni_types_pkg::nmu_sam_ar_result_t [NUM_MODE_PAIRS-1:0] stalled_ar;
         logic all_done;
 
         clk = 1'b0;

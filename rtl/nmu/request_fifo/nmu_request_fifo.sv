@@ -9,9 +9,9 @@ module nmu_request_fifo #(
     parameter int unsigned AXI_FIFO_DEPTH = 8,
     // External AXI ID width; request records retain this width across CDC.
     parameter int unsigned AXI_ID_WIDTH = 3,
-    parameter type AW_T = logic [AXI_ID_WIDTH-1:0],
-    parameter type W_T = logic,
-    parameter type AR_T = logic [AXI_ID_WIDTH-1:0]
+    parameter type         aw_t         = logic [AXI_ID_WIDTH-1:0],
+    parameter type         w_t          = logic,
+    parameter type         ar_t         = logic [AXI_ID_WIDTH-1:0]
 ) (
     input  wire logic  axi_clk_i,
     input  wire logic  axi_rst_ni,
@@ -20,24 +20,24 @@ module nmu_request_fifo #(
 
     input  wire logic  s_aw_valid_i,
     output wire logic  s_aw_ready_o,
-    input  wire AW_T   s_aw_data_i,
+    input  wire aw_t   s_aw_data_i,
     output wire logic  m_aw_valid_o,
     input  wire logic  m_aw_ready_i,
-    output wire AW_T   m_aw_data_o,
+    output wire aw_t   m_aw_data_o,
 
     input  wire logic  s_w_valid_i,
     output wire logic  s_w_ready_o,
-    input  wire W_T    s_w_data_i,
+    input  wire w_t    s_w_data_i,
     output wire logic  m_w_valid_o,
     input  wire logic  m_w_ready_i,
-    output wire W_T    m_w_data_o,
+    output wire w_t    m_w_data_o,
 
     input  wire logic  s_ar_valid_i,
     output wire logic  s_ar_ready_o,
-    input  wire AR_T   s_ar_data_i,
+    input  wire ar_t   s_ar_data_i,
     output wire logic  m_ar_valid_o,
     input  wire logic  m_ar_ready_i,
-    output wire AR_T   m_ar_data_o
+    output wire ar_t   m_ar_data_o
 );
 
     if (AXI_FIFO_DEPTH < 2 || (AXI_FIFO_DEPTH & (AXI_FIFO_DEPTH - 1)) != 0) begin : gen_invalid_depth
@@ -49,51 +49,51 @@ module nmu_request_fifo #(
     end
 
     axi_async_fifo #(
-        .AXI_FIFO_DEPTH ( AXI_FIFO_DEPTH ),
-        .T              ( AW_T           )
+        .AXI_FIFO_DEPTH (AXI_FIFO_DEPTH),
+        .data_t         (aw_t          )
     ) i_aw_fifo (
-        .src_clk_i   ( axi_clk_i    ),
-        .src_rst_ni  ( axi_rst_ni   ),
-        .src_valid_i ( s_aw_valid_i ),
-        .src_ready_o ( s_aw_ready_o ),
-        .src_data_i  ( s_aw_data_i  ),
-        .dst_clk_i   ( noc_clk_i    ),
-        .dst_rst_ni  ( noc_rst_ni   ),
-        .dst_valid_o ( m_aw_valid_o ),
-        .dst_ready_i ( m_aw_ready_i ),
-        .dst_data_o  ( m_aw_data_o  )
+        .src_clk_i   (axi_clk_i   ),
+        .src_rst_ni  (axi_rst_ni  ),
+        .src_valid_i (s_aw_valid_i),
+        .src_ready_o (s_aw_ready_o),
+        .src_data_i  (s_aw_data_i ),
+        .dst_clk_i   (noc_clk_i   ),
+        .dst_rst_ni  (noc_rst_ni  ),
+        .dst_valid_o (m_aw_valid_o),
+        .dst_ready_i (m_aw_ready_i),
+        .dst_data_o  (m_aw_data_o )
     );
 
     axi_async_fifo #(
-        .AXI_FIFO_DEPTH ( AXI_FIFO_DEPTH ),
-        .T              ( W_T            )
+        .AXI_FIFO_DEPTH (AXI_FIFO_DEPTH),
+        .data_t         (w_t           )
     ) i_w_fifo (
-        .src_clk_i   ( axi_clk_i   ),
-        .src_rst_ni  ( axi_rst_ni  ),
-        .src_valid_i ( s_w_valid_i ),
-        .src_ready_o ( s_w_ready_o ),
-        .src_data_i  ( s_w_data_i  ),
-        .dst_clk_i   ( noc_clk_i   ),
-        .dst_rst_ni  ( noc_rst_ni  ),
-        .dst_valid_o ( m_w_valid_o ),
-        .dst_ready_i ( m_w_ready_i ),
-        .dst_data_o  ( m_w_data_o  )
+        .src_clk_i   (axi_clk_i  ),
+        .src_rst_ni  (axi_rst_ni ),
+        .src_valid_i (s_w_valid_i),
+        .src_ready_o (s_w_ready_o),
+        .src_data_i  (s_w_data_i ),
+        .dst_clk_i   (noc_clk_i  ),
+        .dst_rst_ni  (noc_rst_ni ),
+        .dst_valid_o (m_w_valid_o),
+        .dst_ready_i (m_w_ready_i),
+        .dst_data_o  (m_w_data_o )
     );
 
     axi_async_fifo #(
-        .AXI_FIFO_DEPTH ( AXI_FIFO_DEPTH ),
-        .T              ( AR_T           )
+        .AXI_FIFO_DEPTH (AXI_FIFO_DEPTH),
+        .data_t         (ar_t          )
     ) i_ar_fifo (
-        .src_clk_i   ( axi_clk_i    ),
-        .src_rst_ni  ( axi_rst_ni   ),
-        .src_valid_i ( s_ar_valid_i ),
-        .src_ready_o ( s_ar_ready_o ),
-        .src_data_i  ( s_ar_data_i  ),
-        .dst_clk_i   ( noc_clk_i    ),
-        .dst_rst_ni  ( noc_rst_ni   ),
-        .dst_valid_o ( m_ar_valid_o ),
-        .dst_ready_i ( m_ar_ready_i ),
-        .dst_data_o  ( m_ar_data_o  )
+        .src_clk_i   (axi_clk_i   ),
+        .src_rst_ni  (axi_rst_ni  ),
+        .src_valid_i (s_ar_valid_i),
+        .src_ready_o (s_ar_ready_o),
+        .src_data_i  (s_ar_data_i ),
+        .dst_clk_i   (noc_clk_i   ),
+        .dst_rst_ni  (noc_rst_ni  ),
+        .dst_valid_o (m_ar_valid_o),
+        .dst_ready_i (m_ar_ready_i),
+        .dst_data_o  (m_ar_data_o )
     );
 
 endmodule

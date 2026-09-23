@@ -31,7 +31,7 @@ def test_load_constants_returns_expected_shape():
     assert c["noc"]["DAT_VC_MODE_READ_WRITE_SPLIT"]["default"] == 1
     assert c["noc"]["FIFO_DEPTH"]["min"] == 1
     assert c["noc"]["FIFO_DEPTH"]["default"] == 8
-    assert c["noc"]["DAT_FLIT_WIDTH"]["sv_symbol"] == "NOC_DAT_FLIT_WIDTH_DFLT"
+    assert c["noc"]["DAT_FLIT_WIDTH"]["sv_symbol"] == "NOC_DAT_FLIT_WIDTH"
 
 
 # ---- constants.yaml naming discipline ----

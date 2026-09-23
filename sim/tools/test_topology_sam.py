@@ -24,10 +24,10 @@ def _rule(pkg, generated_index):
         rf"dst_port_id: ni_flit_pkg::DST_PORT_ID_WIDTH'\((?P<port>\d+)\), "
         rf"is_data: 1'b(?P<is_data>[01]), "
         rf"collective_en: 1'b(?P<collective>[01]), "
-        rf"mask_x: '\{{offset: SAM_MASK_SEL_WIDTH'\((?P<x_offset>\d+)\), "
-        rf"len: SAM_MASK_SEL_WIDTH'\((?P<x_len>\d+)\)\}}, "
-        rf"mask_y: '\{{offset: SAM_MASK_SEL_WIDTH'\((?P<y_offset>\d+)\), "
-        rf"len: SAM_MASK_SEL_WIDTH'\((?P<y_len>\d+)\)\}}\}}, "
+        rf"mask_x: '\{{offset: SAM_MASK_SEL_FIELD_W'\((?P<x_offset>\d+)\), "
+        rf"len: SAM_MASK_SEL_FIELD_W'\((?P<x_len>\d+)\)\}}, "
+        rf"mask_y: '\{{offset: SAM_MASK_SEL_FIELD_W'\((?P<y_offset>\d+)\), "
+        rf"len: SAM_MASK_SEL_FIELD_W'\((?P<y_len>\d+)\)\}}\}}, "
         rf"start_addr: ADDR_WIDTH'\(64'h(?P<start>[0-9A-F]+)\), "
         rf"end_addr: ADDR_WIDTH'\(64'h(?P<end>[0-9A-F]+)\)\}}")
     match = re.search(pattern, pkg, re.MULTILINE)

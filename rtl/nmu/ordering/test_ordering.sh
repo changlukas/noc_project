@@ -7,7 +7,7 @@ task_sources=(
   "$task_root/specgen/generated/sv/ni_params_pkg.sv"
   "$task_root/specgen/generated/sv/ni_signals_pkg.sv"
   "$task_root/specgen/generated/sv/ni_flit_pkg.sv"
-  "$task_root/rtl/common/ni_child_types_pkg.sv"
+  "$task_root/rtl/common/ni_types_pkg.sv"
   "$task_root/rtl/nmu/ordering/nmu_reorder_storage.sv"
   "$task_root/rtl/nmu/ordering/nmu_ordering.sv"
 )
@@ -38,14 +38,14 @@ if [[ "${1:-test}" == test ]]; then
   test -n "$task_tag_w"
   task_invalid_limit=$(( (1 << task_tag_w) + 1 ))
   task_guard_values=(
-    "-GNMU_ROB_B_DEPTH=$task_invalid_limit"
-    "-GNMU_ROB_R_DEPTH=$task_invalid_limit"
-    "-GNMU_MAX_TXNS_PER_ID=$task_invalid_limit"
+    "-GB_ROB_DEPTH=$task_invalid_limit"
+    "-GR_ROB_DEPTH=$task_invalid_limit"
+    "-GMAX_OUTSTANDING_PER_ID=$task_invalid_limit"
   )
   task_guard_messages=(
-    "NMU_ROB_B_DEPTH must be in [1, TAG_SPACE]"
-    "NMU_ROB_R_DEPTH must be in [1, TAG_SPACE]"
-    "NMU_MAX_TXNS_PER_ID must be in [1, TAG_SPACE]"
+    "B_ROB_DEPTH must be in [1, NUM_TAGS]"
+    "R_ROB_DEPTH must be in [1, NUM_TAGS]"
+    "MAX_OUTSTANDING_PER_ID must be in [1, NUM_TAGS]"
   )
   for task_case in 0 1 2; do
     task_log="$task_tmp/guard_$task_case.log"

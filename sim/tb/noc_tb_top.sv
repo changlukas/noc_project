@@ -28,9 +28,9 @@ module noc_tb_top #(
     // router, so NUM_ENDPOINTS = X_DIM*Y_DIM + N_PERIPH. Every loop that walks
     // the initiators walks endpoints -- each one injects and each one can wedge.
     parameter int unsigned NUM_ENDPOINTS = 4,
-    parameter int unsigned ID_WIDTH   = ni_params_pkg::NOC_ID_WIDTH_DFLT,
-    parameter int unsigned ADDR_WIDTH = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
-    parameter int unsigned DATA_WIDTH = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
+    parameter int unsigned ID_WIDTH   = ni_params_pkg::NOC_ID_WIDTH,
+    parameter int unsigned ADDR_WIDTH = ni_params_pkg::AXI_ADDR_WIDTH,
+    parameter int unsigned DATA_WIDTH = ni_params_pkg::AXI_DATA_WIDTH,
     // Tile crossbar windows, one field per target in port order (m0 = config,
     // last = data), one row per endpoint. Each endpoint decodes on its OWN
     // windows: a hit is tile-local and never touches the NoC, a miss falls
@@ -55,16 +55,16 @@ module noc_tb_top #(
     parameter logic [N_PERIPH_MAX-1:0][7:0] PERIPH_NODE = '0,
     parameter logic [N_PERIPH_MAX-1:0][7:0] PERIPH_PORT = '0,
     // DAT face VC count. Default from where the parameter is defined:
-    // noc.DAT_NUM_VC in specgen/source/constants.yaml, the same value
+    // noc.NUM_DAT_VC in specgen/source/constants.yaml, the same value
     // build_config.mk picks the noc_types_pkg_vc<N> flit package with.
-    parameter int unsigned DAT_NUM_VC = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
+    parameter int unsigned NUM_DAT_VC = ni_params_pkg::NUM_DAT_VC,
     // NMU read reorder buffer: 1 = the reorder-buffer response path
     // docs/noc-target-spec.md section 3 describes, 0 = the RoBless bypass with
     // its per-id single-outstanding interlock. int unsigned, not bit: it goes
     // straight into cmodel_nmu_create_ex's `input int rob_enabled`. Default from
-    // where the parameter is defined: nmu.READ_ROB_ENABLED in
+    // where the parameter is defined: nmu.R_ROB_EN in
     // specgen/source/constants.yaml.
-    parameter int unsigned READ_ROB_ENABLED = ni_params_pkg::NMU_READ_ROB_ENABLED_DFLT,
+    parameter int unsigned R_ROB_EN = ni_params_pkg::NMU_R_ROB_EN,
     // Tile-memory latency profile. Every endpoint's two memories sit behind an
     // axi_delayer carrying these settings; input covers AW/W/AR, output B/R.
     parameter bit          MEM_STALL_RANDOM_INPUT  = 1'b0,
@@ -86,12 +86,12 @@ module noc_tb_top #(
     end
 
     localparam int unsigned NUM_NODES      = X_DIM * Y_DIM;
-    localparam int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT;
-    localparam int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT;
-    localparam int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT;
+    localparam int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH;
+    localparam int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH;
+    localparam int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH;
     // ROUTER_VC_DEPTH: credit window for inter-router links; passed to fabric so
     // link_perf_monitor tracks the actual receiving buffer depth.
-    localparam int unsigned ROUTER_VC_DEPTH = ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT;
+    localparam int unsigned ROUTER_VC_DEPTH = ni_params_pkg::NOC_ROUTER_VC_DEPTH;
 
     // -------------------------------------------------------------------------
     // Liveness trace. The watchdog below reports that time ran out; these two
@@ -247,14 +247,14 @@ module noc_tb_top #(
     // NSU knobs. max_unique_ids=1 collapses every master onto one downstream
     // AXI id (FlooNoC default); 2**AXI_ID_WIDTH passes the master's id through.
     // max_outstanding is the shared MetaBuffer pool per direction.
-    int unsigned max_unique_ids  = ni_params_pkg::NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT;
-    int unsigned max_outstanding = ni_params_pkg::NSU_META_BUFFER_MAX_OUTSTANDING_DFLT;
+    int unsigned max_unique_ids  = ni_params_pkg::NSU_META_BUFFER_MAX_UNIQUE_IDS;
+    int unsigned max_outstanding = ni_params_pkg::NSU_META_BUFFER_MAX_OUTSTANDING;
 
     // NMU RoB pool depths, per direction. Both <= 256 (ordering_tag is 8 bits).
-    int unsigned b_rob_depth = ni_params_pkg::NMU_ROB_B_DEPTH_DFLT;
-    int unsigned r_rob_depth = ni_params_pkg::NMU_ROB_R_DEPTH_DFLT;
+    int unsigned b_rob_depth = ni_params_pkg::NMU_ROB_B_DEPTH;
+    int unsigned r_rob_depth = ni_params_pkg::NMU_ROB_R_DEPTH;
     // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId).
-    int unsigned max_txns_per_id = ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT;
+    int unsigned max_txns_per_id = ni_params_pkg::NMU_MAX_OUTSTANDING_PER_ID;
     int unsigned channel_mode = 0;
     int unsigned injection_mode = 0;
     string traffic_direction = "write";
@@ -273,16 +273,16 @@ module noc_tb_top #(
         // specgen/source/constants.yaml and no longer appears in the config name,
         // so the log is the only place it is bound to the run that used it.
         $display("[Config] max_unique_ids=%0d max_outstanding=%0d dat_num_vc=%0d router_vc_depth=%0d mst_stall_random=%0d ni_dat_rx_vc_depth=%0d",
-                 max_unique_ids, max_outstanding, DAT_NUM_VC,
-                 ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT, MST_STALL_RANDOM_OUTPUT,
-                 ni_params_pkg::NOC_NI_DAT_RX_VC_DEPTH_DFLT);
+                 max_unique_ids, max_outstanding, NUM_DAT_VC,
+                 ni_params_pkg::NOC_ROUTER_VC_DEPTH, MST_STALL_RANDOM_OUTPUT,
+                 ni_params_pkg::NOC_NI_DAT_RX_VC_DEPTH);
         void'($value$plusargs("b_rob_depth=%d", b_rob_depth));
         void'($value$plusargs("r_rob_depth=%d", r_rob_depth));
         void'($value$plusargs("max_txns_per_id=%d", max_txns_per_id));
         for (int unsigned i = 0; i < NUM_NODES; i++)
             router_ctx[i] = cmodel_router_create($sformatf("router_%0d", i),
                                                  int'(i % X_DIM), int'(i / X_DIM),
-                                                 int'(X_DIM), int'(Y_DIM), int'(DAT_NUM_VC));
+                                                 int'(X_DIM), int'(Y_DIM), int'(NUM_DAT_VC));
         // NI creates cover the ENDPOINT space: the routers first, then one per
         // peripheral. src_id is the route coordinate (y<<X_WIDTH)|x, stamped
         // into every request the endpoint emits and what its responses come back
@@ -295,16 +295,16 @@ module noc_tb_top #(
             automatic int src_id = int'(((node / X_DIM) << ni_flit_pkg::X_WIDTH)
                                         | (node % X_DIM));
             automatic int port_id = (e < NUM_NODES) ? 0 : int'(PERIPH_PORT[e - NUM_NODES]);
-            nmu_ctx[e] = cmodel_nmu_create_ex($sformatf("nmu_%0d", e), src_id, int'(DAT_NUM_VC),
-                                              int'(READ_ROB_ENABLED), b_rob_depth, r_rob_depth,
+            nmu_ctx[e] = cmodel_nmu_create_ex($sformatf("nmu_%0d", e), src_id, int'(NUM_DAT_VC),
+                                              int'(R_ROB_EN), b_rob_depth, r_rob_depth,
                                               max_txns_per_id, port_id, sam_config_path);
-            nsu_ctx[e] = cmodel_nsu_create($sformatf("nsu_%0d", e), src_id, int'(DAT_NUM_VC),
+            nsu_ctx[e] = cmodel_nsu_create($sformatf("nsu_%0d", e), src_id, int'(NUM_DAT_VC),
                                            max_unique_ids, max_outstanding, port_id,
                                            sam_config_path);
             cmodel_nmu_set_channel_mode(nmu_ctx[e], channel_mode);
             cmodel_nsu_set_channel_mode(nsu_ctx[e], channel_mode);
             dat_merge_ctx[e] = cmodel_dat_merge_create($sformatf("dat_merge_%0d", e),
-                                                       int'(DAT_NUM_VC));
+                                                       int'(NUM_DAT_VC));
         end
     end
 
@@ -312,7 +312,7 @@ module noc_tb_top #(
     // Per-node AXI buses (struct arrays): master-side into NMU, slave-side out of NSU
     // -------------------------------------------------------------------------
     ni_signals_pkg::axi_req_t  master_axi_req [NUM_ENDPOINTS];  // tb master -> NMU
-    logic [ni_params_pkg::AXI_AWUSER_WIDTH_DFLT-1:0] master_awuser [NUM_ENDPOINTS];  // AWUSER sideband
+    logic [ni_params_pkg::AXI_AWUSER_WIDTH-1:0] master_awuser [NUM_ENDPOINTS];  // AWUSER sideband
     ni_signals_pkg::axi_rsp_t  master_axi_rsp [NUM_ENDPOINTS];  // NMU -> tb master
     ni_signals_pkg::axi_req_t  slave_axi_req  [NUM_ENDPOINTS];  // NSU -> tb slave
     ni_signals_pkg::axi_rsp_t  slave_axi_rsp  [NUM_ENDPOINTS];  // tb slave -> NSU
@@ -323,7 +323,7 @@ module noc_tb_top #(
     noc_fabric #(
         .X_DIM(X_DIM), .Y_DIM(Y_DIM),
         .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
-        .DAT_NUM_VC(DAT_NUM_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),
+        .NUM_DAT_VC(NUM_DAT_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),
         .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH),
         .ROUTER_VC_DEPTH(ROUTER_VC_DEPTH),
         .N_PERIPH(N_PERIPH),

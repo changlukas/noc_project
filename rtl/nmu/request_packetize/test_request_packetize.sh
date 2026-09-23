@@ -19,7 +19,7 @@ task_sources=(
     "$task_root/specgen/generated/sv/ni_params_pkg.sv"
     "$task_root/specgen/generated/sv/ni_flit_pkg.sv"
     "$task_root/specgen/generated/sv/ni_signals_pkg.sv"
-    "$task_root/rtl/common/ni_child_types_pkg.sv"
+    "$task_root/rtl/common/ni_types_pkg.sv"
     "$task_root/rtl/nmu/channel_assign/nmu_channel_assign.sv"
     "$task_root/rtl/nmu/request_packetize/nmu_request_packetize.sv"
     "$task_root/rtl/nmu/request_packetize/nmu_request_inject_tb_dut.sv"
@@ -45,7 +45,7 @@ if [[ "${1:-test}" == test ]]; then
         IFS=: read -r task_depth task_vcs task_mode <<< "$task_config"
         task_obj="$task_tmp/stress_${task_depth}_${task_vcs}_${task_mode}"
         "${task_verilator[@]}" --binary -j 1 --top-module "$task_top" \
-            -GFIFO_DEPTH="$task_depth" -GDAT_NUM_VC="$task_vcs" -GDAT_VC_MODE="$task_mode" \
+            -GFIFO_DEPTH="$task_depth" -GNUM_DAT_VC="$task_vcs" -GDAT_VC_MODE="$task_mode" \
             --Mdir "$task_obj" -o stress_tb "${task_sources[@]}" "$task_tb"
         "$task_obj/stress_tb"
     done

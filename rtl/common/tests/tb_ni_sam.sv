@@ -6,7 +6,7 @@ module tb_ni_sam;
 
     import topology_pkg::*;
 
-    localparam sam_idx_t OVERLAP_BROAD_IDX = '{
+    localparam sam_result_t OVERLAP_BROAD_IDX = '{
         dst_id: ni_flit_pkg::DST_ID_WIDTH'(1),
         dst_port_id: ni_flit_pkg::DST_PORT_ID_WIDTH'(0),
         is_data: 1'b1,
@@ -14,7 +14,7 @@ module tb_ni_sam;
         mask_x: '0,
         mask_y: '0
     };
-    localparam sam_idx_t OVERLAP_NARROW_IDX = '{
+    localparam sam_result_t OVERLAP_NARROW_IDX = '{
         dst_id: ni_flit_pkg::DST_ID_WIDTH'(2),
         dst_port_id: ni_flit_pkg::DST_PORT_ID_WIDTH'(0),
         is_data: 1'b0,
@@ -29,11 +29,11 @@ module tb_ni_sam;
 
     sam_addr_t addr;
     logic      lookup_en;
-    sam_idx_t  sam_idx;
+    sam_result_t  sam_idx;
     logic      lookup_valid;
     logic      lookup_error;
 
-    sam_idx_t overlap_idx;
+    sam_result_t overlap_idx;
     logic     overlap_valid;
     logic     overlap_error;
 
@@ -41,7 +41,7 @@ module tb_ni_sam;
         .SAM_NUM_RULES  ( SAM_NUM_RULES  ),
         .addr_t         ( sam_addr_t     ),
         .sam_mask_sel_t ( sam_mask_sel_t ),
-        .sam_idx_t      ( sam_idx_t      ),
+        .sam_result_t      ( sam_result_t      ),
         .sam_rule_t     ( sam_rule_t     ),
         .SAM            ( SAM            )
     ) i_ni_sam (
@@ -56,7 +56,7 @@ module tb_ni_sam;
         .SAM_NUM_RULES  ( 2              ),
         .addr_t         ( sam_addr_t     ),
         .sam_mask_sel_t ( sam_mask_sel_t ),
-        .sam_idx_t      ( sam_idx_t      ),
+        .sam_result_t      ( sam_result_t      ),
         .sam_rule_t     ( sam_rule_t     ),
         .SAM            ( OVERLAP_SAM    )
     ) i_overlap_ni_sam (
@@ -77,7 +77,7 @@ module tb_ni_sam;
         lookup_en = 1'b1;
         #1ps;
         assert (lookup_valid && !lookup_error && sam_idx == SAM[SAM_NUM_RULES-1].idx)
-            else $fatal(1, "Memory lookup did not preserve sam_idx_t");
+            else $fatal(1, "Memory lookup did not preserve sam_result_t");
 
         addr = 48'h0000_0200_0000;
         #1ps;

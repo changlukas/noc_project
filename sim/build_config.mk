@@ -228,7 +228,7 @@ TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_flit_pkg.sv \
     $(TOPOLOGY_NOC_TYPES_PKG) \
     $(TOPOLOGY_PKG_SV) \
-    $(RTL_ROOT)/common/ni_child_types_pkg.sv \
+    $(RTL_ROOT)/common/ni_types_pkg.sv \
     $(DV_ROOT)/common_cells-1.37.0/src/cf_math_pkg.sv \
     $(DV_ROOT)/common_cells-1.37.0/src/addr_decode_dync.sv \
     $(DV_ROOT)/common_cells-1.37.0/src/addr_decode.sv \

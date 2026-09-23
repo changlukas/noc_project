@@ -14,7 +14,7 @@ axi:
     # The endpoint remaps this external width into the fixed NOC_ID_WIDTH
     # carried by every NoC flit. New upstream IDs backpressure when all NoC
     # IDs are live; distinct live upstream IDs never share a NoC ID.
-    sv_symbol: AXI_ID_WIDTH_DFLT
+    sv_symbol: AXI_ID_WIDTH
     cpp_symbol: AXI_ID_WIDTH
   NOC_ID_WIDTH:
     type: int
@@ -22,7 +22,7 @@ axi:
     description: "Fixed NoC transaction ID width after AXI-ID remapping"
     default: 3
     allowed: [3]
-    sv_symbol: NOC_ID_WIDTH_DFLT
+    sv_symbol: NOC_ID_WIDTH
     cpp_symbol: NOC_ID_WIDTH
   ADDR_WIDTH:
     type: int
@@ -36,7 +36,7 @@ axi:
     # ref_model/dpi/cmodel_dpi.cpp packs into a 2-word svBitVecVal[2] container
     # (unchanged: ceil(48/32) == ceil(64/32) == 2); widening past 64 still
     # needs pack_addr64 reparameterized.
-    sv_symbol: AXI_ADDR_WIDTH_DFLT
+    sv_symbol: AXI_ADDR_WIDTH
     cpp_symbol: AXI_ADDR_WIDTH
   DATA_WIDTH:
     type: int
@@ -48,7 +48,7 @@ axi:
     # the data class at this width (DATA_BYTES = 64 in c_model/include/axi/types.hpp,
     # and the parameterized data marshalling in sim/c/cmodel_dpi.cpp); the narrow
     # class rides the addressed 8 B lane of the same port (docs/noc-target-spec.md §5).
-    sv_symbol: AXI_DATA_WIDTH_DFLT
+    sv_symbol: AXI_DATA_WIDTH
     cpp_symbol: AXI_DATA_WIDTH
   AWUSER_WIDTH:
     type: int
@@ -61,7 +61,7 @@ axi:
     # holds while ADDR_WIDTH == 48. The DPI carries AWUSER in a 2-word
     # svBitVecVal container (ref_model/dpi/cmodel_dpi.cpp cmodel_nmu_set_inputs),
     # which is what caps this at 64.
-    sv_symbol: AXI_AWUSER_WIDTH_DFLT
+    sv_symbol: AXI_AWUSER_WIDTH
     cpp_symbol: AXI_AWUSER_WIDTH
   FIFO_DEPTH:
     type: int
@@ -69,7 +69,7 @@ axi:
     description: "Common depth of the five AXI-channel asynchronous FIFOs in an NMU or NSU; power of two and at least 2"
     default: 8
     min: 2
-    sv_symbol: AXI_FIFO_DEPTH_DFLT
+    sv_symbol: AXI_FIFO_DEPTH
     cpp_symbol: AXI_FIFO_DEPTH
 
 noc:
@@ -95,7 +95,7 @@ noc:
     description: "DAT VC allocation policy: 0 = SHARED, 1 = READ_WRITE_SPLIT"
     default: 0
     allowed: [0, 1]
-    sv_symbol: NOC_DAT_VC_MODE_DFLT
+    sv_symbol: NOC_DAT_VC_MODE
     cpp_symbol: NOC_DAT_VC_MODE
   DAT_NUM_VC:
     type: int
@@ -104,7 +104,7 @@ noc:
     default: 2
     min: 1
     max: 8
-    sv_symbol: NOC_DAT_NUM_VC_DFLT
+    sv_symbol: NUM_DAT_VC
     cpp_symbol: NOC_DAT_NUM_VC
   REQ_FLIT_WIDTH:
     type: int
@@ -113,7 +113,7 @@ noc:
     default: 136
     min: 64
     max: 1024
-    sv_symbol: NOC_REQ_FLIT_WIDTH_DFLT
+    sv_symbol: NOC_REQ_FLIT_WIDTH
     cpp_symbol: NOC_REQ_FLIT_WIDTH
   RSP_FLIT_WIDTH:
     type: int
@@ -122,7 +122,7 @@ noc:
     default: 126
     min: 64
     max: 1024
-    sv_symbol: NOC_RSP_FLIT_WIDTH_DFLT
+    sv_symbol: NOC_RSP_FLIT_WIDTH
     cpp_symbol: NOC_RSP_FLIT_WIDTH
   DAT_FLIT_WIDTH:
     type: int
@@ -131,7 +131,7 @@ noc:
     default: 633
     min: 64
     max: 1024
-    sv_symbol: NOC_DAT_FLIT_WIDTH_DFLT
+    sv_symbol: NOC_DAT_FLIT_WIDTH
     cpp_symbol: NOC_DAT_FLIT_WIDTH
   FIFO_DEPTH:
     type: int
@@ -139,7 +139,7 @@ noc:
     description: "Common depth of the REQ, RSP, DAT Write and DAT Read synchronous NoC-class FIFOs in an NMU or NSU; positive power of two"
     default: 8
     min: 1
-    sv_symbol: NOC_FIFO_DEPTH_DFLT
+    sv_symbol: NOC_FIFO_DEPTH
     cpp_symbol: NOC_FIFO_DEPTH
   ROUTER_VC_DEPTH:
     type: int
@@ -147,7 +147,7 @@ noc:
     description: "Router input VC FIFO depth; power of two and at least 2; defines the credit seed of the upstream sender"
     default: 8
     min: 2
-    sv_symbol: NOC_ROUTER_VC_DEPTH_DFLT
+    sv_symbol: NOC_ROUTER_VC_DEPTH
     cpp_symbol: NOC_ROUTER_VC_DEPTH
   NI_DAT_RX_VC_DEPTH:
     type: int
@@ -155,7 +155,7 @@ noc:
     description: "NI DAT receive FIFO depth per VC; power of two and at least 2; defaults to the Router VC depth and defines the Router LOCAL sender credit seed"
     default: 8
     min: 2
-    sv_symbol: NOC_NI_DAT_RX_VC_DEPTH_DFLT
+    sv_symbol: NOC_NI_DAT_RX_VC_DEPTH
     cpp_symbol: NOC_NI_DAT_RX_VC_DEPTH
   ROUTER_OUTPUT_FIFO_DEPTH:
     type: int
@@ -163,7 +163,7 @@ noc:
     description: "Router output FIFO depth (stage 3); positive power of two; not credit-counted"
     default: 8
     min: 1
-    sv_symbol: NOC_ROUTER_OUTPUT_FIFO_DEPTH_DFLT
+    sv_symbol: NOC_ROUTER_OUTPUT_FIFO_DEPTH
     cpp_symbol: NOC_ROUTER_OUTPUT_FIFO_DEPTH
   MESH_X_DIM:
     type: int
@@ -171,7 +171,7 @@ noc:
     description: "Mesh X dimension (routers per row); power of two; bounded by X_WIDTH (4 bit); minimum 2"
     default: 4
     allowed: [2, 4, 8, 16]
-    sv_symbol: NOC_MESH_X_DIM_DFLT
+    sv_symbol: NOC_MESH_X_DIM
     cpp_symbol: NOC_MESH_X_DIM
   MESH_Y_DIM:
     type: int
@@ -179,7 +179,7 @@ noc:
     description: "Mesh Y dimension (routers per column); power of two; bounded by Y_WIDTH (4 bit); minimum 2"
     default: 4
     allowed: [2, 4, 8, 16]
-    sv_symbol: NOC_MESH_Y_DIM_DFLT
+    sv_symbol: NOC_MESH_Y_DIM
     cpp_symbol: NOC_MESH_Y_DIM
 
 nmu:
@@ -190,7 +190,7 @@ nmu:
     default: 1
     min: 0
     max: 1
-    sv_symbol: NMU_READ_ROB_ENABLED_DFLT
+    sv_symbol: NMU_R_ROB_EN
     cpp_symbol: NMU_READ_ROB_ENABLED
   ROB_B_DEPTH:
     type: int
@@ -199,7 +199,7 @@ nmu:
     default: 128
     min: 1
     max: 256
-    sv_symbol: NMU_ROB_B_DEPTH_DFLT
+    sv_symbol: NMU_ROB_B_DEPTH
     cpp_symbol: NMU_ROB_B_DEPTH
   ROB_R_DEPTH:
     type: int
@@ -208,7 +208,7 @@ nmu:
     default: 128
     min: 1
     max: 256
-    sv_symbol: NMU_ROB_R_DEPTH_DFLT
+    sv_symbol: NMU_ROB_R_DEPTH
     cpp_symbol: NMU_ROB_R_DEPTH
   MAX_TXNS_PER_ID:
     type: int
@@ -217,7 +217,7 @@ nmu:
     default: 32
     min: 1
     max: 256
-    sv_symbol: NMU_MAX_TXNS_PER_ID_DFLT
+    sv_symbol: NMU_MAX_OUTSTANDING_PER_ID
     cpp_symbol: NMU_MAX_TXNS_PER_ID
   QUEUE_DEPTH:
     type: int
@@ -226,7 +226,7 @@ nmu:
     default: 16
     min: 1
     max: 1024
-    sv_symbol: NMU_QUEUE_DEPTH_DFLT
+    sv_symbol: NMU_QUEUE_DEPTH
     cpp_symbol: NMU_QUEUE_DEPTH
   DEPKT_Q_DEPTH:
     type: int
@@ -235,7 +235,7 @@ nmu:
     default: 16
     min: 1
     max: 1024
-    sv_symbol: NMU_DEPKT_Q_DEPTH_DFLT
+    sv_symbol: NMU_DEPKT_Q_DEPTH
     cpp_symbol: NMU_DEPKT_Q_DEPTH
   ARBITER_FIFO_DEPTH:
     type: int
@@ -244,7 +244,7 @@ nmu:
     default: 4
     min: 1
     max: 64
-    sv_symbol: NMU_ARBITER_FIFO_DEPTH_DFLT
+    sv_symbol: NMU_ARBITER_FIFO_DEPTH
     cpp_symbol: NMU_ARBITER_FIFO_DEPTH
 
 nsu:
@@ -255,7 +255,7 @@ nsu:
     default: 3
     min: 1
     max: 8
-    sv_symbol: NSU_AXI_ID_WIDTH_DFLT
+    sv_symbol: NSU_AXI_ID_WIDTH
     cpp_symbol: NSU_AXI_ID_WIDTH
   MAX_ACTIVE_IDS:
     type: int
@@ -264,7 +264,7 @@ nsu:
     default: 8
     min: 1
     max: 256
-    sv_symbol: NSU_MAX_ACTIVE_IDS_DFLT
+    sv_symbol: NSU_MAX_ACTIVE_IDS
     cpp_symbol: NSU_MAX_ACTIVE_IDS
   MAX_OUTSTANDING:
     type: int
@@ -273,7 +273,7 @@ nsu:
     default: 32
     min: 1
     max: 256
-    sv_symbol: NSU_MAX_OUTSTANDING_DFLT
+    sv_symbol: NSU_MAX_OUTSTANDING
     cpp_symbol: NSU_MAX_OUTSTANDING
   QUEUE_DEPTH:
     type: int
@@ -282,7 +282,7 @@ nsu:
     default: 16
     min: 1
     max: 1024
-    sv_symbol: NSU_QUEUE_DEPTH_DFLT
+    sv_symbol: NSU_QUEUE_DEPTH
     cpp_symbol: NSU_QUEUE_DEPTH
   META_BUFFER_MAX_OUTSTANDING:
     type: int
@@ -291,7 +291,7 @@ nsu:
     default: 32
     min: 1
     max: 256
-    sv_symbol: NSU_META_BUFFER_MAX_OUTSTANDING_DFLT
+    sv_symbol: NSU_META_BUFFER_MAX_OUTSTANDING
     cpp_symbol: NSU_META_BUFFER_MAX_OUTSTANDING
   META_BUFFER_MAX_UNIQUE_IDS:
     type: int
@@ -299,7 +299,7 @@ nsu:
     description: "Distinct AXI IDs the NSU presents downstream (1 collapses; 8 passes through). Default passthrough: the upstream ID reaches the slave unchanged."
     default: 8
     allowed: [1, 8]
-    sv_symbol: NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT
+    sv_symbol: NSU_META_BUFFER_MAX_UNIQUE_IDS
     cpp_symbol: NSU_META_BUFFER_MAX_UNIQUE_IDS
   ARBITER_FIFO_DEPTH:
     type: int
@@ -308,5 +308,5 @@ nsu:
     default: 4
     min: 1
     max: 64
-    sv_symbol: NSU_ARBITER_FIFO_DEPTH_DFLT
+    sv_symbol: NSU_ARBITER_FIFO_DEPTH
     cpp_symbol: NSU_ARBITER_FIFO_DEPTH

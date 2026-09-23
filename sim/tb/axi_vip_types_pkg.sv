@@ -8,9 +8,9 @@
 
 package axi_vip_types_pkg;
 
-    localparam int unsigned VIP_AW = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;
-    localparam int unsigned VIP_DW = ni_params_pkg::AXI_DATA_WIDTH_DFLT;
-    localparam int unsigned VIP_IW = ni_params_pkg::AXI_ID_WIDTH_DFLT;
+    localparam int unsigned VIP_AW = ni_params_pkg::AXI_ADDR_WIDTH;
+    localparam int unsigned VIP_DW = ni_params_pkg::AXI_DATA_WIDTH;
+    localparam int unsigned VIP_IW = ni_params_pkg::AXI_ID_WIDTH;
     localparam int unsigned VIP_UW = 1;  // pulp minimum; flat struct has no user
 
     typedef logic [VIP_AW-1:0]   vip_addr_t;

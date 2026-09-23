@@ -28,8 +28,8 @@
 `define DAT_MERGE_WRAP_SV
 
 module dat_merge_wrap #(
-    parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
-    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT
+    parameter int unsigned NUM_DAT_VC     = ni_params_pkg::NUM_DAT_VC,
+    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
@@ -38,26 +38,26 @@ module dat_merge_wrap #(
     // NMU-facing (from nmu_wrap's own tx_dat_*/rx_dat_* view).
     input  logic                      nmu_tx_dat_valid_i,
     input  logic [DAT_FLIT_WIDTH-1:0] nmu_tx_dat_flit_i,
-    output logic [DAT_NUM_VC-1:0]     nmu_tx_dat_crdvalid_o,
+    output logic [NUM_DAT_VC-1:0]     nmu_tx_dat_crdvalid_o,
     output logic                      nmu_rx_dat_valid_o,
     output logic [DAT_FLIT_WIDTH-1:0] nmu_rx_dat_flit_o,
 
     // NSU-facing (from nsu_wrap's own tx_dat_*/rx_dat_* view).
     input  logic                      nsu_tx_dat_valid_i,
     input  logic [DAT_FLIT_WIDTH-1:0] nsu_tx_dat_flit_i,
-    output logic [DAT_NUM_VC-1:0]     nsu_tx_dat_crdvalid_o,
+    output logic [NUM_DAT_VC-1:0]     nsu_tx_dat_crdvalid_o,
     output logic                      nsu_rx_dat_valid_o,
     output logic [DAT_FLIT_WIDTH-1:0] nsu_rx_dat_flit_o,
-    input  logic [DAT_NUM_VC-1:0]     nsu_rx_dat_crdvalid_i,
+    input  logic [NUM_DAT_VC-1:0]     nsu_rx_dat_crdvalid_i,
 
     // Router-facing (this module's own view; connects to router_wrap's DAT
     // LOCAL port, i.e. rx_dat_valid[LOCAL]/tx_dat_valid[LOCAL] etc.).
     output logic                      tx_dat_valid_o,
     output logic [DAT_FLIT_WIDTH-1:0] tx_dat_flit_o,
-    input  logic [DAT_NUM_VC-1:0]     tx_dat_crdvalid_i,
+    input  logic [NUM_DAT_VC-1:0]     tx_dat_crdvalid_i,
     input  logic                      rx_dat_valid_i,
     input  logic [DAT_FLIT_WIDTH-1:0] rx_dat_flit_i,
-    output logic [DAT_NUM_VC-1:0]     rx_dat_crdvalid_o
+    output logic [NUM_DAT_VC-1:0]     rx_dat_crdvalid_o
 );
 
     // -------------------------------------------------------------------------
@@ -70,8 +70,8 @@ module dat_merge_wrap #(
         input  bit [DAT_FLIT_WIDTH-1:0] nmu_tx_dat_flit,
         input  bit                    nsu_tx_dat_valid,
         input  bit [DAT_FLIT_WIDTH-1:0] nsu_tx_dat_flit,
-        input  bit [DAT_NUM_VC-1:0]   tx_dat_crdvalid,
-        input  bit [DAT_NUM_VC-1:0]   nsu_rx_dat_crdvalid,
+        input  bit [NUM_DAT_VC-1:0]   tx_dat_crdvalid,
+        input  bit [NUM_DAT_VC-1:0]   nsu_rx_dat_crdvalid,
         input  bit                    rx_dat_valid,
         input  bit [DAT_FLIT_WIDTH-1:0] rx_dat_flit
     );
@@ -80,15 +80,15 @@ module dat_merge_wrap #(
 
     import "DPI-C" context function void cmodel_dat_merge_get_outputs(
         input  longint unsigned              ctx,
-        output bit [DAT_NUM_VC-1:0]     nmu_tx_dat_crdvalid,
+        output bit [NUM_DAT_VC-1:0]     nmu_tx_dat_crdvalid,
         output bit                      nmu_rx_dat_valid,
         output bit [DAT_FLIT_WIDTH-1:0] nmu_rx_dat_flit,
-        output bit [DAT_NUM_VC-1:0]     nsu_tx_dat_crdvalid,
+        output bit [NUM_DAT_VC-1:0]     nsu_tx_dat_crdvalid,
         output bit                      nsu_rx_dat_valid,
         output bit [DAT_FLIT_WIDTH-1:0] nsu_rx_dat_flit,
         output bit                      tx_dat_valid,
         output bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit,
-        output bit [DAT_NUM_VC-1:0]     rx_dat_crdvalid
+        output bit [NUM_DAT_VC-1:0]     rx_dat_crdvalid
     );
 
     // Lifecycle / error polling lives in tb_top.sv.
@@ -97,15 +97,15 @@ module dat_merge_wrap #(
     // Output registers (registered one cycle behind DPI sample)
     // -------------------------------------------------------------------------
 
-    bit [DAT_NUM_VC-1:0]     nmu_tx_dat_crdvalid_q;
+    bit [NUM_DAT_VC-1:0]     nmu_tx_dat_crdvalid_q;
     bit                      nmu_rx_dat_valid_q;
     bit [DAT_FLIT_WIDTH-1:0] nmu_rx_dat_flit_q;
-    bit [DAT_NUM_VC-1:0]     nsu_tx_dat_crdvalid_q;
+    bit [NUM_DAT_VC-1:0]     nsu_tx_dat_crdvalid_q;
     bit                      nsu_rx_dat_valid_q;
     bit [DAT_FLIT_WIDTH-1:0] nsu_rx_dat_flit_q;
     bit                      tx_dat_valid_q;
     bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q;
-    bit [DAT_NUM_VC-1:0]     rx_dat_crdvalid_q;
+    bit [NUM_DAT_VC-1:0]     rx_dat_crdvalid_q;
 
     // -------------------------------------------------------------------------
     // always_ff: sync-reset, 3-step DPI call, registered outputs
@@ -139,15 +139,15 @@ module dat_merge_wrap #(
             // Step 3: pull outputs into local temporaries (blocking to locals is
             // safe; avoids BLKANDNBLK with the nonblocking reset path above).
             begin : get_outputs_blk
-                bit [DAT_NUM_VC-1:0]     t_nmu_tx_dat_crdvalid;
+                bit [NUM_DAT_VC-1:0]     t_nmu_tx_dat_crdvalid;
                 bit                      t_nmu_rx_dat_valid;
                 bit [DAT_FLIT_WIDTH-1:0] t_nmu_rx_dat_flit;
-                bit [DAT_NUM_VC-1:0]     t_nsu_tx_dat_crdvalid;
+                bit [NUM_DAT_VC-1:0]     t_nsu_tx_dat_crdvalid;
                 bit                      t_nsu_rx_dat_valid;
                 bit [DAT_FLIT_WIDTH-1:0] t_nsu_rx_dat_flit;
                 bit                      t_tx_dat_valid;
                 bit [DAT_FLIT_WIDTH-1:0] t_tx_dat_flit;
-                bit [DAT_NUM_VC-1:0]     t_rx_dat_crdvalid;
+                bit [NUM_DAT_VC-1:0]     t_rx_dat_crdvalid;
                 cmodel_dat_merge_get_outputs(
                     ctx_i,
                     t_nmu_tx_dat_crdvalid, t_nmu_rx_dat_valid, t_nmu_rx_dat_flit,

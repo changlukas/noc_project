@@ -125,15 +125,15 @@ _AXI_PAYLOAD_FIELD_LSB_ORDER: dict[str, list[str]] = {
 # Interface uses parameterized widths; struct must use fully-qualified pkg refs.
 # ---------------------------------------------------------------------------
 _IFACE_WIDTH_TO_STRUCT: dict[str, str] = {
-    "[ID_WIDTH-1:0]":   "[ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0]",
-    "[ADDR_WIDTH-1:0]": "[ni_params_pkg::AXI_ADDR_WIDTH_DFLT-1:0]",
-    "[DATA_WIDTH-1:0]": "[ni_params_pkg::AXI_DATA_WIDTH_DFLT-1:0]",
-    "[WSTRB_WIDTH-1:0]": "[ni_params_pkg::AXI_DATA_WIDTH_DFLT/8-1:0]",
+    "[ID_WIDTH-1:0]":   "[ni_params_pkg::AXI_ID_WIDTH-1:0]",
+    "[ADDR_WIDTH-1:0]": "[ni_params_pkg::AXI_ADDR_WIDTH-1:0]",
+    "[DATA_WIDTH-1:0]": "[ni_params_pkg::AXI_DATA_WIDTH-1:0]",
+    "[WSTRB_WIDTH-1:0]": "[ni_params_pkg::AXI_DATA_WIDTH/8-1:0]",
     "[7:0]":  "[7:0]",
     "[2:0]":  "[2:0]",
     "[1:0]":  "[1:0]",
     "[3:0]":  "[3:0]",
-    "[AWUSER_WIDTH-1:0]": "[ni_params_pkg::AXI_AWUSER_WIDTH_DFLT-1:0]",
+    "[AWUSER_WIDTH-1:0]": "[ni_params_pkg::AXI_AWUSER_WIDTH-1:0]",
     "":       "",
 }
 
@@ -174,7 +174,7 @@ def _emit_axi_structs(channels: list[str]) -> list[str]:
     The per-channel types have an explicit LSB-first protocol order and exclude
     handshake signals.  The existing aggregate types retain their established
     field order.  All widths come from _AXI_CHANNEL_SIGNALS and translate to
-    fully-qualified ni_params_pkg::*_DFLT references.
+    fully-qualified ni_params_pkg::* references.
     """
     req_fields: list[tuple[str, str]] = []
     rsp_fields: list[tuple[str, str]] = []

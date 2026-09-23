@@ -1,17 +1,17 @@
 `timescale 1ns / 1ps
 
 module tb_nmu_ordering_robless;
-    localparam int unsigned ID_W = ni_params_pkg::AXI_ID_WIDTH_DFLT;
+    localparam int unsigned ID_W = ni_params_pkg::AXI_ID_WIDTH;
 
     logic clk_i = 0, rst_i = 1;
-    ni_child_types_pkg::nmu_sam_aw_result_t s_aw_i;
-    ni_child_types_pkg::nmu_aw_request_t m_aw_o;
+    ni_types_pkg::nmu_sam_aw_result_t s_aw_i;
+    ni_types_pkg::nmu_aw_request_t m_aw_o;
     ni_signals_pkg::axi_w_t s_w_i, m_w_o;
-    ni_child_types_pkg::nmu_sam_ar_result_t s_ar_i;
-    ni_child_types_pkg::nmu_ar_request_t m_ar_o;
-    ni_child_types_pkg::nmu_b_response_t s_b_i;
+    ni_types_pkg::nmu_sam_ar_result_t s_ar_i;
+    ni_types_pkg::nmu_ar_request_t m_ar_o;
+    ni_types_pkg::nmu_b_response_t s_b_i;
     ni_signals_pkg::axi_b_t m_b_o;
-    ni_child_types_pkg::nmu_r_response_t s_r_i;
+    ni_types_pkg::nmu_r_response_t s_r_i;
     ni_signals_pkg::axi_r_t m_r_o;
     logic s_aw_valid_i, s_aw_ready_o, m_aw_valid_o, m_aw_ready_i;
     logic s_w_valid_i, s_w_ready_o, m_w_valid_o, m_w_ready_i;
@@ -20,8 +20,8 @@ module tb_nmu_ordering_robless;
     logic s_r_valid_i, s_r_ready_o, m_r_valid_o, m_r_ready_i;
 
     nmu_ordering #(
-        .NMU_ROB_B_DEPTH (8), .NMU_ROB_R_DEPTH (8),
-        .NMU_MAX_TXNS_PER_ID (4), .READ_ROB_ENABLED (1'b0)
+        .B_ROB_DEPTH (8), .R_ROB_DEPTH (8),
+        .MAX_OUTSTANDING_PER_ID (4), .R_ROB_EN (1'b0)
     ) dut (.*);
 
     always #5ns clk_i = !clk_i;

@@ -30,7 +30,7 @@ task_sources=(
     "$task_root/specgen/generated/sv/ni_signals_pkg.sv"
     "$task_root/specgen/generated/sv/ni_flit_pkg.sv"
     "$task_generated"
-    "$task_root/rtl/common/ni_child_types_pkg.sv"
+    "$task_root/rtl/common/ni_types_pkg.sv"
     "$task_common_cells/src/cc_pkg.sv"
     "$task_common_cells/src/cc_addr_decode_dync.sv"
     "$task_common_cells/src/cc_addr_decode.sv"

@@ -8,27 +8,27 @@ module tb_nmu_elaborate;
     logic noc_rst_n;
 
     axi_if #(
-        .DATA_W(ni_params_pkg::AXI_DATA_WIDTH_DFLT),
-        .ADDR_W(ni_params_pkg::AXI_ADDR_WIDTH_DFLT),
+        .DATA_W(ni_params_pkg::AXI_DATA_WIDTH),
+        .ADDR_W(ni_params_pkg::AXI_ADDR_WIDTH),
         .ID_W(8),
         .AWUSER_EN(1'b1),
-        .AWUSER_W(ni_params_pkg::AXI_AWUSER_WIDTH_DFLT)
+        .AWUSER_W(ni_params_pkg::AXI_AWUSER_WIDTH)
     ) axi_if();
 
     logic tx_req_valid_o;
-    logic [ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT-1:0] tx_req_flit_o;
+    logic [ni_params_pkg::NOC_REQ_FLIT_WIDTH-1:0] tx_req_flit_o;
     logic tx_req_ready_i;
 
     logic rx_rsp_valid_i;
-    logic [ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT-1:0] rx_rsp_flit_i;
+    logic [ni_params_pkg::NOC_RSP_FLIT_WIDTH-1:0] rx_rsp_flit_i;
     logic rx_rsp_ready_o;
 
     logic tx_dat_valid_o;
-    logic [ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT-1:0] tx_dat_flit_o;
-    logic [ni_params_pkg::NOC_DAT_NUM_VC_DFLT-1:0] tx_dat_crdvalid_i;
+    logic [ni_params_pkg::NOC_DAT_FLIT_WIDTH-1:0] tx_dat_flit_o;
+    logic [ni_params_pkg::NUM_DAT_VC-1:0] tx_dat_crdvalid_i;
     logic rx_dat_valid_i;
-    logic [ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT-1:0] rx_dat_flit_i;
-    logic [ni_params_pkg::NOC_DAT_NUM_VC_DFLT-1:0] rx_dat_crdvalid_o;
+    logic [ni_params_pkg::NOC_DAT_FLIT_WIDTH-1:0] rx_dat_flit_i;
+    logic [ni_params_pkg::NUM_DAT_VC-1:0] rx_dat_crdvalid_o;
 
     nmu #(
         .AXI_ID_WIDTH(8)
@@ -56,19 +56,19 @@ module tb_nmu_elaborate;
     initial begin
         assert ($bits(axi_if.awid) == 8)
             else $fatal(1, "AXI request ID width mismatch");
-        assert ($bits(axi_if.awaddr) == ni_params_pkg::AXI_ADDR_WIDTH_DFLT)
+        assert ($bits(axi_if.awaddr) == ni_params_pkg::AXI_ADDR_WIDTH)
             else $fatal(1, "AXI request address width mismatch");
-        assert ($bits(axi_if.wdata) == ni_params_pkg::AXI_DATA_WIDTH_DFLT)
+        assert ($bits(axi_if.wdata) == ni_params_pkg::AXI_DATA_WIDTH)
             else $fatal(1, "AXI request data width mismatch");
-        assert ($bits(axi_if.awuser) == ni_params_pkg::AXI_AWUSER_WIDTH_DFLT)
+        assert ($bits(axi_if.awuser) == ni_params_pkg::AXI_AWUSER_WIDTH)
             else $fatal(1, "AWUSER width mismatch");
-        assert ($bits(tx_req_flit_o) == ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT)
+        assert ($bits(tx_req_flit_o) == ni_params_pkg::NOC_REQ_FLIT_WIDTH)
             else $fatal(1, "REQ flit width mismatch");
-        assert ($bits(rx_rsp_flit_i) == ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT)
+        assert ($bits(rx_rsp_flit_i) == ni_params_pkg::NOC_RSP_FLIT_WIDTH)
             else $fatal(1, "RSP flit width mismatch");
-        assert ($bits(tx_dat_flit_o) == ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT)
+        assert ($bits(tx_dat_flit_o) == ni_params_pkg::NOC_DAT_FLIT_WIDTH)
             else $fatal(1, "DAT flit width mismatch");
-        assert ($bits(tx_dat_crdvalid_i) == ni_params_pkg::NOC_DAT_NUM_VC_DFLT)
+        assert ($bits(tx_dat_crdvalid_i) == ni_params_pkg::NUM_DAT_VC)
             else $fatal(1, "DAT credit width mismatch");
         $finish;
     end

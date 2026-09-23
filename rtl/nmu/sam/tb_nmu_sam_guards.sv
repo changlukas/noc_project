@@ -18,13 +18,13 @@ module tb_nmu_sam_guards #(
     ni_signals_pkg::axi_aw_t s_aw = '0;
     logic m_aw_valid;
     logic m_aw_ready = 1'b0;
-    ni_child_types_pkg::nmu_sam_aw_result_t m_aw;
+    ni_types_pkg::nmu_sam_aw_result_t m_aw;
     logic s_ar_valid = 1'b0;
     logic s_ar_ready;
     ni_signals_pkg::axi_ar_t s_ar = '0;
     logic m_ar_valid;
     logic m_ar_ready = 1'b0;
-    ni_child_types_pkg::nmu_sam_ar_result_t m_ar;
+    ni_types_pkg::nmu_sam_ar_result_t m_ar;
 
     nmu_sam #(
         .AW_SAM_REG_TYPE ( AW_REG_TYPE   ),
@@ -32,7 +32,7 @@ module tb_nmu_sam_guards #(
         .SAM_NUM_RULES   ( SAM_NUM_RULES  ),
         .addr_t          ( sam_addr_t     ),
         .sam_mask_sel_t  ( sam_mask_sel_t ),
-        .sam_idx_t       ( sam_idx_t      ),
+        .sam_result_t       ( sam_result_t      ),
         .sam_rule_t      ( sam_rule_t     ),
         .SAM             ( SAM            )
     ) dut (

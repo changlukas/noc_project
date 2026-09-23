@@ -6,77 +6,76 @@
 
 /* Shared NMU request-ordering and response-reordering subsystem. */
 module nmu_ordering #(
-    parameter int unsigned NMU_ROB_B_DEPTH = ni_params_pkg::NMU_ROB_B_DEPTH_DFLT,
-    parameter int unsigned NMU_ROB_R_DEPTH = ni_params_pkg::NMU_ROB_R_DEPTH_DFLT,
-    parameter int unsigned NMU_MAX_TXNS_PER_ID = ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT,
-    parameter bit READ_ROB_ENABLED = bit'(ni_params_pkg::NMU_READ_ROB_ENABLED_DFLT)
+    parameter int unsigned B_ROB_DEPTH            = ni_params_pkg::NMU_ROB_B_DEPTH,
+    parameter int unsigned R_ROB_DEPTH            = ni_params_pkg::NMU_ROB_R_DEPTH,
+    parameter int unsigned MAX_OUTSTANDING_PER_ID = ni_params_pkg::NMU_MAX_OUTSTANDING_PER_ID,
+    parameter bit          R_ROB_EN               = bit'(ni_params_pkg::NMU_R_ROB_EN)
 ) (
-    input  wire logic                                      clk_i,
-    input  wire logic                                      rst_i,
-    input  wire ni_child_types_pkg::nmu_sam_aw_result_t   s_aw_i,
-    input  wire logic                                      s_aw_valid_i,
-    output wire logic                                      s_aw_ready_o,
-    output wire ni_child_types_pkg::nmu_aw_request_t       m_aw_o,
-    output wire logic                                      m_aw_valid_o,
-    input  wire logic                                      m_aw_ready_i,
-    input  wire ni_signals_pkg::axi_w_t                   s_w_i,
-    input  wire logic                                      s_w_valid_i,
-    output wire logic                                      s_w_ready_o,
-    output wire ni_signals_pkg::axi_w_t                   m_w_o,
-    output wire logic                                      m_w_valid_o,
-    input  wire logic                                      m_w_ready_i,
-    input  wire ni_child_types_pkg::nmu_sam_ar_result_t   s_ar_i,
-    input  wire logic                                      s_ar_valid_i,
-    output wire logic                                      s_ar_ready_o,
-    output wire ni_child_types_pkg::nmu_ar_request_t       m_ar_o,
-    output wire logic                                      m_ar_valid_o,
-    input  wire logic                                      m_ar_ready_i,
-    input  wire ni_child_types_pkg::nmu_b_response_t       s_b_i,
-    input  wire logic                                      s_b_valid_i,
-    output wire logic                                      s_b_ready_o,
-    output wire ni_signals_pkg::axi_b_t                   m_b_o,
-    output wire logic                                      m_b_valid_o,
-    input  wire logic                                      m_b_ready_i,
-    input  wire ni_child_types_pkg::nmu_r_response_t       s_r_i,
-    input  wire logic                                      s_r_valid_i,
-    output wire logic                                      s_r_ready_o,
-    output wire ni_signals_pkg::axi_r_t                   m_r_o,
-    output wire logic                                      m_r_valid_o,
-    input  wire logic                                      m_r_ready_i
+    input  wire logic                              clk_i,
+    input  wire logic                              rst_i,
+    input  wire ni_types_pkg::nmu_sam_aw_result_t  s_aw_i,
+    input  wire logic                              s_aw_valid_i,
+    output wire logic                              s_aw_ready_o,
+    output wire ni_types_pkg::nmu_aw_request_t     m_aw_o,
+    output wire logic                              m_aw_valid_o,
+    input  wire logic                              m_aw_ready_i,
+    input  wire ni_signals_pkg::axi_w_t            s_w_i,
+    input  wire logic                              s_w_valid_i,
+    output wire logic                              s_w_ready_o,
+    output wire ni_signals_pkg::axi_w_t            m_w_o,
+    output wire logic                              m_w_valid_o,
+    input  wire logic                              m_w_ready_i,
+    input  wire ni_types_pkg::nmu_sam_ar_result_t  s_ar_i,
+    input  wire logic                              s_ar_valid_i,
+    output wire logic                              s_ar_ready_o,
+    output wire ni_types_pkg::nmu_ar_request_t     m_ar_o,
+    output wire logic                              m_ar_valid_o,
+    input  wire logic                              m_ar_ready_i,
+    input  wire ni_types_pkg::nmu_b_response_t     s_b_i,
+    input  wire logic                              s_b_valid_i,
+    output wire logic                              s_b_ready_o,
+    output wire ni_signals_pkg::axi_b_t            m_b_o,
+    output wire logic                              m_b_valid_o,
+    input  wire logic                              m_b_ready_i,
+    input  wire ni_types_pkg::nmu_r_response_t     s_r_i,
+    input  wire logic                              s_r_valid_i,
+    output wire logic                              s_r_ready_o,
+    output wire ni_signals_pkg::axi_r_t            m_r_o,
+    output wire logic                              m_r_valid_o,
+    input  wire logic                              m_r_ready_i
 );
 
     ni_signals_pkg::axi_r_t retire_response;
     assign m_r_o = retire_response;
 
-    localparam int unsigned ID_W = $bits(s_aw_i.axi.awid);
-    localparam int unsigned NUM_IDS = 1 << ID_W;
-    localparam int unsigned TAG_W = ni_flit_pkg::ORDERING_TAG_WIDTH;
-    localparam int unsigned TAG_SPACE = 1 << TAG_W;
-    localparam int unsigned BEAT_COUNT_W = ni_flit_pkg::AXI_LEN_WIDTH + 1;
-    localparam int unsigned CL_MAX_TXNS = $clog2(NMU_MAX_TXNS_PER_ID + 1);
-    localparam int unsigned CL_ORDER = NMU_MAX_TXNS_PER_ID > 1 ? $clog2(NMU_MAX_TXNS_PER_ID) : 1;
-    localparam int unsigned CL_NUM_IDS = $clog2(NUM_IDS);
-    localparam int unsigned CL_B_DEPTH = NMU_ROB_B_DEPTH > 1 ? $clog2(NMU_ROB_B_DEPTH) : 1;
-    localparam int unsigned CL_R_DEPTH = NMU_ROB_R_DEPTH > 1 ? $clog2(NMU_ROB_R_DEPTH) : 1;
+    localparam int unsigned ID_W              = $bits(s_aw_i.axi.awid);
+    localparam int unsigned NUM_IDS           = 1 << ID_W;
+    localparam int unsigned TAG_W             = ni_flit_pkg::ORDERING_TAG_WIDTH;
+    localparam int unsigned NUM_TAGS          = 1 << TAG_W;
+    localparam int unsigned BEAT_COUNT_W      = ni_flit_pkg::AXI_LEN_WIDTH + 1;
+    localparam int unsigned OUTSTANDING_CNT_W = $clog2(MAX_OUTSTANDING_PER_ID + 1);
+    localparam int unsigned ORDER_PTR_W       = MAX_OUTSTANDING_PER_ID > 1 ? $clog2(MAX_OUTSTANDING_PER_ID) : 1;
+    localparam int unsigned B_ROB_ADDR_W      = B_ROB_DEPTH > 1 ? $clog2(B_ROB_DEPTH) : 1;
+    localparam int unsigned R_ROB_ADDR_W      = R_ROB_DEPTH > 1 ? $clog2(R_ROB_DEPTH) : 1;
 
-    if (NMU_ROB_B_DEPTH < 1 || NMU_ROB_B_DEPTH > TAG_SPACE) begin : gen_invalid_b_depth
-        initial $fatal(0, "Error: NMU_ROB_B_DEPTH must be in [1, TAG_SPACE] (instance %m)");
+    if (B_ROB_DEPTH < 1 || B_ROB_DEPTH > NUM_TAGS) begin : gen_invalid_b_depth
+        initial $fatal(0, "Error: B_ROB_DEPTH must be in [1, NUM_TAGS] (instance %m)");
     end
-    if (NMU_ROB_R_DEPTH < 1 || NMU_ROB_R_DEPTH > TAG_SPACE) begin : gen_invalid_r_depth
-        initial $fatal(0, "Error: NMU_ROB_R_DEPTH must be in [1, TAG_SPACE] (instance %m)");
+    if (R_ROB_DEPTH < 1 || R_ROB_DEPTH > NUM_TAGS) begin : gen_invalid_r_depth
+        initial $fatal(0, "Error: R_ROB_DEPTH must be in [1, NUM_TAGS] (instance %m)");
     end
-    if (NMU_MAX_TXNS_PER_ID < 1 || NMU_MAX_TXNS_PER_ID > TAG_SPACE) begin : gen_invalid_max_txns
-        initial $fatal(0, "Error: NMU_MAX_TXNS_PER_ID must be in [1, TAG_SPACE] (instance %m)");
+    if (MAX_OUTSTANDING_PER_ID < 1 || MAX_OUTSTANDING_PER_ID > NUM_TAGS) begin : gen_invalid_max_txns
+        initial $fatal(0, "Error: MAX_OUTSTANDING_PER_ID must be in [1, NUM_TAGS] (instance %m)");
     end
     if ($bits(s_ar_i.axi.arid) != ID_W || $bits(s_b_i.axi.bid) != ID_W ||
             $bits(s_r_i.axi.rid) != ID_W) begin : gen_mismatched_id_width
         initial $fatal(0, "Error: AW, AR, B, and R ID widths must match (instance %m)");
     end
 
-    typedef ni_child_types_pkg::nmu_rob_order_entry_t order_entry_t;
-    typedef ni_child_types_pkg::nmu_ordering_domain_t domain_t;
+    typedef ni_types_pkg::nmu_rob_order_entry_t order_entry_t;
+    typedef ni_types_pkg::nmu_ordering_domain_t domain_t;
 
-    localparam int unsigned BYTE_OFFSET_W = $clog2(ni_params_pkg::AXI_DATA_WIDTH_DFLT/8);
+    localparam int unsigned BYTE_OFFSET_W = $clog2(ni_params_pkg::AXI_DATA_WIDTH/8);
     typedef struct packed {
         logic [BYTE_OFFSET_W-1:0] addr;
         logic [7:0] len;
@@ -84,27 +83,27 @@ module nmu_ordering #(
         logic [1:0] burst;
         logic is_data;
     } read_lane_context_t;
-    read_lane_context_t rd_lane_context_reg [NUM_IDS][NMU_MAX_TXNS_PER_ID];
+    read_lane_context_t rd_lane_context_reg [NUM_IDS][MAX_OUTSTANDING_PER_ID];
     read_lane_context_t retire_context;
     ni_signals_pkg::axi_r_t retire_r;
     int unsigned retire_byte_addr, retire_step, retire_span, retire_lane;
 
-    order_entry_t wr_order_reg [NUM_IDS][NMU_MAX_TXNS_PER_ID];
-    order_entry_t rd_order_reg [NUM_IDS][NMU_MAX_TXNS_PER_ID];
-    logic [CL_ORDER-1:0] wr_order_rd_ptr_reg [NUM_IDS], wr_order_rd_ptr_next [NUM_IDS];
-    logic [CL_ORDER-1:0] wr_order_wr_ptr_reg [NUM_IDS], wr_order_wr_ptr_next [NUM_IDS];
-    logic [CL_ORDER-1:0] rd_order_rd_ptr_reg [NUM_IDS], rd_order_rd_ptr_next [NUM_IDS];
-    logic [CL_ORDER-1:0] rd_order_wr_ptr_reg [NUM_IDS], rd_order_wr_ptr_next [NUM_IDS];
-    logic [CL_MAX_TXNS-1:0] wr_outstanding_cnt_reg [NUM_IDS], wr_outstanding_cnt_next [NUM_IDS];
-    logic [CL_MAX_TXNS-1:0] rd_outstanding_cnt_reg [NUM_IDS], rd_outstanding_cnt_next [NUM_IDS];
+    order_entry_t wr_order_reg [NUM_IDS][MAX_OUTSTANDING_PER_ID];
+    order_entry_t rd_order_reg [NUM_IDS][MAX_OUTSTANDING_PER_ID];
+    logic [ORDER_PTR_W-1:0] wr_order_rd_ptr_reg [NUM_IDS], wr_order_rd_ptr_next [NUM_IDS];
+    logic [ORDER_PTR_W-1:0] wr_order_wr_ptr_reg [NUM_IDS], wr_order_wr_ptr_next [NUM_IDS];
+    logic [ORDER_PTR_W-1:0] rd_order_rd_ptr_reg [NUM_IDS], rd_order_rd_ptr_next [NUM_IDS];
+    logic [ORDER_PTR_W-1:0] rd_order_wr_ptr_reg [NUM_IDS], rd_order_wr_ptr_next [NUM_IDS];
+    logic [OUTSTANDING_CNT_W-1:0] wr_outstanding_cnt_reg [NUM_IDS], wr_outstanding_cnt_next [NUM_IDS];
+    logic [OUTSTANDING_CNT_W-1:0] rd_outstanding_cnt_reg [NUM_IDS], rd_outstanding_cnt_next [NUM_IDS];
     domain_t wr_domain_reg [NUM_IDS], wr_domain_next [NUM_IDS];
     domain_t rd_domain_reg [NUM_IDS], rd_domain_next [NUM_IDS];
     logic [BEAT_COUNT_W-1:0] r_retire_offset_reg [NUM_IDS], r_retire_offset_next [NUM_IDS];
     logic [NUM_IDS-1:0] wr_reorder_active_reg, wr_reorder_active_next;
     logic [NUM_IDS-1:0] rd_reorder_active_reg, rd_reorder_active_next;
     logic [NUM_IDS-1:0] wr_collective_active_reg, wr_collective_active_next;
-    logic [CL_NUM_IDS-1:0] b_rr_reg, b_rr_next;
-    logic [CL_NUM_IDS-1:0] r_rr_reg, r_rr_next;
+    logic [ID_W-1:0] b_rr_reg, b_rr_next;
+    logic [ID_W-1:0] r_rr_reg, r_rr_next;
     logic aw_hold_reg, aw_hold_next;
     logic ar_hold_reg, ar_hold_next;
     logic aw_hold_reorder_reg, aw_hold_reorder_next;
@@ -115,8 +114,8 @@ module nmu_ordering #(
     logic r_hold_reg, r_hold_next;
     logic b_hold_direct_reg, b_hold_direct_next;
     logic r_hold_direct_reg, r_hold_direct_next;
-    logic [CL_NUM_IDS-1:0] b_hold_id_reg, b_hold_id_next;
-    logic [CL_NUM_IDS-1:0] r_hold_id_reg, r_hold_id_next;
+    logic [ID_W-1:0] b_hold_id_reg, b_hold_id_next;
+    logic [ID_W-1:0] r_hold_id_reg, r_hold_id_next;
 
     logic [TAG_W:0] b_free_cnt, r_free_cnt;
     logic [TAG_W-1:0] b_next_base, r_next_base, aw_tag, ar_tag;
@@ -125,11 +124,11 @@ module nmu_ordering #(
     order_entry_t wr_order_head [NUM_IDS], rd_order_head [NUM_IDS];
     logic [NUM_IDS-1:0] b_buffer_ready, r_buffer_ready;
     logic b_sel_valid, r_sel_valid;
-    logic [CL_NUM_IDS-1:0] b_sel_id, r_sel_id;
+    logic [ID_W-1:0] b_sel_id, r_sel_id;
     logic b_direct, r_direct;
-    logic [CL_NUM_IDS-1:0] b_retire_id, r_retire_id;
-    logic [NMU_ROB_B_DEPTH-1:0] b_complete;
-    logic [NMU_ROB_R_DEPTH-1:0] r_complete;
+    logic [ID_W-1:0] b_retire_id, r_retire_id;
+    logic [B_ROB_DEPTH-1:0] b_complete;
+    logic [R_ROB_DEPTH-1:0] r_complete;
     logic [TAG_W-1:0] b_storage_rd_addr, r_storage_rd_addr, b_storage_free_addr, r_storage_free_addr;
     ni_signals_pkg::axi_b_t b_storage_rd_data;
     ni_signals_pkg::axi_r_t r_storage_rd_data;
@@ -147,12 +146,12 @@ module nmu_ordering #(
             wr_order_head[n] = wr_order_reg[n][wr_order_rd_ptr_reg[n]];
             rd_order_head[n] = rd_order_reg[n][rd_order_rd_ptr_reg[n]];
             b_buffer_ready[n] = wr_outstanding_cnt_reg[n] != 0 && wr_order_head[n].ordering_req &&
-                int'(wr_order_head[n].base) < NMU_ROB_B_DEPTH &&
-                b_complete[CL_B_DEPTH'(wr_order_head[n].base)];
-            r_buffer_ready[n] = READ_ROB_ENABLED && rd_outstanding_cnt_reg[n] != 0 &&
+                int'(wr_order_head[n].base) < B_ROB_DEPTH &&
+                b_complete[B_ROB_ADDR_W'(wr_order_head[n].base)];
+            r_buffer_ready[n] = R_ROB_EN && rd_outstanding_cnt_reg[n] != 0 &&
                 rd_order_head[n].ordering_req &&
-                int'(rd_order_head[n].base) + int'(r_retire_offset_reg[n]) < NMU_ROB_R_DEPTH &&
-                r_complete[CL_R_DEPTH'($unsigned(int'(rd_order_head[n].base) + int'(r_retire_offset_reg[n])))];
+                int'(rd_order_head[n].base) + int'(r_retire_offset_reg[n]) < R_ROB_DEPTH &&
+                r_complete[R_ROB_ADDR_W'($unsigned(int'(rd_order_head[n].base) + int'(r_retire_offset_reg[n])))];
         end
     end
 
@@ -165,17 +164,17 @@ module nmu_ordering #(
              rd_domain_reg[s_ar_i.axi.arid] != s_ar_i.route.domain);
         aw_reorder = aw_hold_reg ? aw_hold_reorder_reg : aw_reorder_required;
         ar_reorder = ar_hold_reg ? ar_hold_reorder_reg :
-            READ_ROB_ENABLED && ar_reorder_required;
+            R_ROB_EN && ar_reorder_required;
         aw_tag = aw_hold_reg ? aw_hold_tag_reg : (aw_reorder ? b_next_base : '0);
         ar_tag = ar_hold_reg ? ar_hold_tag_reg : (ar_reorder ? r_next_base : '0);
         aw_can_accept = aw_hold_reg ||
-            (wr_outstanding_cnt_reg[s_aw_i.axi.awid] < CL_MAX_TXNS'(NMU_MAX_TXNS_PER_ID) &&
+            (wr_outstanding_cnt_reg[s_aw_i.axi.awid] < OUTSTANDING_CNT_W'(MAX_OUTSTANDING_PER_ID) &&
              !wr_collective_active_reg[s_aw_i.axi.awid] &&
              (s_aw_i.route.collective_op == 0 || wr_outstanding_cnt_reg[s_aw_i.axi.awid] == 0) &&
              (!aw_reorder || b_free_cnt != 0));
         ar_can_accept = ar_hold_reg ||
-            (rd_outstanding_cnt_reg[s_ar_i.axi.arid] < CL_MAX_TXNS'(NMU_MAX_TXNS_PER_ID) &&
-             (READ_ROB_ENABLED ? (!ar_reorder || r_free_cnt >= (TAG_W+1)'(ar_beat_cnt)) :
+            (rd_outstanding_cnt_reg[s_ar_i.axi.arid] < OUTSTANDING_CNT_W'(MAX_OUTSTANDING_PER_ID) &&
+             (R_ROB_EN ? (!ar_reorder || r_free_cnt >= (TAG_W+1)'(ar_beat_cnt)) :
               !ar_reorder_required));
     end
 
@@ -204,7 +203,7 @@ module nmu_ordering #(
         for (int offset = NUM_IDS-1; offset >= 0; offset--) begin
             if (b_buffer_ready[(int'(b_rr_reg) + offset) % NUM_IDS]) begin
                 b_sel_valid = 1'b1;
-                b_sel_id = CL_NUM_IDS'(int'(b_rr_reg) + offset);
+                b_sel_id = ID_W'(int'(b_rr_reg) + offset);
             end
         end
         b_direct = !b_sel_valid && s_b_valid_i &&
@@ -233,7 +232,7 @@ module nmu_ordering #(
         for (int offset = NUM_IDS-1; offset >= 0; offset--) begin
             if (r_buffer_ready[(int'(r_rr_reg) + offset) % NUM_IDS]) begin
                 r_sel_valid = 1'b1;
-                r_sel_id = CL_NUM_IDS'(int'(r_rr_reg) + offset);
+                r_sel_id = ID_W'(int'(r_rr_reg) + offset);
             end
         end
         r_direct = !r_sel_valid && s_r_valid_i && rd_outstanding_cnt_reg[s_r_i.axi.rid] != 0 &&
@@ -266,13 +265,13 @@ module nmu_ordering #(
                 retire_byte_addr = (int'(retire_context.addr) & ~(retire_span-1)) |
                     (retire_byte_addr & (retire_span-1));
         end
-        retire_lane = (retire_byte_addr % (ni_params_pkg::AXI_DATA_WIDTH_DFLT/8)) / 8;
+        retire_lane = (retire_byte_addr % (ni_params_pkg::AXI_DATA_WIDTH/8)) / 8;
         retire_response = retire_r;
         if (!retire_context.is_data)
-            retire_response.rdata = ni_params_pkg::AXI_DATA_WIDTH_DFLT'(retire_r.rdata[63:0]) << (retire_lane*64);
+            retire_response.rdata = ni_params_pkg::AXI_DATA_WIDTH'(retire_r.rdata[63:0]) << (retire_lane*64);
     end
     assign s_r_ready_o = !rst_i && (r_direct ? m_r_ready_i :
-        (READ_ROB_ENABLED && s_r_i.meta.ordering_req && r_storage_wr_ready));
+        (R_ROB_EN && s_r_i.meta.ordering_req && r_storage_wr_ready));
     assign r_retire_id = r_sel_valid ? r_sel_id : s_r_i.axi.rid;
 
     always_comb begin
@@ -328,7 +327,7 @@ module nmu_ordering #(
 
         if (aw_accept) begin
             wr_order_wr_ptr_next[s_aw_i.axi.awid] =
-                wr_order_wr_ptr_reg[s_aw_i.axi.awid] == CL_ORDER'(NMU_MAX_TXNS_PER_ID-1) ? '0 :
+                wr_order_wr_ptr_reg[s_aw_i.axi.awid] == ORDER_PTR_W'(MAX_OUTSTANDING_PER_ID-1) ? '0 :
                 wr_order_wr_ptr_reg[s_aw_i.axi.awid] + 1'b1;
             wr_domain_next[s_aw_i.axi.awid] = s_aw_i.route.route.domain;
             if (s_aw_i.route.collective_op != 0) begin
@@ -337,13 +336,13 @@ module nmu_ordering #(
         end
         if (ar_accept) begin
             rd_order_wr_ptr_next[s_ar_i.axi.arid] =
-                rd_order_wr_ptr_reg[s_ar_i.axi.arid] == CL_ORDER'(NMU_MAX_TXNS_PER_ID-1) ? '0 :
+                rd_order_wr_ptr_reg[s_ar_i.axi.arid] == ORDER_PTR_W'(MAX_OUTSTANDING_PER_ID-1) ? '0 :
                 rd_order_wr_ptr_reg[s_ar_i.axi.arid] + 1'b1;
             rd_domain_next[s_ar_i.axi.arid] = s_ar_i.route.domain;
         end
         if (b_retire) begin
             wr_order_rd_ptr_next[b_retire_id] =
-                wr_order_rd_ptr_reg[b_retire_id] == CL_ORDER'(NMU_MAX_TXNS_PER_ID-1) ? '0 :
+                wr_order_rd_ptr_reg[b_retire_id] == ORDER_PTR_W'(MAX_OUTSTANDING_PER_ID-1) ? '0 :
                 wr_order_rd_ptr_reg[b_retire_id] + 1'b1;
             if (wr_order_head[b_retire_id].collective) begin
                 wr_collective_active_next[b_retire_id] = 1'b0;
@@ -353,7 +352,7 @@ module nmu_ordering #(
         if (r_retire) begin
             if (r_retire_last) begin
                 rd_order_rd_ptr_next[r_retire_id] =
-                    rd_order_rd_ptr_reg[r_retire_id] == CL_ORDER'(NMU_MAX_TXNS_PER_ID-1) ? '0 :
+                    rd_order_rd_ptr_reg[r_retire_id] == ORDER_PTR_W'(MAX_OUTSTANDING_PER_ID-1) ? '0 :
                     rd_order_rd_ptr_reg[r_retire_id] + 1'b1;
                 r_retire_offset_next[r_retire_id] = '0;
             end else begin
@@ -364,7 +363,7 @@ module nmu_ordering #(
 
         for (int id = 0; id < NUM_IDS; id++) begin
             case ({aw_accept && s_aw_i.axi.awid == ID_W'(id),
-                   b_retire && b_retire_id == CL_NUM_IDS'(id)})
+                   b_retire && b_retire_id == ID_W'(id)})
                 2'b10: wr_outstanding_cnt_next[id] = wr_outstanding_cnt_reg[id] + 1'b1;
                 2'b01: wr_outstanding_cnt_next[id] = wr_outstanding_cnt_reg[id] - 1'b1;
                 default: begin end
@@ -375,11 +374,11 @@ module nmu_ordering #(
                 end else if (aw_reorder) begin
                     wr_reorder_active_next[id] = 1'b1;
                 end
-            end else if (b_retire && b_retire_id == CL_NUM_IDS'(id) && wr_outstanding_cnt_reg[id] == 1) begin
+            end else if (b_retire && b_retire_id == ID_W'(id) && wr_outstanding_cnt_reg[id] == 1) begin
                 wr_reorder_active_next[id] = 1'b0;
             end
             case ({ar_accept && s_ar_i.axi.arid == ID_W'(id),
-                   r_retire && r_retire_id == CL_NUM_IDS'(id) && r_retire_last})
+                   r_retire && r_retire_id == ID_W'(id) && r_retire_last})
                 2'b10: rd_outstanding_cnt_next[id] = rd_outstanding_cnt_reg[id] + 1'b1;
                 2'b01: rd_outstanding_cnt_next[id] = rd_outstanding_cnt_reg[id] - 1'b1;
                 default: begin end
@@ -390,7 +389,7 @@ module nmu_ordering #(
                 end else if (ar_reorder) begin
                     rd_reorder_active_next[id] = 1'b1;
                 end
-            end else if (r_retire && r_retire_id == CL_NUM_IDS'(id) &&
+            end else if (r_retire && r_retire_id == ID_W'(id) &&
                     rd_outstanding_cnt_reg[id] == 1 && r_retire_last) begin
                 rd_reorder_active_next[id] = 1'b0;
             end
@@ -481,58 +480,58 @@ module nmu_ordering #(
     end
 
     nmu_reorder_storage #(
-        .DEPTH (NMU_ROB_B_DEPTH),
-        .T (ni_signals_pkg::axi_b_t)
+        .DEPTH  (B_ROB_DEPTH            ),
+        .data_t (ni_signals_pkg::axi_b_t)
     ) i_b_storage (
         .clk_i,
         .rst_i,
         .alloc_valid_i (aw_accept && aw_reorder),
-        .alloc_base_i (aw_tag),
-        .alloc_cnt_i ((TAG_W+1)'(1)),
-        .next_base_o (b_next_base),
-        .free_cnt_o (b_free_cnt),
-        .wr_valid_i (!rst_i && s_b_valid_i && s_b_i.meta.ordering_req && (!b_direct || m_b_ready_i)),
-        .wr_bypass_i (b_direct),
-        .wr_ready_o (b_storage_wr_ready),
-        .wr_base_i (!rst_i && s_b_valid_i && s_b_i.meta.ordering_req ?
+        .alloc_base_i  (aw_tag),
+        .alloc_cnt_i   ((TAG_W+1)'(1)),
+        .next_base_o   (b_next_base),
+        .free_cnt_o    (b_free_cnt),
+        .wr_valid_i    (!rst_i && s_b_valid_i && s_b_i.meta.ordering_req && (!b_direct || m_b_ready_i)),
+        .wr_bypass_i   (b_direct),
+        .wr_ready_o    (b_storage_wr_ready),
+        .wr_base_i     (!rst_i && s_b_valid_i && s_b_i.meta.ordering_req ?
             s_b_i.meta.ordering_tag : '0),
-        .wr_last_i (1'b1),
-        .wr_data_i (s_b_i.axi),
-        .rd_en_i (b_sel_valid),
-        .rd_addr_i (b_storage_rd_addr),
-        .rd_entry_complete_o (),
-        .rd_data_o (b_storage_rd_data),
-        .free_valid_i (b_retire && wr_order_head[b_retire_id].ordering_req),
-        .free_addr_i (b_storage_free_addr),
-        .complete_o (b_complete)
+        .wr_last_i           (1'b1                                               ),
+        .wr_data_i           (s_b_i.axi                                          ),
+        .rd_en_i             (b_sel_valid                                        ),
+        .rd_addr_i           (b_storage_rd_addr                                  ),
+        .rd_entry_complete_o (                                                   ),
+        .rd_data_o           (b_storage_rd_data                                  ),
+        .free_valid_i        (b_retire && wr_order_head[b_retire_id].ordering_req),
+        .free_addr_i         (b_storage_free_addr                                ),
+        .complete_o          (b_complete                                         )
     );
 
-    if (READ_ROB_ENABLED) begin : gen_read_reorder_storage
+    if (R_ROB_EN) begin : gen_read_reorder_storage
         nmu_reorder_storage #(
-            .DEPTH (NMU_ROB_R_DEPTH),
-            .T (ni_signals_pkg::axi_r_t)
+            .DEPTH  (R_ROB_DEPTH            ),
+            .data_t (ni_signals_pkg::axi_r_t)
         ) i_r_storage (
             .clk_i,
             .rst_i,
             .alloc_valid_i (ar_accept && ar_reorder),
-            .alloc_base_i (ar_tag),
-            .alloc_cnt_i ((TAG_W+1)'(ar_beat_cnt)),
-            .next_base_o (r_next_base),
-            .free_cnt_o (r_free_cnt),
-            .wr_valid_i (!rst_i && s_r_valid_i && s_r_i.meta.ordering_req && (!r_direct || m_r_ready_i)),
-            .wr_bypass_i (r_direct),
-            .wr_ready_o (r_storage_wr_ready),
-            .wr_base_i (!rst_i && s_r_valid_i && s_r_i.meta.ordering_req ?
+            .alloc_base_i  (ar_tag),
+            .alloc_cnt_i   ((TAG_W+1)'(ar_beat_cnt)),
+            .next_base_o   (r_next_base),
+            .free_cnt_o    (r_free_cnt),
+            .wr_valid_i    (!rst_i && s_r_valid_i && s_r_i.meta.ordering_req && (!r_direct || m_r_ready_i)),
+            .wr_bypass_i   (r_direct),
+            .wr_ready_o    (r_storage_wr_ready),
+            .wr_base_i     (!rst_i && s_r_valid_i && s_r_i.meta.ordering_req ?
                 s_r_i.meta.ordering_tag : '0),
-            .wr_last_i (!rst_i && s_r_valid_i && s_r_i.meta.ordering_req && s_r_i.axi.rlast),
-            .wr_data_i (s_r_i.axi),
-            .rd_en_i (r_sel_valid),
-            .rd_addr_i (r_storage_rd_addr),
+            .wr_last_i           (!rst_i && s_r_valid_i && s_r_i.meta.ordering_req && s_r_i.axi.rlast),
+            .wr_data_i           (s_r_i.axi),
+            .rd_en_i             (r_sel_valid),
+            .rd_addr_i           (r_storage_rd_addr),
             .rd_entry_complete_o (),
-            .rd_data_o (r_storage_rd_data),
-            .free_valid_i (r_retire && rd_order_head[r_retire_id].ordering_req),
-            .free_addr_i (r_storage_free_addr),
-            .complete_o (r_complete)
+            .rd_data_o           (r_storage_rd_data),
+            .free_valid_i        (r_retire && rd_order_head[r_retire_id].ordering_req),
+            .free_addr_i         (r_storage_free_addr),
+            .complete_o          (r_complete)
         );
     end else begin : gen_no_read_reorder_storage
         assign r_next_base = '0;

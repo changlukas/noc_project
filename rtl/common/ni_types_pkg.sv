@@ -1,18 +1,18 @@
 `timescale 1ns/1ps
 
-`ifndef NI_CHILD_TYPES_PKG_SVH
-`define NI_CHILD_TYPES_PKG_SVH
+`ifndef NI_TYPES_PKG_SVH
+`define NI_TYPES_PKG_SVH
 
-package ni_child_types_pkg;
+package ni_types_pkg;
 
     // Fixed packetizer slots, not configurable VC or source counts.
-    localparam int NMU_REQ_AW    = 0;
-    localparam int NMU_REQ_W     = 1;
-    localparam int NMU_REQ_AR    = 2;
-    localparam int NMU_REQ_COUNT = 3;
-    localparam int NMU_DAT_AW    = 0;
-    localparam int NMU_DAT_W     = 1;
-    localparam int NMU_DAT_COUNT = 2;
+    localparam int NMU_REQ_AW_IDX = 0;
+    localparam int NMU_REQ_W_IDX  = 1;
+    localparam int NMU_REQ_AR_IDX = 2;
+    localparam int NUM_NMU_REQ_CH = 3;
+    localparam int NMU_DAT_AW_IDX = 0;
+    localparam int NMU_DAT_W_IDX  = 1;
+    localparam int NUM_NMU_DAT_CH = 2;
 
     // NMU request classification.  This is the complete ordering-domain key.
     typedef struct packed {
@@ -97,15 +97,15 @@ package ni_child_types_pkg;
     typedef struct packed {
         logic occupied;
         logic complete;
-        logic [$clog2(ni_params_pkg::AXI_DATA_WIDTH_DFLT /
+        logic [$clog2(ni_params_pkg::AXI_DATA_WIDTH /
                       ni_flit_pkg::NOC_NARROW_DATA_WIDTH)-1:0] narrow_lane;
         ni_signals_pkg::axi_r_t                                beat;
     } nmu_r_rob_entry_t;
 
     // Narrow-read address basis shared by enabled bypass and structural
-    // READ_ROB_ENABLED=0 paths.  beat_index advances on each accepted R beat.
+    // R_ROB_EN=0 paths.  beat_index advances on each accepted R beat.
     typedef struct packed {
-        logic [ni_params_pkg::AXI_ADDR_WIDTH_DFLT-1:0] local_addr;
+        logic [ni_params_pkg::AXI_ADDR_WIDTH-1:0] local_addr;
         logic         [ni_flit_pkg::AXI_LEN_WIDTH-1:0] len;
         logic        [ni_flit_pkg::AXI_SIZE_WIDTH-1:0] size;
         logic       [ni_flit_pkg::AXI_BURST_WIDTH-1:0] burst;
@@ -117,11 +117,11 @@ package ni_child_types_pkg;
     typedef struct packed {
         logic          [ni_flit_pkg::SRC_ID_WIDTH-1:0] src_id;
         logic     [ni_flit_pkg::SRC_PORT_ID_WIDTH-1:0] src_port_id;
-        logic   [ni_params_pkg::NOC_ID_WIDTH_DFLT-1:0] noc_id;
+        logic   [ni_params_pkg::NOC_ID_WIDTH-1:0] noc_id;
         logic                                          ordering_req;
         logic    [ni_flit_pkg::ORDERING_TAG_WIDTH-1:0] ordering_tag;
         logic                                          is_data;
-        logic [ni_params_pkg::AXI_ADDR_WIDTH_DFLT-1:0] local_addr;
+        logic [ni_params_pkg::AXI_ADDR_WIDTH-1:0] local_addr;
         logic         [ni_flit_pkg::AXI_LEN_WIDTH-1:0] len;
         logic        [ni_flit_pkg::AXI_SIZE_WIDTH-1:0] size;
         logic       [ni_flit_pkg::AXI_BURST_WIDTH-1:0] burst;
@@ -151,4 +151,4 @@ package ni_child_types_pkg;
 
 endpackage
 
-`endif // NI_CHILD_TYPES_PKG_SVH
+`endif // NI_TYPES_PKG_SVH

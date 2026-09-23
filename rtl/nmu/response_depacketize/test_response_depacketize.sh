@@ -6,7 +6,7 @@ mkdir -p "$task_out"
 if [[ -n "${NMU_DAT_STAGE:-}" ]]; then
     task_stage=$NMU_DAT_STAGE
 else
-    make -C "$task_root/sim/standalone/nmu" prepare ID_WIDTH=8 NOC_HALF_PERIOD=5 BUFFER_DEPTH=128 READ_ROB_ENABLED=1 > "$task_out/prepare.log" 2>&1
+    make -C "$task_root/sim/standalone/nmu" prepare ID_WIDTH=8 NOC_HALF_PERIOD=5 BUFFER_DEPTH=128 R_ROB_EN=1 > "$task_out/prepare.log" 2>&1
     task_stage="$task_root/sim/standalone/nmu/output/i8_n5_b128_r1/stage"
 fi
 cd "$task_stage"
@@ -16,7 +16,7 @@ task_sources=(
     repo/specgen/generated/sv/ni_params_pkg.sv
     repo/specgen/generated/sv/ni_signals_pkg.sv
     repo/specgen/generated/sv/ni_flit_pkg.sv
-    repo/rtl/common/ni_child_types_pkg.sv
+    repo/rtl/common/ni_types_pkg.sv
     deps/common_cells/src/cc_pkg.sv
     deps/common_cells/src/cc_fifo.sv
     repo/sim/dv/common_cells-1.37.0/src/cf_math_pkg.sv
@@ -34,7 +34,7 @@ task_compile() {
             -Werror-WIDTHEXPAND -Werror-WIDTHTRUNC -Werror-LATCH \
             "$task_root/rtl/nmu/top/nmu_lint.vlt" \
             --top-module tb_nmu_response_depacketize \
-            -GDAT_NUM_VC="$task_vcs" -GDAT_VC_MODE="$task_mode" -GDAT_RX_VC_DEPTH="$task_depth" \
+            -GNUM_DAT_VC="$task_vcs" -GDAT_VC_MODE="$task_mode" -GDAT_RX_VC_DEPTH="$task_depth" \
             -Ideps/common_cells/include "${task_sources[@]}" \
             "$task_root/rtl/nmu/response_depacketize/tb_nmu_response_depacketize.sv" \
             ${task_wave[@]+"${task_wave[@]}"} --Mdir "$task_out/$task_name" > "$task_out/$task_name.compile.log" 2>&1
@@ -55,7 +55,7 @@ task_compile() {
             +incdir+deps/common_cells/include "${task_sources[@]}" \
             "$task_root/rtl/nmu/response_depacketize/tb_nmu_response_depacketize.sv" \
             -top tb_nmu_response_depacketize \
-            -pvalue+tb_nmu_response_depacketize.DAT_NUM_VC="$task_vcs" \
+            -pvalue+tb_nmu_response_depacketize.NUM_DAT_VC="$task_vcs" \
             -pvalue+tb_nmu_response_depacketize.DAT_VC_MODE="$task_mode" \
             -pvalue+tb_nmu_response_depacketize.DAT_RX_VC_DEPTH="$task_depth" \
             ${task_wave[@]+"${task_wave[@]}"} -Mdir="$task_work/csrc" -o "$task_work/simv" \

@@ -170,7 +170,7 @@ $(FILELIST_F): ../build_config.mk $(SPECGEN_CONSTANTS) $(SIM_ROOT)/tools/gen_fil
 
 # The generated parameter files, from the source both they and build_config.mk's
 # --print-num-vc read. Without this an edit to constants.yaml left the testbench
-# elaborating at the previous DAT_NUM_VC / READ_ROB_ENABLED while the filelist
+# elaborating at the previous NUM_DAT_VC / R_ROB_EN while the filelist
 # already named the new VC width. Duplicated in sim/vcs/Makefile, as FILELIST_F.
 $(NI_PARAMS_SV): $(SPECGEN_CONSTANTS) $(CODEGEN)
 	$(PYTHON3) $(CODEGEN) --target sv --domain params
@@ -624,7 +624,7 @@ sim run: $(if $(filter run,$(MAKECMDGOALS)),check-built,$(TBTOP_EXE))
 SWEEP_OFFERED  ?= 0.067 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.2
 
 # One curve per pattern per seed. The VC dimension is not swept here --
-# NOC_DAT_NUM_VC lives in specgen/source/constants.yaml, a tracked file, and a
+# NUM_DAT_VC lives in specgen/source/constants.yaml, a tracked file, and a
 # sweep would have to edit it mid-run.
 SWEEP_PATTERNS ?= uniform_random
 SWEEP_SEEDS    ?= 1

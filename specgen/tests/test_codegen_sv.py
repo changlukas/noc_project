@@ -180,8 +180,8 @@ class TestSvSignalsEmit:
     def test_axi_ids_use_external_width(self):
         sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
         axi_types = sv[sv.index("typedef struct packed {"):sv.index("} axi_rsp_t;")]
-        assert "AXI_ID_WIDTH_DFLT-1:0" in axi_types
-        assert "NOC_ID_WIDTH_DFLT-1:0" not in axi_types
+        assert "AXI_ID_WIDTH-1:0" in axi_types
+        assert "NOC_ID_WIDTH-1:0" not in axi_types
 
     def test_struct_typedefs_in_package(self):
         sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")

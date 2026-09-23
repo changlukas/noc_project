@@ -31,15 +31,15 @@
 module dma_node_endpoint #(
     parameter int unsigned NODE_ID      = 0,
     parameter int unsigned NUM_ENDPOINTS = 1,
-    parameter int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_ID_WIDTH_DFLT,
-    parameter int unsigned NOC_ID_WIDTH = ni_params_pkg::NOC_ID_WIDTH_DFLT,
+    parameter int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_ID_WIDTH,
+    parameter int unsigned NOC_ID_WIDTH = ni_params_pkg::NOC_ID_WIDTH,
     // ADDR/DATA/AWUSER widths are what the crossbar, the memories and the id
     // remap are sized by. The DMA's own types come from idma_types_pkg, which
     // fixes them at the same ni_params_pkg defaults the generator passes here;
     // the two are one set of values, stated in two places because a package
     // cannot take a parameter.
-    parameter int unsigned ADDR_WIDTH   = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
-    parameter int unsigned DATA_WIDTH   = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
+    parameter int unsigned ADDR_WIDTH   = ni_params_pkg::AXI_ADDR_WIDTH,
+    parameter int unsigned DATA_WIDTH   = ni_params_pkg::AXI_DATA_WIDTH,
     // THIS node's own crossbar windows, stamped by gen_tb_top.py from the
     // config file. Field t is target t, m0 = config, LAST = data (see
     // gen_tb_top.tile_targets). No defaults: only the generator knows a
@@ -58,7 +58,7 @@ module dma_node_endpoint #(
     // Master-face consumer backpressure, response side only.
     parameter bit          MST_STALL_RANDOM_OUTPUT = 1'b0,
     parameter int unsigned MST_FIXED_DELAY_OUTPUT  = 0,
-    parameter int unsigned AWUSER_WIDTH = ni_params_pkg::AXI_AWUSER_WIDTH_DFLT
+    parameter int unsigned AWUSER_WIDTH = ni_params_pkg::AXI_AWUSER_WIDTH
 ) (
     input  logic                       clk_i,
     input  logic                       rst_ni,
@@ -465,7 +465,7 @@ module dma_node_endpoint #(
     axi_id_remap_intf #(
         .AXI_SLV_PORT_ID_WIDTH(XBAR_MST_ID_W),
         .AXI_SLV_PORT_MAX_UNIQ_IDS(NOC_MAX_UNIQ_IDS),
-        .AXI_MAX_TXNS_PER_ID(ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT),
+        .AXI_MAX_TXNS_PER_ID(ni_params_pkg::NMU_MAX_OUTSTANDING_PER_ID),
         .AXI_MST_PORT_ID_WIDTH(NOC_ID_WIDTH),
         .AXI_ADDR_WIDTH(ADDR_WIDTH),
         .AXI_DATA_WIDTH(DATA_WIDTH),

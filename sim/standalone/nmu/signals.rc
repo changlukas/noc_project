@@ -246,7 +246,7 @@ addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/i_b_storage/free_addr_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/i_b_storage/complete_o
 endSubGroup "B storage"
-addSubGroup "R storage (READ_ROB_ENABLED=1)" -e FALSE
+addSubGroup "R storage (R_ROB_EN=1)" -e FALSE
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/alloc_valid_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/alloc_base_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/alloc_cnt_i
@@ -264,7 +264,7 @@ addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/free_valid_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/free_addr_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/complete_o
-endSubGroup "R storage (READ_ROB_ENABLED=1)"
+endSubGroup "R storage (R_ROB_EN=1)"
 addSubGroup "B CDC FIFO" -e FALSE
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/src_clk_i
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_response_fifo/i_b_fifo/src_rst_ni

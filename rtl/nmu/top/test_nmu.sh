@@ -34,7 +34,7 @@ task_sources=(
     "$task_root/specgen/generated/sv/ni_signals_pkg.sv"
     "$task_root/specgen/generated/sv/ni_flit_pkg.sv"
     "$task_generated"
-    "$task_root/rtl/common/ni_child_types_pkg.sv"
+    "$task_root/rtl/common/ni_types_pkg.sv"
     "$task_common_cells/src/cc_pkg.sv"
     "$task_common_cells/src/cc_binary_to_gray.sv"
     "$task_common_cells/src/cc_gray_to_binary.sv"
@@ -98,7 +98,7 @@ if [[ "${1:-test}" == standalone || "${1:-test}" == prepare ]]; then
     if [[ ${1:-test} != prepare ]]; then
     "${task_verilator[@]}" --top-module tb_nmu_standalone --binary -j 1 \
         -GID_WIDTH="${NMU_ID_WIDTH:-8}" -GNOC_HALF_PERIOD="${NMU_NOC_HALF_PERIOD:-5}" \
-        -GBUFFER_DEPTH="${NMU_BUFFER_DEPTH:-128}" -GREAD_ROB_ENABLED="${NMU_READ_ROB:-1}" \
+        -GBUFFER_DEPTH="${NMU_BUFFER_DEPTH:-128}" -GR_ROB_EN="${NMU_READ_ROB:-1}" \
         --Mdir "$task_output/obj" "${task_sources[@]}"
     fi
     for task_pattern in neighbor uniform_random hotspot; do

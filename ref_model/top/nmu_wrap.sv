@@ -39,17 +39,17 @@
 `define NMU_WRAP_SV
 
 module nmu_wrap #(
-    parameter int unsigned ID_WIDTH       = ni_params_pkg::AXI_ID_WIDTH_DFLT,
-    parameter int unsigned ADDR_WIDTH     = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
-    parameter int unsigned DATA_WIDTH     = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
-    parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
-    parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT,
-    parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT,
-    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT,
+    parameter int unsigned ID_WIDTH       = ni_params_pkg::AXI_ID_WIDTH,
+    parameter int unsigned ADDR_WIDTH     = ni_params_pkg::AXI_ADDR_WIDTH,
+    parameter int unsigned DATA_WIDTH     = ni_params_pkg::AXI_DATA_WIDTH,
+    parameter int unsigned NUM_DAT_VC     = ni_params_pkg::NUM_DAT_VC,
+    parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH,
+    parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH,
+    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH,
     // AWUSER width (docs/noc-target-spec.md §6: [7:0] user, [9:8] collective_op,
     // [57:10] collective address mask). Dedicated port beside axi_req_i: the
     // generated axi_req_t struct has no awuser field.
-    parameter int unsigned AWUSER_WIDTH   = ni_params_pkg::AXI_AWUSER_WIDTH_DFLT
+    parameter int unsigned AWUSER_WIDTH   = ni_params_pkg::AXI_AWUSER_WIDTH
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
@@ -71,10 +71,10 @@ module nmu_wrap #(
     // DAT face (both directions, credit).
     output logic                  tx_dat_valid_o,
     output logic [DAT_FLIT_WIDTH-1:0] tx_dat_flit_o,
-    input  logic [DAT_NUM_VC-1:0]     tx_dat_crdvalid_i,
+    input  logic [NUM_DAT_VC-1:0]     tx_dat_crdvalid_i,
     input  logic                      rx_dat_valid_i,
     input  logic [DAT_FLIT_WIDTH-1:0] rx_dat_flit_i,
-    output logic [DAT_NUM_VC-1:0]     rx_dat_crdvalid_o
+    output logic [NUM_DAT_VC-1:0]     rx_dat_crdvalid_o
 );
 
     // -------------------------------------------------------------------------
@@ -115,7 +115,7 @@ module nmu_wrap #(
         input  bit [RSP_FLIT_WIDTH-1:0] rx_rsp_flit,
         input  bit                    rx_dat_valid,
         input  bit [DAT_FLIT_WIDTH-1:0] rx_dat_flit,
-        input  bit [DAT_NUM_VC-1:0]   tx_dat_crdvalid
+        input  bit [NUM_DAT_VC-1:0]   tx_dat_crdvalid
     );
 
     import "DPI-C" context function void cmodel_nmu_tick(
@@ -140,7 +140,7 @@ module nmu_wrap #(
         output bit                    rx_rsp_ready,
         output bit                    tx_dat_valid,
         output bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit,
-        output bit [DAT_NUM_VC-1:0]   rx_dat_crdvalid
+        output bit [NUM_DAT_VC-1:0]   rx_dat_crdvalid
     );
 
     // Lifecycle / error polling lives in tb_top.sv.
@@ -170,7 +170,7 @@ module nmu_wrap #(
     bit                    rx_rsp_ready_q;
     bit                    tx_dat_valid_q;
     bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q;
-    bit [DAT_NUM_VC-1:0]     rx_dat_crdvalid_q;
+    bit [NUM_DAT_VC-1:0]     rx_dat_crdvalid_q;
 
     // -------------------------------------------------------------------------
     // always_ff: sync-reset, 3-step DPI call, registered outputs, error check
@@ -258,7 +258,7 @@ module nmu_wrap #(
                 bit                    t_rx_rsp_ready;
                 bit                    t_tx_dat_valid;
                 bit [DAT_FLIT_WIDTH-1:0] t_tx_dat_flit;
-                bit [DAT_NUM_VC-1:0]     t_rx_dat_crdvalid;
+                bit [NUM_DAT_VC-1:0]     t_rx_dat_crdvalid;
                 cmodel_nmu_get_outputs(
                     ctx_i,
                     t_awready, t_wready, t_arready,

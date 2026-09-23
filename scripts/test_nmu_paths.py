@@ -14,7 +14,7 @@ COMMON_SOURCES = [
     ROOT / "specgen/generated/sv/ni_params_pkg.sv",
     ROOT / "specgen/generated/sv/ni_signals_pkg.sv",
     ROOT / "specgen/generated/sv/ni_flit_pkg.sv",
-    ROOT / "rtl/common/ni_child_types_pkg.sv",
+    ROOT / "rtl/common/ni_types_pkg.sv",
 ]
 def elaborate(top_module: str, dut_source: pathlib.Path, testbench: pathlib.Path) -> None:
     with tempfile.TemporaryDirectory(prefix=f"{top_module}_") as temp_dir:

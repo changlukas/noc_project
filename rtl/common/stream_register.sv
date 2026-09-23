@@ -8,16 +8,16 @@
 module stream_register #(
     // 0: bypass, 1: simple register, 2: full spill register.
     parameter int unsigned REG_TYPE = 0,
-    parameter type T = logic
+    parameter type         data_t   = logic
 ) (
-    input  wire logic  clk_i,
-    input  wire logic  rst_ni,
-    input  wire logic  s_valid_i,
-    output wire logic  s_ready_o,
-    input  wire T      s_data_i,
-    output wire logic  m_valid_o,
-    input  wire logic  m_ready_i,
-    output wire T      m_data_o
+    input  wire logic   clk_i,
+    input  wire logic   rst_ni,
+    input  wire logic   s_valid_i,
+    output wire logic   s_ready_o,
+    input  wire data_t  s_data_i,
+    output wire logic   m_valid_o,
+    input  wire logic   m_ready_i,
+    output wire data_t  m_data_o
 );
 
     if (REG_TYPE > 2) begin : gen_invalid_reg_type
@@ -30,31 +30,31 @@ module stream_register #(
         assign m_data_o = s_data_i;
     end else if (REG_TYPE == 1) begin : gen_simple
         cc_stream_register #(
-            .data_t ( T )
+            .data_t (data_t)
         ) i_cc_stream_register (
             .clk_i,
             .rst_ni,
-            .clr_i      ( 1'b0      ),
-            .valid_i    ( s_valid_i ),
-            .ready_o    ( s_ready_o ),
-            .data_i     ( s_data_i  ),
-            .valid_o    ( m_valid_o ),
-            .ready_i    ( m_ready_i ),
-            .data_o     ( m_data_o  )
+            .clr_i   (1'b0     ),
+            .valid_i (s_valid_i),
+            .ready_o (s_ready_o),
+            .data_i  (s_data_i ),
+            .valid_o (m_valid_o),
+            .ready_i (m_ready_i),
+            .data_o  (m_data_o )
         );
     end else begin : gen_spill
         cc_spill_register #(
-            .data_t ( T )
+            .data_t (data_t)
         ) i_cc_spill_register (
             .clk_i,
             .rst_ni,
-            .clr_i   ( 1'b0      ),
-            .valid_i ( s_valid_i ),
-            .ready_o ( s_ready_o ),
-            .data_i  ( s_data_i  ),
-            .valid_o ( m_valid_o ),
-            .ready_i ( m_ready_i ),
-            .data_o  ( m_data_o  )
+            .clr_i   (1'b0     ),
+            .valid_i (s_valid_i),
+            .ready_o (s_ready_o),
+            .data_i  (s_data_i ),
+            .valid_o (m_valid_o),
+            .ready_i (m_ready_i),
+            .data_o  (m_data_o )
         );
     end
 

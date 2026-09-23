@@ -8,8 +8,8 @@ module tb_nmu_request_path;
     ni_signals_pkg::axi_aw_t s_aw_i;
     ni_signals_pkg::axi_w_t s_w_i, m_w_o;
     ni_signals_pkg::axi_ar_t s_ar_i;
-    ni_child_types_pkg::nmu_sam_aw_result_t m_aw_o;
-    ni_child_types_pkg::nmu_sam_ar_result_t m_ar_o;
+    ni_types_pkg::nmu_sam_aw_result_t m_aw_o;
+    ni_types_pkg::nmu_sam_ar_result_t m_ar_o;
     logic s_aw_valid_i, s_aw_ready_o, s_w_valid_i, s_w_ready_o;
     logic s_ar_valid_i, s_ar_ready_o;
     logic m_aw_valid_o, m_aw_ready_i = 1, m_w_valid_o, m_w_ready_i = 1;
@@ -53,7 +53,7 @@ module tb_nmu_request_path;
         .AXI_ID_WIDTH(3),
         .AXI_FIFO_DEPTH (4),
         .SAM_NUM_RULES (SAM_NUM_RULES), .addr_t (sam_addr_t),
-        .sam_mask_sel_t (sam_mask_sel_t), .sam_idx_t (sam_idx_t),
+        .sam_mask_sel_t (sam_mask_sel_t), .sam_result_t (sam_result_t),
         .sam_rule_t (sam_rule_t), .SAM (SAM)
     ) dut (
         .axi_clk_i, .axi_rst_ni, .noc_clk_i, .noc_rst_ni,

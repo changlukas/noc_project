@@ -12,7 +12,7 @@ import pytest
 SPECGEN_ROOT = Path(__file__).resolve().parent.parent
 SV_DIR = SPECGEN_ROOT / "generated" / "sv"
 HARNESS = Path(__file__).resolve().parent / "sv" / "tb_ni_type_contract.sv"
-CHILD_TYPES = SPECGEN_ROOT.parent / "rtl" / "common" / "ni_child_types_pkg.sv"
+NI_TYPES = SPECGEN_ROOT.parent / "rtl" / "common" / "ni_types_pkg.sv"
 
 
 def _typedef_fields(text: str, type_name: str) -> list[str]:
@@ -54,8 +54,8 @@ def test_flit_container_fields_and_packed_order():
         assert _typedef_fields(text, type_name) == ["payload", "header"]
 
 
-def test_child_record_field_sets():
-    text = CHILD_TYPES.read_text(encoding="ascii")
+def test_ni_record_field_sets():
+    text = NI_TYPES.read_text(encoding="ascii")
     expected = {
         "nmu_ordering_domain_t": ["dst_id", "dst_port_id", "is_data"],
         "nmu_route_t": ["domain"],
@@ -102,7 +102,7 @@ def test_generated_type_harness_elaborates_and_runs(tmp_path: Path):
             str(SV_DIR / "ni_params_pkg.sv"),
             str(SV_DIR / "ni_signals_pkg.sv"),
             str(SV_DIR / "ni_flit_pkg.sv"),
-            str(CHILD_TYPES),
+            str(NI_TYPES),
             str(HARNESS),
         ],
         capture_output=True,

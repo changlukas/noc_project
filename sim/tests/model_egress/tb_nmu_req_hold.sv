@@ -2,7 +2,7 @@
 
 module tb_nmu_req_hold;
 
-    localparam int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT;
+    localparam int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH;
 
     logic clk_i = 1'b0;
     logic rst_ni = 1'b0;

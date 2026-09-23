@@ -1,20 +1,20 @@
 `timescale 1ns / 1ps
 
 module tb_nmu_ordering_stall;
-    localparam int unsigned ID_W = ni_params_pkg::AXI_ID_WIDTH_DFLT;
+    localparam int unsigned ID_W = ni_params_pkg::AXI_ID_WIDTH;
     localparam int unsigned LEN_W = 8;
     localparam int unsigned TAG_W = ni_flit_pkg::ORDERING_TAG_WIDTH;
     localparam int unsigned COLLECTIVE_OP_W = ni_flit_pkg::COLLECTIVE_OP_WIDTH;
 
     logic clk_i = 0, rst_i = 1;
-    ni_child_types_pkg::nmu_sam_aw_result_t s_aw_i;
-    ni_child_types_pkg::nmu_aw_request_t m_aw_o;
+    ni_types_pkg::nmu_sam_aw_result_t s_aw_i;
+    ni_types_pkg::nmu_aw_request_t m_aw_o;
     ni_signals_pkg::axi_w_t s_w_i, m_w_o;
-    ni_child_types_pkg::nmu_sam_ar_result_t s_ar_i;
-    ni_child_types_pkg::nmu_ar_request_t m_ar_o;
-    ni_child_types_pkg::nmu_b_response_t s_b_i;
+    ni_types_pkg::nmu_sam_ar_result_t s_ar_i;
+    ni_types_pkg::nmu_ar_request_t m_ar_o;
+    ni_types_pkg::nmu_b_response_t s_b_i;
     ni_signals_pkg::axi_b_t m_b_o;
-    ni_child_types_pkg::nmu_r_response_t s_r_i;
+    ni_types_pkg::nmu_r_response_t s_r_i;
     ni_signals_pkg::axi_r_t m_r_o;
     logic s_aw_valid_i, s_aw_ready_o, m_aw_valid_o, m_aw_ready_i;
     logic s_w_valid_i, s_w_ready_o, m_w_valid_o, m_w_ready_i;
@@ -29,14 +29,14 @@ module tb_nmu_ordering_stall;
     int unsigned b_retire_count = 0, r_retire_count = 0, cycle_count = 0;
 
     nmu_ordering #(
-        .NMU_ROB_B_DEPTH (8), .NMU_ROB_R_DEPTH (16),
-        .NMU_MAX_TXNS_PER_ID (4), .READ_ROB_ENABLED (1'b1)
+        .B_ROB_DEPTH (8), .R_ROB_DEPTH (16),
+        .MAX_OUTSTANDING_PER_ID (4), .R_ROB_EN (1'b1)
     ) dut (.*);
 
     always #5ns clk_i = !clk_i;
 
-    ni_child_types_pkg::nmu_aw_request_t prev_aw;
-    ni_child_types_pkg::nmu_ar_request_t prev_ar;
+    ni_types_pkg::nmu_aw_request_t prev_aw;
+    ni_types_pkg::nmu_ar_request_t prev_ar;
     ni_signals_pkg::axi_b_t prev_b;
     ni_signals_pkg::axi_r_t prev_r;
     logic aw_stalled = 0, ar_stalled = 0, b_stalled = 0, r_stalled = 0;
@@ -127,7 +127,7 @@ module tb_nmu_ordering_stall;
         @(negedge clk_i);
         s_r_i = '0;
         s_r_i.axi.rid = ID_W'(id);
-        s_r_i.axi.rdata = ni_params_pkg::AXI_DATA_WIDTH_DFLT'(data);
+        s_r_i.axi.rdata = ni_params_pkg::AXI_DATA_WIDTH'(data);
         s_r_i.axi.rlast = last;
         s_r_i.meta.ordering_req = ordered;
         s_r_i.meta.ordering_tag = TAG_W'(tag);
@@ -178,8 +178,8 @@ module tb_nmu_ordering_stall;
         send_b(1, 1, 1, 2);
         send_r(1, 1, 1, 32'h41, 0); send_r(1, 1, 1, 32'h42, 1);
         if (b_retire_count != 4 || r_retire_count != 5 ||
-                retired_b[3].bresp != 2 || retired_r[3].rdata != ni_params_pkg::AXI_DATA_WIDTH_DFLT'(32'h41) ||
-                retired_r[4].rdata != ni_params_pkg::AXI_DATA_WIDTH_DFLT'(32'h42))
+                retired_b[3].bresp != 2 || retired_r[3].rdata != ni_params_pkg::AXI_DATA_WIDTH'(32'h41) ||
+                retired_r[4].rdata != ni_params_pkg::AXI_DATA_WIDTH'(32'h42))
             $fatal(1, "held tag did not reserve and retire its range");
         send_aw(1, 3);
         if (last_aw_ordering_req) $fatal(1, "idle write ID did not return to bypass");
@@ -227,7 +227,7 @@ module tb_nmu_ordering_stall;
         repeat (2) @(posedge clk_i);
         @(negedge clk_i);
         if (r_retire_count != 5 || retired_r[3].rid != ID_W'(1) ||
-                retired_r[4].rid != ID_W'(2) || retired_r[4].rdata != ni_params_pkg::AXI_DATA_WIDTH_DFLT'(32'h202) ||
+                retired_r[4].rid != ID_W'(2) || retired_r[4].rdata != ni_params_pkg::AXI_DATA_WIDTH'(32'h202) ||
                 !retired_r[4].rlast || retired_r_cycle[4] != retired_r_cycle[3] + 1)
             $fatal(1, "mixed direct/buffered R burst did not retire correctly");
 

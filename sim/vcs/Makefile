@@ -93,7 +93,7 @@ $(FILELIST_F): ../build_config.mk $(SPECGEN_CONSTANTS) $(SIM_ROOT)/tools/gen_fil
 
 # The generated parameter files, from the source both they and build_config.mk's
 # --print-num-vc read. Without this an edit to constants.yaml left the testbench
-# elaborating at the previous DAT_NUM_VC / READ_ROB_ENABLED while the filelist
+# elaborating at the previous NUM_DAT_VC / R_ROB_EN while the filelist
 # already named the new VC width. Duplicated in sim/vcs/Makefile, as FILELIST_F.
 $(NI_PARAMS_SV): $(SPECGEN_CONSTANTS) $(CODEGEN)
 	$(PYTHON3) $(CODEGEN) --target sv --domain params

@@ -24,17 +24,17 @@ module noc_fabric #(
     // Y = i / X_DIM, and the routing id route_compute agrees on is (Y<<4)|X.
     parameter int unsigned X_DIM          = 2,
     parameter int unsigned Y_DIM          = 2,
-    parameter int unsigned ID_WIDTH       = ni_params_pkg::NOC_ID_WIDTH_DFLT,
-    parameter int unsigned ADDR_WIDTH     = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
-    parameter int unsigned DATA_WIDTH     = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
-    parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
-    parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT,
-    parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT,
-    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT,
+    parameter int unsigned ID_WIDTH       = ni_params_pkg::NOC_ID_WIDTH,
+    parameter int unsigned ADDR_WIDTH     = ni_params_pkg::AXI_ADDR_WIDTH,
+    parameter int unsigned DATA_WIDTH     = ni_params_pkg::AXI_DATA_WIDTH,
+    parameter int unsigned NUM_DAT_VC     = ni_params_pkg::NUM_DAT_VC,
+    parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH,
+    parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH,
+    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH,
     // ROUTER_VC_DEPTH: per-VC input FIFO depth inside the DAT router; also the
     // credit seed the DAT merge point's downstream pool is initialized with, so
     // both ends of every link agree on the credit window.
-    parameter int unsigned ROUTER_VC_DEPTH = ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT,
+    parameter int unsigned ROUTER_VC_DEPTH = ni_params_pkg::NOC_ROUTER_VC_DEPTH,
     // Off-mesh peripherals, in endpoint order. PERIPH_NODE[p] is the linear
     // index of the router peripheral p hangs off; PERIPH_PORT[p] is its FACE,
     // 1 = x (the WEST or EAST port) and 2 = y (SOUTH or NORTH). Which port of
@@ -67,7 +67,7 @@ module noc_fabric #(
     input  ni_signals_pkg::axi_req_t  master_axi_req [X_DIM*Y_DIM + N_PERIPH],
     // AWUSER sideband: collective op + address mask.
     // Dedicated array beside the struct (axi_req_t has no awuser field).
-    input  logic [ni_params_pkg::AXI_AWUSER_WIDTH_DFLT-1:0]
+    input  logic [ni_params_pkg::AXI_AWUSER_WIDTH-1:0]
                                       master_awuser  [X_DIM*Y_DIM + N_PERIPH],
     output ni_signals_pkg::axi_rsp_t  master_axi_rsp [X_DIM*Y_DIM + N_PERIPH],
     // Per-endpoint AXI faces (struct arrays): NSU egress (consumed by tb slave)
@@ -126,8 +126,8 @@ module noc_fabric #(
     logic [DAT_FLIT_WIDTH-1:0]    tx_dat_flit  [NUM_NODES][LINK_PORTS];
     logic [LINK_PORTS-1:0]        rx_dat_valid [NUM_NODES];
     logic [DAT_FLIT_WIDTH-1:0]    rx_dat_flit  [NUM_NODES][LINK_PORTS];
-    logic [DAT_NUM_VC-1:0]        tx_dat_crdvalid [NUM_NODES][LINK_PORTS];  // input
-    logic [DAT_NUM_VC-1:0]        rx_dat_crdvalid [NUM_NODES][LINK_PORTS];  // output
+    logic [NUM_DAT_VC-1:0]        tx_dat_crdvalid [NUM_NODES][LINK_PORTS];  // input
+    logic [NUM_DAT_VC-1:0]        rx_dat_crdvalid [NUM_NODES][LINK_PORTS];  // output
 
     // -------------------------------------------------------------------------
     // Peripherals: an NI on a populated boundary port, no router of its own
@@ -147,7 +147,7 @@ module noc_fabric #(
     logic                        periph_rx_rsp_ready    [N_PERIPH_MAX];
     logic                        periph_tx_dat_valid    [N_PERIPH_MAX];
     logic [DAT_FLIT_WIDTH-1:0]   periph_tx_dat_flit     [N_PERIPH_MAX];
-    logic [DAT_NUM_VC-1:0]       periph_rx_dat_crdvalid [N_PERIPH_MAX];
+    logic [NUM_DAT_VC-1:0]       periph_rx_dat_crdvalid [N_PERIPH_MAX];
 
     for (genvar p = 0; p < N_PERIPH; p++) begin : g_periph
         localparam int unsigned EP   = NUM_NODES + p;      // endpoint index
@@ -156,7 +156,7 @@ module noc_fabric #(
 
         ni_wrap #(
             .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
-            .DAT_NUM_VC(DAT_NUM_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),
+            .NUM_DAT_VC(NUM_DAT_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),
             .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH)
         ) u_ni (
             .clk_i(clk_i), .rst_ni(rst_ni),
@@ -208,7 +208,7 @@ module noc_fabric #(
             .LINK_NAME($sformatf("req_node%0d.router_to_node%0d.%s", HOST, HOST, FACE)),
             .FLOW("ready_valid"),
             .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
         ) u_perf_req (
             .clk_i, .rst_ni, .measure_en(measure_en),
             .valid(tx_req_valid[HOST][DIR]),
@@ -220,7 +220,7 @@ module noc_fabric #(
             .LINK_NAME($sformatf("req_node%0d.%s_to_node%0d.router", HOST, FACE, HOST)),
             .FLOW("ready_valid"),
             .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
         ) u_perf_req_out (
             .clk_i, .rst_ni, .measure_en(measure_en),
             .valid(periph_tx_req_valid[p]),
@@ -232,7 +232,7 @@ module noc_fabric #(
             .LINK_NAME($sformatf("rsp_node%0d.router_to_node%0d.%s", HOST, HOST, FACE)),
             .FLOW("ready_valid"),
             .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
         ) u_perf_rsp (
             .clk_i, .rst_ni, .measure_en(measure_en),
             .valid(tx_rsp_valid[HOST][DIR]),
@@ -244,7 +244,7 @@ module noc_fabric #(
             .LINK_NAME($sformatf("rsp_node%0d.%s_to_node%0d.router", HOST, FACE, HOST)),
             .FLOW("ready_valid"),
             .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
         ) u_perf_rsp_out (
             .clk_i, .rst_ni, .measure_en(measure_en),
             .valid(periph_tx_rsp_valid[p]),
@@ -256,7 +256,7 @@ module noc_fabric #(
             .LINK_NAME($sformatf("dat_node%0d.router_to_node%0d.%s", HOST, HOST, FACE)),
             .FLOW("credit"),
             .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
         ) u_perf_dat (
             .clk_i, .rst_ni, .measure_en(measure_en),
             .valid(tx_dat_valid[HOST][DIR]),
@@ -268,7 +268,7 @@ module noc_fabric #(
             .LINK_NAME($sformatf("dat_node%0d.%s_to_node%0d.router", HOST, FACE, HOST)),
             .FLOW("credit"),
             .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
         ) u_perf_dat_out (
             .clk_i, .rst_ni, .measure_en(measure_en),
             .valid(periph_tx_dat_valid[p]),
@@ -296,7 +296,7 @@ module noc_fabric #(
 
         ni_wrap #(
             .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
-            .DAT_NUM_VC(DAT_NUM_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),
+            .NUM_DAT_VC(NUM_DAT_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),
             .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH)
         ) u_ni (
             .clk_i(clk_i), .rst_ni(rst_ni),
@@ -326,7 +326,7 @@ module noc_fabric #(
         );
 
         router_wrap #(
-            .DAT_NUM_VC(DAT_NUM_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),
+            .NUM_DAT_VC(NUM_DAT_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),
             .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH),
             .LINK_PORTS(LINK_PORTS)
         ) u_router (
@@ -350,7 +350,7 @@ module noc_fabric #(
         link_perf_monitor #(
             .LINK_NAME($sformatf("req_inject_%0d", i)),
             .FLOW("ready_valid"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
         ) u_perf_local_req_inject (
             .clk_i, .rst_ni, .measure_en(measure_en),
             .valid(rx_req_valid[i][RP_LOCAL]), .ready(rx_req_ready[i][RP_LOCAL]),
@@ -359,7 +359,7 @@ module noc_fabric #(
         link_perf_monitor #(
             .LINK_NAME($sformatf("rsp_inject_%0d", i)),
             .FLOW("ready_valid"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
         ) u_perf_local_rsp_inject (
             .clk_i, .rst_ni, .measure_en(measure_en),
             .valid(rx_rsp_valid[i][RP_LOCAL]), .ready(rx_rsp_ready[i][RP_LOCAL]),
@@ -368,7 +368,7 @@ module noc_fabric #(
         link_perf_monitor #(
             .LINK_NAME($sformatf("dat_inject_%0d", i)),
             .FLOW("credit"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
         ) u_perf_local_dat_inject (
             .clk_i, .rst_ni, .measure_en(measure_en),
             .valid(rx_dat_valid[i][RP_LOCAL]), .ready(1'b0),
@@ -378,7 +378,7 @@ module noc_fabric #(
         link_perf_monitor #(
             .LINK_NAME($sformatf("req_eject_%0d", i)),
             .FLOW("ready_valid"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
         ) u_perf_local_req_eject (
             .clk_i, .rst_ni, .measure_en(measure_en),
             .valid(tx_req_valid[i][RP_LOCAL]), .ready(tx_req_ready[i][RP_LOCAL]),
@@ -387,7 +387,7 @@ module noc_fabric #(
         link_perf_monitor #(
             .LINK_NAME($sformatf("rsp_eject_%0d", i)),
             .FLOW("ready_valid"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
         ) u_perf_local_rsp_eject (
             .clk_i, .rst_ni, .measure_en(measure_en),
             .valid(tx_rsp_valid[i][RP_LOCAL]), .ready(tx_rsp_ready[i][RP_LOCAL]),
@@ -396,7 +396,7 @@ module noc_fabric #(
         link_perf_monitor #(
             .LINK_NAME($sformatf("dat_eject_%0d", i)),
             .FLOW("credit"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-            .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+            .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
         ) u_perf_local_dat_eject (
             .clk_i, .rst_ni, .measure_en(measure_en),
             .valid(tx_dat_valid[i][RP_LOCAL]), .ready(1'b0),
@@ -550,7 +550,7 @@ module noc_fabric #(
                 .LINK_NAME($sformatf("req_%0dto%0d", i, PEER_N)),
                 .FLOW("ready_valid"),
                 .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
             ) u_perf_link_req (
             .clk_i, .rst_ni, .measure_en(measure_en),
                 .valid(tx_req_valid[i][RP_NORTH]),
@@ -562,7 +562,7 @@ module noc_fabric #(
                 .LINK_NAME($sformatf("rsp_%0dto%0d", i, PEER_N)),
                 .FLOW("ready_valid"),
                 .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
             ) u_perf_link_rsp (
             .clk_i, .rst_ni, .measure_en(measure_en),
                 .valid(tx_rsp_valid[i][RP_NORTH]),
@@ -574,7 +574,7 @@ module noc_fabric #(
                 .LINK_NAME($sformatf("dat_%0dto%0d", i, PEER_N)),
                 .FLOW("credit"),
                 .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
             ) u_perf_link_dat (
             .clk_i, .rst_ni, .measure_en(measure_en),
                 .valid(tx_dat_valid[i][RP_NORTH]),
@@ -588,7 +588,7 @@ module noc_fabric #(
                 .LINK_NAME($sformatf("req_%0dto%0d", i, PEER_E)),
                 .FLOW("ready_valid"),
                 .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
             ) u_perf_link_req (
             .clk_i, .rst_ni, .measure_en(measure_en),
                 .valid(tx_req_valid[i][RP_EAST]),
@@ -600,7 +600,7 @@ module noc_fabric #(
                 .LINK_NAME($sformatf("rsp_%0dto%0d", i, PEER_E)),
                 .FLOW("ready_valid"),
                 .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
             ) u_perf_link_rsp (
             .clk_i, .rst_ni, .measure_en(measure_en),
                 .valid(tx_rsp_valid[i][RP_EAST]),
@@ -612,7 +612,7 @@ module noc_fabric #(
                 .LINK_NAME($sformatf("dat_%0dto%0d", i, PEER_E)),
                 .FLOW("credit"),
                 .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
             ) u_perf_link_dat (
             .clk_i, .rst_ni, .measure_en(measure_en),
                 .valid(tx_dat_valid[i][RP_EAST]),
@@ -626,7 +626,7 @@ module noc_fabric #(
                 .LINK_NAME($sformatf("req_%0dto%0d", i, PEER_S)),
                 .FLOW("ready_valid"),
                 .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
             ) u_perf_link_req (
             .clk_i, .rst_ni, .measure_en(measure_en),
                 .valid(tx_req_valid[i][RP_SOUTH]),
@@ -638,7 +638,7 @@ module noc_fabric #(
                 .LINK_NAME($sformatf("rsp_%0dto%0d", i, PEER_S)),
                 .FLOW("ready_valid"),
                 .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
             ) u_perf_link_rsp (
             .clk_i, .rst_ni, .measure_en(measure_en),
                 .valid(tx_rsp_valid[i][RP_SOUTH]),
@@ -650,7 +650,7 @@ module noc_fabric #(
                 .LINK_NAME($sformatf("dat_%0dto%0d", i, PEER_S)),
                 .FLOW("credit"),
                 .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
             ) u_perf_link_dat (
             .clk_i, .rst_ni, .measure_en(measure_en),
                 .valid(tx_dat_valid[i][RP_SOUTH]),
@@ -664,7 +664,7 @@ module noc_fabric #(
                 .LINK_NAME($sformatf("req_%0dto%0d", i, PEER_W)),
                 .FLOW("ready_valid"),
                 .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
             ) u_perf_link_req (
             .clk_i, .rst_ni, .measure_en(measure_en),
                 .valid(tx_req_valid[i][RP_WEST]),
@@ -676,7 +676,7 @@ module noc_fabric #(
                 .LINK_NAME($sformatf("rsp_%0dto%0d", i, PEER_W)),
                 .FLOW("ready_valid"),
                 .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
             ) u_perf_link_rsp (
             .clk_i, .rst_ni, .measure_en(measure_en),
                 .valid(tx_rsp_valid[i][RP_WEST]),
@@ -688,7 +688,7 @@ module noc_fabric #(
                 .LINK_NAME($sformatf("dat_%0dto%0d", i, PEER_W)),
                 .FLOW("credit"),
                 .BUFFER_DEPTH(ROUTER_VC_DEPTH),
-                .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
+                .NUM_VC(NUM_DAT_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)
             ) u_perf_link_dat (
             .clk_i, .rst_ni, .measure_en(measure_en),
                 .valid(tx_dat_valid[i][RP_WEST]),

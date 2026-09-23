@@ -10,7 +10,7 @@ module tb_nmu_response_path;
     logic m_b_valid_o, m_b_ready_i, m_r_valid_o, m_r_ready_i;
 
     nmu_response_fifo #(
-        .AXI_FIFO_DEPTH(4), .B_T(ni_signals_pkg::axi_b_t), .R_T(ni_signals_pkg::axi_r_t)
+        .AXI_FIFO_DEPTH(4), .b_t(ni_signals_pkg::axi_b_t), .r_t(ni_signals_pkg::axi_r_t)
     ) dut (
         .noc_clk_i, .noc_rst_ni, .axi_clk_i, .axi_rst_ni,
         .s_b_data_i(s_b_i), .s_b_valid_i, .s_b_ready_o,

@@ -36,13 +36,13 @@
 `define NSU_WRAP_SV
 
 module nsu_wrap #(
-    parameter int unsigned ID_WIDTH       = ni_params_pkg::NSU_AXI_ID_WIDTH_DFLT,
-    parameter int unsigned ADDR_WIDTH     = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
-    parameter int unsigned DATA_WIDTH     = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
-    parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
-    parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT,
-    parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT,
-    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT
+    parameter int unsigned ID_WIDTH       = ni_params_pkg::NSU_AXI_ID_WIDTH,
+    parameter int unsigned ADDR_WIDTH     = ni_params_pkg::AXI_ADDR_WIDTH,
+    parameter int unsigned DATA_WIDTH     = ni_params_pkg::AXI_DATA_WIDTH,
+    parameter int unsigned NUM_DAT_VC     = ni_params_pkg::NUM_DAT_VC,
+    parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH,
+    parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH,
+    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
@@ -61,10 +61,10 @@ module nsu_wrap #(
     // DAT face (both directions, credit).
     output logic                  tx_dat_valid_o,
     output logic [DAT_FLIT_WIDTH-1:0] tx_dat_flit_o,
-    input  logic [DAT_NUM_VC-1:0]     tx_dat_crdvalid_i,
+    input  logic [NUM_DAT_VC-1:0]     tx_dat_crdvalid_i,
     input  logic                      rx_dat_valid_i,
     input  logic [DAT_FLIT_WIDTH-1:0] rx_dat_flit_i,
-    output logic [DAT_NUM_VC-1:0]     rx_dat_crdvalid_o,
+    output logic [NUM_DAT_VC-1:0]     rx_dat_crdvalid_o,
 
     output ni_signals_pkg::axi_req_t   axi_req_o,
     input  ni_signals_pkg::axi_rsp_t   axi_rsp_i
@@ -81,7 +81,7 @@ module nsu_wrap #(
         input  bit                    tx_rsp_ready,
         input  bit                    rx_dat_valid,
         input  bit [DAT_FLIT_WIDTH-1:0] rx_dat_flit,
-        input  bit [DAT_NUM_VC-1:0]   tx_dat_crdvalid,
+        input  bit [NUM_DAT_VC-1:0]   tx_dat_crdvalid,
         input  bit                    awready,
         input  bit                    wready,
         input  bit                    bvalid,
@@ -106,7 +106,7 @@ module nsu_wrap #(
         output bit [RSP_FLIT_WIDTH-1:0] tx_rsp_flit,
         output bit                    tx_dat_valid,
         output bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit,
-        output bit [DAT_NUM_VC-1:0]   rx_dat_crdvalid,
+        output bit [NUM_DAT_VC-1:0]   rx_dat_crdvalid,
         output bit                    awvalid,
         output bit [ID_WIDTH-1:0]     awid,
         output bit [ADDR_WIDTH-1:0]   awaddr,
@@ -147,7 +147,7 @@ module nsu_wrap #(
     logic                  tx_rsp_model_ready;
     bit                    tx_dat_valid_q;
     bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q;
-    bit [DAT_NUM_VC-1:0]     rx_dat_crdvalid_q;
+    bit [NUM_DAT_VC-1:0]     rx_dat_crdvalid_q;
 
     // AXI master side outputs (Nsu drives toward slave)
     bit                    awvalid_q;
@@ -255,7 +255,7 @@ module nsu_wrap #(
                 bit [RSP_FLIT_WIDTH-1:0] t_tx_rsp_flit;
                 bit                    t_tx_dat_valid;
                 bit [DAT_FLIT_WIDTH-1:0] t_tx_dat_flit;
-                bit [DAT_NUM_VC-1:0]     t_rx_dat_crdvalid;
+                bit [NUM_DAT_VC-1:0]     t_rx_dat_crdvalid;
                 bit                    t_awvalid;
                 bit [ID_WIDTH-1:0]     t_awid;
                 bit [ADDR_WIDTH-1:0]   t_awaddr;

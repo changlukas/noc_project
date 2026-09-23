@@ -3,28 +3,28 @@
 
 module tb_nmu_request_packetize_stall;
 
-    localparam int unsigned DAT_NUM_VC = 2;
+    localparam int unsigned NUM_DAT_VC = 2;
     localparam int unsigned ROUTER_VC_DEPTH = 2;
 
     logic clk = 1'b0;
     logic rst = 1'b1;
-    ni_child_types_pkg::nmu_aw_request_t s_aw;
+    ni_types_pkg::nmu_aw_request_t s_aw;
     logic s_aw_valid, s_aw_ready;
     ni_signals_pkg::axi_w_t s_w;
     logic s_w_valid, s_w_ready;
-    ni_child_types_pkg::nmu_ar_request_t s_ar;
+    ni_types_pkg::nmu_ar_request_t s_ar;
     logic s_ar_valid, s_ar_ready;
     ni_flit_pkg::req_flit_t m_req;
     logic m_req_valid, m_req_ready;
     ni_flit_pkg::dat_flit_t m_dat;
     logic m_dat_valid;
-    logic [DAT_NUM_VC-1:0] dat_credit_return;
+    logic [NUM_DAT_VC-1:0] dat_credit_return;
 
     always #5 clk = ~clk;
 
     nmu_request_inject_tb_dut #(
         .FIFO_DEPTH       (4),
-        .DAT_NUM_VC       (DAT_NUM_VC),
+        .NUM_DAT_VC       (NUM_DAT_VC),
         .ROUTER_VC_DEPTH  (ROUTER_VC_DEPTH),
         .SRC_ID           (8'h12),
         .SRC_PORT_ID      (2'h2)
@@ -55,7 +55,7 @@ module tb_nmu_request_packetize_stall;
         s_aw.axi.awaddr = addr;
         s_aw.axi.awsize = is_data ? 3'd6 : 3'd3;
         s_aw.axi.awburst = 2'b01;
-        s_aw.axi.awuser = ni_params_pkg::AXI_AWUSER_WIDTH_DFLT'(8'h5a);
+        s_aw.axi.awuser = ni_params_pkg::AXI_AWUSER_WIDTH'(8'h5a);
         s_aw.meta.route.domain = '{dst_id: dst, dst_port_id: 2'h1, is_data: is_data};
         s_aw.user = 8'h5a;
         s_aw_valid = 1'b1;

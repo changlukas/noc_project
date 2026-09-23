@@ -49,9 +49,9 @@ module tb_nmu_request_fifo #(
     nmu_request_fifo #(
         .AXI_FIFO_DEPTH ( AXI_FIFO_DEPTH ),
         .AXI_ID_WIDTH   ( AXI_ID_WIDTH   ),
-        .AW_T           ( aw_t           ),
-        .W_T            ( w_t            ),
-        .AR_T           ( ar_t           )
+        .aw_t           ( aw_t           ),
+        .w_t            ( w_t            ),
+        .ar_t           ( ar_t           )
     ) dut (
         .axi_clk_i,
         .axi_rst_ni,

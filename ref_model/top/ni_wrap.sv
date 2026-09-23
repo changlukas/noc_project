@@ -42,15 +42,15 @@
 // `include needed.
 
 module ni_wrap #(
-    parameter int unsigned ID_WIDTH       = ni_params_pkg::AXI_ID_WIDTH_DFLT,
-    parameter int unsigned ADDR_WIDTH     = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
-    parameter int unsigned DATA_WIDTH     = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
-    parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
-    parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT,
-    parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT,
-    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT,
+    parameter int unsigned ID_WIDTH       = ni_params_pkg::AXI_ID_WIDTH,
+    parameter int unsigned ADDR_WIDTH     = ni_params_pkg::AXI_ADDR_WIDTH,
+    parameter int unsigned DATA_WIDTH     = ni_params_pkg::AXI_DATA_WIDTH,
+    parameter int unsigned NUM_DAT_VC     = ni_params_pkg::NUM_DAT_VC,
+    parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH,
+    parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH,
+    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH,
     // AWUSER width (see nmu_wrap.sv AWUSER_WIDTH).
-    parameter int unsigned AWUSER_WIDTH   = ni_params_pkg::AXI_AWUSER_WIDTH_DFLT
+    parameter int unsigned AWUSER_WIDTH   = ni_params_pkg::AXI_AWUSER_WIDTH
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
@@ -88,30 +88,30 @@ module ni_wrap #(
     // DAT face (merged NMU+NSU, credit) — dat_merge_wrap's router-facing side.
     output logic                      tx_dat_valid_o,
     output logic [DAT_FLIT_WIDTH-1:0] tx_dat_flit_o,
-    input  logic [DAT_NUM_VC-1:0]     tx_dat_crdvalid_i,
+    input  logic [NUM_DAT_VC-1:0]     tx_dat_crdvalid_i,
     input  logic                      rx_dat_valid_i,
     input  logic [DAT_FLIT_WIDTH-1:0] rx_dat_flit_i,
-    output logic [DAT_NUM_VC-1:0]     rx_dat_crdvalid_o
+    output logic [NUM_DAT_VC-1:0]     rx_dat_crdvalid_o
 );
 
     // NMU <-> dat_merge_wrap DAT pins.
     logic                      nmu_tx_dat_valid;
     logic [DAT_FLIT_WIDTH-1:0] nmu_tx_dat_flit;
-    logic [DAT_NUM_VC-1:0]     nmu_tx_dat_crdvalid;
+    logic [NUM_DAT_VC-1:0]     nmu_tx_dat_crdvalid;
     logic                      nmu_rx_dat_valid;
     logic [DAT_FLIT_WIDTH-1:0] nmu_rx_dat_flit;
 
     // NSU <-> dat_merge_wrap DAT pins.
     logic                      nsu_tx_dat_valid;
     logic [DAT_FLIT_WIDTH-1:0] nsu_tx_dat_flit;
-    logic [DAT_NUM_VC-1:0]     nsu_tx_dat_crdvalid;
+    logic [NUM_DAT_VC-1:0]     nsu_tx_dat_crdvalid;
     logic                      nsu_rx_dat_valid;
     logic [DAT_FLIT_WIDTH-1:0] nsu_rx_dat_flit;
-    logic [DAT_NUM_VC-1:0]     nsu_rx_dat_crdvalid;
+    logic [NUM_DAT_VC-1:0]     nsu_rx_dat_crdvalid;
 
     nmu_wrap #(
         .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
-        .DAT_NUM_VC(DAT_NUM_VC),
+        .NUM_DAT_VC(NUM_DAT_VC),
         .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH), .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH),
         .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH), .AWUSER_WIDTH(AWUSER_WIDTH)
     ) u_nmu (
@@ -132,7 +132,7 @@ module ni_wrap #(
 
     nsu_wrap #(
         .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
-        .DAT_NUM_VC(DAT_NUM_VC),
+        .NUM_DAT_VC(NUM_DAT_VC),
         .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH), .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH),
         .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH)
     ) u_nsu (
@@ -152,7 +152,7 @@ module ni_wrap #(
     );
 
     dat_merge_wrap #(
-        .DAT_NUM_VC(DAT_NUM_VC), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH)
+        .NUM_DAT_VC(NUM_DAT_VC), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH)
     ) u_dat_merge (
         .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(dat_merge_ctx_i),
         .nmu_tx_dat_valid_i(nmu_tx_dat_valid), .nmu_tx_dat_flit_i(nmu_tx_dat_flit),

@@ -17,10 +17,10 @@
 // ready/valid per port, no credit. TXREQREADY-class pins are packed
 // [LINK_PORTS-1:0] vectors (one bit per port), matching spec §7.
 //
-// DAT (Router, credit, DAT_NUM_VC virtual channels): unchanged FlooNoC
+// DAT (Router, credit, NUM_DAT_VC virtual channels): unchanged FlooNoC
 // pulse-credit mechanism, now applied uniformly to LOCAL too instead of
 // LOCAL-special-cased + LINK-looped. Credit is a per-VC pulse vector, one
-// word per port (unpacked array [LINK_PORTS] of [DAT_NUM_VC-1:0] packed).
+// word per port (unpacked array [LINK_PORTS] of [NUM_DAT_VC-1:0] packed).
 //
 // Registered-DPI-tick discipline (shared by the NI wraps nmu_wrap/nsu_wrap): on every posedge clk_i
 // the module samples the PREVIOUS cycle's registered wire inputs, pushes them to the
@@ -51,10 +51,10 @@
 `define ROUTER_WRAP_SV
 
 module router_wrap #(
-    parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
-    parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT,
-    parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT,
-    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT,
+    parameter int unsigned NUM_DAT_VC     = ni_params_pkg::NUM_DAT_VC,
+    parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH,
+    parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH,
+    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH,
     // Router port count (LOCAL + N/E/S/W). Mirrors c_model ROUTER_PORT_COUNT /
     // ROUTER_LINK_PORTS; every network's pins are marshalled port-major over
     // these. Fixed at 5; not overridden (kept as a parameter so the port
@@ -81,20 +81,20 @@ module router_wrap #(
     input  logic [RSP_FLIT_WIDTH-1:0] rx_rsp_flit  [LINK_PORTS],
     output logic [LINK_PORTS-1:0]     rx_rsp_ready,
 
-    // DAT network (credit, DAT_NUM_VC virtual channels): per-port.
+    // DAT network (credit, NUM_DAT_VC virtual channels): per-port.
     output logic [LINK_PORTS-1:0]     tx_dat_valid,
     output logic [DAT_FLIT_WIDTH-1:0] tx_dat_flit     [LINK_PORTS],
-    input  logic [DAT_NUM_VC-1:0]     tx_dat_crdvalid [LINK_PORTS],
+    input  logic [NUM_DAT_VC-1:0]     tx_dat_crdvalid [LINK_PORTS],
     input  logic [LINK_PORTS-1:0]     rx_dat_valid,
     input  logic [DAT_FLIT_WIDTH-1:0] rx_dat_flit     [LINK_PORTS],
-    output logic [DAT_NUM_VC-1:0]     rx_dat_crdvalid [LINK_PORTS]
+    output logic [NUM_DAT_VC-1:0]     rx_dat_crdvalid [LINK_PORTS]
 );
 
-    // Elaboration guard: noc_types_pkg::noc_credit_t width must match DAT_NUM_VC.
+    // Elaboration guard: noc_types_pkg::noc_credit_t width must match NUM_DAT_VC.
     initial begin
-        if ($bits(noc_types_pkg::noc_credit_t) != DAT_NUM_VC) begin
-            $fatal(1, "%m: noc_credit_t width %0d != DAT_NUM_VC %0d; use matching noc_types_pkg_vc{N}.sv",
-                   $bits(noc_types_pkg::noc_credit_t), DAT_NUM_VC);
+        if ($bits(noc_types_pkg::noc_credit_t) != NUM_DAT_VC) begin
+            $fatal(1, "%m: noc_credit_t width %0d != NUM_DAT_VC %0d; use matching noc_types_pkg_vc{N}.sv",
+                   $bits(noc_types_pkg::noc_credit_t), NUM_DAT_VC);
         end
     end
 
@@ -103,7 +103,7 @@ module router_wrap #(
     // tick, shared); arg order mirrors cmodel_dpi.h Router decls. valid/ready
     // are packed [LINK_PORTS-1:0] vectors (one word, bit per port). flit
     // arrays are unpacked [LINK_PORTS], <NET>_VEC_WORDS-per-port (port-major).
-    // DAT credit is an unpacked [LINK_PORTS] array of [DAT_NUM_VC-1:0] packed
+    // DAT credit is an unpacked [LINK_PORTS] array of [NUM_DAT_VC-1:0] packed
     // words (one word per port, bit per VC).
     // -------------------------------------------------------------------------
 
@@ -123,7 +123,7 @@ module router_wrap #(
         input  longint unsigned              ctx,
         input  bit [LINK_PORTS-1:0]     rx_dat_valid,
         input  bit [DAT_FLIT_WIDTH-1:0] rx_dat_flit  [LINK_PORTS],
-        input  bit [DAT_NUM_VC-1:0]     tx_dat_crdvalid [LINK_PORTS]
+        input  bit [NUM_DAT_VC-1:0]     tx_dat_crdvalid [LINK_PORTS]
     );
 
     // tick: advance C++ model one cycle (all three networks together).
@@ -146,7 +146,7 @@ module router_wrap #(
         input  longint unsigned              ctx,
         output bit [LINK_PORTS-1:0]     tx_dat_valid,
         output bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit  [LINK_PORTS],
-        output bit [DAT_NUM_VC-1:0]     rx_dat_crdvalid [LINK_PORTS]
+        output bit [NUM_DAT_VC-1:0]     rx_dat_crdvalid [LINK_PORTS]
     );
 
     // Lifecycle / error polling lives in tb_top.sv.
@@ -165,7 +165,7 @@ module router_wrap #(
     bit [LINK_PORTS-1:0]     rx_rsp_ready_q;
     bit [LINK_PORTS-1:0]     tx_dat_valid_q;
     logic [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q [LINK_PORTS];
-    logic [DAT_NUM_VC-1:0]     rx_dat_crdvalid_q [LINK_PORTS];
+    logic [NUM_DAT_VC-1:0]     rx_dat_crdvalid_q [LINK_PORTS];
 
     // -------------------------------------------------------------------------
     // always_ff: sync-reset, 3-step DPI call, registered outputs
@@ -197,7 +197,7 @@ module router_wrap #(
                 bit [REQ_FLIT_WIDTH-1:0] b_rx_req_flit [LINK_PORTS];
                 bit [RSP_FLIT_WIDTH-1:0] b_rx_rsp_flit [LINK_PORTS];
                 bit [DAT_FLIT_WIDTH-1:0] b_rx_dat_flit [LINK_PORTS];
-                bit [DAT_NUM_VC-1:0]     b_tx_dat_crdvalid [LINK_PORTS];
+                bit [NUM_DAT_VC-1:0]     b_tx_dat_crdvalid [LINK_PORTS];
                 for (int p = 0; p < LINK_PORTS; p++) begin
                     b_rx_req_flit[p]     = rx_req_flit[p];
                     b_rx_rsp_flit[p]     = rx_rsp_flit[p];
@@ -228,7 +228,7 @@ module router_wrap #(
                 bit [LINK_PORTS-1:0]     t_rx_rsp_ready;
                 bit [LINK_PORTS-1:0]     t_tx_dat_valid;
                 bit [DAT_FLIT_WIDTH-1:0] t_tx_dat_flit [LINK_PORTS];
-                bit [DAT_NUM_VC-1:0]     t_rx_dat_crdvalid [LINK_PORTS];
+                bit [NUM_DAT_VC-1:0]     t_rx_dat_crdvalid [LINK_PORTS];
                 cmodel_router_req_get_outputs(ctx_i, t_tx_req_valid, t_tx_req_flit, t_rx_req_ready);
                 cmodel_router_rsp_get_outputs(ctx_i, t_tx_rsp_valid, t_tx_rsp_flit, t_rx_rsp_ready);
                 cmodel_router_dat_get_outputs(ctx_i, t_tx_dat_valid, t_tx_dat_flit, t_rx_dat_crdvalid);
