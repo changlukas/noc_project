@@ -1,0 +1,13 @@
+{
+  "case": "same_id_in_order",
+  "mode": "control",
+  "seed": 1,
+  "id_width": 3,
+  "coverage": {
+    "control_write": 8,
+    "control_read": 8,
+    "data_write": 0,
+    "data_read": 0
+  },
+  "profile": "cosim"
+}

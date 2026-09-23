@@ -1,0 +1,62 @@
+{
+  "cases": [
+    {
+      "name": "ctrl_backpressure",
+      "mode": "control",
+      "count": 16,
+      "burst_beats": 8,
+      "stall_cycles": 4
+    },
+    {
+      "name": "ctrl_capacity_recover",
+      "mode": "control",
+      "count": 64,
+      "burst_beats": 8,
+      "hold_cycles": 4096,
+      "capacity_test": true
+    },
+    {
+      "name": "ctrl_partial_write",
+      "mode": "control",
+      "count": 12,
+      "burst_sweep": true,
+      "partial_write": true
+    },
+    {
+      "name": "ctrl_read_write",
+      "mode": "control",
+      "count": 16,
+      "burst_beats": 8,
+      "concurrent_rw": true
+    },
+    {
+      "name": "data_backpressure",
+      "mode": "data",
+      "count": 16,
+      "burst_beats": 8,
+      "stall_cycles": 4
+    },
+    {
+      "name": "data_capacity_recover",
+      "mode": "data",
+      "count": 64,
+      "burst_beats": 8,
+      "hold_cycles": 4096,
+      "capacity_test": true
+    },
+    {
+      "name": "data_partial_write",
+      "mode": "data",
+      "count": 12,
+      "burst_sweep": true,
+      "partial_write": true
+    },
+    {
+      "name": "data_read_write",
+      "mode": "data",
+      "count": 16,
+      "burst_beats": 8,
+      "concurrent_rw": true
+    }
+  ]
+}

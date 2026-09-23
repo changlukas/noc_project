@@ -58,6 +58,7 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
         target = out / name
         target.mkdir(parents=True, exist_ok=True)
         writes, reads = [], []
+        init_writes, verify_reads = [], []
         capacity = case.get("legacy_mixed", False)
         count = 64 if capacity else case["count"]
         classes = [selected] * count
@@ -118,6 +119,12 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
             if operation in ("write", "both"):
                 fields = _ax_fields(axi_id, address, length, size, True, user=txn)
                 fields[4] = str(burst)
+                if profile == "cosim" and (case.get("partial_write") or case.get("concurrent_rw")):
+                    init_writes.extend(fields)
+                    if case.get("concurrent_rw"):
+                        fields[1] = hex(address + (0x10000 if is_data else 0x800))
+                        if int(fields[1], 16) + (length+1)*step > route["base"] + route["size"]:
+                            raise ValueError("concurrent write crosses SAM window")
                 writes.extend(fields)
                 coverage[classes[txn]+"_write"] += 1
                 span = (length+1)*(1 << size)
@@ -134,17 +141,31 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
                     elif (case.get("burst_sweep") and txn % 3 == 0) or (capacity and txn % 5 == 0):
                         strobe = hex(int(strobe, 16) & 0x5555555555555555)
                     if profile == "cosim":
-                        # Initialize every byte read by this profile. Partial-strobe
-                        # coverage remains in standalone until an init phase is added.
+                        # The normal phase initializes all active bytes. Partial writes
+                        # save this full-strobe version as a separate initialization phase.
                         strobe = encode_write_beats(addr, size, 0, 512)[0].split()[1]
+                    if profile == "cosim" and (case.get("partial_write") or case.get("concurrent_rw")):
+                        init_writes.append(f"{data} {strobe} {user}")
+                        data = hex(int(data, 16) ^ ((1 << 512)-1))
+                        if case.get("partial_write"):
+                            mask = (0, 0x5555555555555555, 0xaaaaaaaaaaaaaaaa,
+                                    1 << (addr % 64))[(txn + beat) % 4]
+                            strobe = hex(int(strobe, 16) & mask)
                     writes.append(f"{data} {strobe} {user}")
             if operation in ("read", "both"):
                 fields = _ax_fields(axi_id, address, length, size, False)
                 fields[4] = str(burst)
                 reads.extend(fields)
+                if profile == "cosim" and case.get("concurrent_rw"):
+                    fields[1] = hex(address + (0x10000 if is_data else 0x800))
+                    verify_reads.extend(fields)
                 coverage[classes[txn]+"_read"] += 1
         (target / "write.txt").write_text("\n".join(writes) + ("\n" if writes else ""))
         (target / "read.txt").write_text("\n".join(reads) + ("\n" if reads else ""))
+        if init_writes:
+            (target / "init_write.txt").write_text("\n".join(init_writes) + "\n")
+        if verify_reads:
+            (target / "verify_read.txt").write_text("\n".join(verify_reads) + "\n")
         defaults = dict(response_delay=1, min_outstanding=1, min_unique=1)
         args = ["+block_case", f"+case_id_width={id_width}", f"+case_name={name}",
                 f"+mode={selected}", f"+seed={seed}", f"+random_case={int(case.get('random', False))}"]
@@ -153,7 +174,13 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
             args = [f"+case_name={name}", f"+seed={seed}",
                     f"+min_outstanding={case.get('min_outstanding', 1)}",
                     f"+min_unique={case.get('min_unique', 1)}",
-                    f"+backpressure={int(name == 'backpressure')}"]
+                    f"+backpressure={int(name == 'backpressure')}",
+                    f"+init_phase={int(bool(init_writes))}",
+                    f"+concurrent_rw={int(bool(case.get('concurrent_rw')))}",
+                    f"+stall_cycles={case.get('stall_cycles', 0)}",
+                    f"+hold_cycles={case.get('hold_cycles', 0)}",
+                    f"+capacity_test={int(bool(case.get('capacity_test')))}",
+                    f"+data_case={int(selected == 'data')}"]
         (target / "schedule.txt").write_text("\n".join(args) + "\n")
         (target / "manifest.json").write_text(json.dumps(dict(case=name, mode=selected, seed=seed,
                                                               id_width=id_width, coverage=coverage,

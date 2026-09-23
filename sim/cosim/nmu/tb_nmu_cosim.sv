@@ -273,8 +273,66 @@ module tb_nmu_cosim;
     int min_outstanding = 1, min_unique = 1;
     master_t::ax_beat_t expected_ar[2**AXI_ID_WIDTH][$];
     int read_beat[2**AXI_ID_WIDTH] = '{default:0};
-    master_t master;
+    master_t master, init_master, verify_master;
     scoreboard_t scoreboard;
+    int init_phase = 0, concurrent_rw = 0, stall_cycles = 0, hold_cycles = 0;
+    int capacity_test = 0, data_case = 0;
+    int b_stall_cnt = 0, r_stall_cnt = 0, aw_stall_cnt = 0, ar_stall_cnt = 0;
+    int b_full_cnt = 0, r_full_cnt = 0, dat_full_cnt = 0;
+    int wr_limit_cnt = 0, rd_limit_cnt = 0;
+    int overlap_cnt = 0, w_during_read_cnt = 0, r_during_write_cnt = 0;
+    bit concurrent_active = 0;
+
+    function automatic void expect_reads(input master_t source);
+        foreach (source.ar_queue[i]) begin
+            expected_ar[source.ar_queue[i].ax_id].push_back(source.ar_queue[i]);
+            expected_beats += int'(source.ar_queue[i].ax_len) + 1;
+        end
+    endfunction
+
+    task automatic receive_b();
+        master_t::b_beat_t beat;
+        if (hold_cycles != 0) begin
+            wait (vip.b_valid);
+            repeat (hold_cycles) @(posedge clk);
+        end
+        if (stall_cycles == 0) begin
+            master.wait_b();
+        end else begin
+            while (master.b_outst.size() != 0) begin
+                wait (vip.b_valid);
+                repeat (stall_cycles) @(posedge clk);
+                master.drv.recv_b(beat);
+                void'(master.b_outst.pop_front());
+            end
+        end
+    endtask
+
+    task automatic receive_r();
+        master_t::r_beat_t beat;
+        if (hold_cycles != 0) begin
+            wait (vip.r_valid);
+            repeat (hold_cycles) @(posedge clk);
+        end
+        if (stall_cycles == 0) begin
+            master.wait_r();
+        end else begin
+            while (master.r_outst.size() != 0) begin
+                wait (vip.r_valid);
+                repeat (stall_cycles) @(posedge clk);
+                master.drv.recv_r(beat);
+                if (beat.r_last) void'(master.r_outst.pop_front());
+            end
+        end
+    endtask
+
+    assert property (@(posedge clk) disable iff (!axi_rst_n)
+        bus.bvalid && !bus.bready |=> bus.bvalid && $stable({bus.bid, bus.bresp}))
+        else $fatal(1, "B response changed under backpressure");
+    assert property (@(posedge clk) disable iff (!axi_rst_n)
+        bus.rvalid && !bus.rready |=> bus.rvalid &&
+        $stable({bus.rid, bus.rdata, bus.rresp, bus.rlast}))
+        else $fatal(1, "R response changed under backpressure");
     import "DPI-C" context function void cmodel_init();
     import "DPI-C" context function void cmodel_finalize();
     import "DPI-C" context function longint unsigned cmodel_router_create(
@@ -303,9 +361,31 @@ module tb_nmu_cosim;
         expected_writes = master.num_writes;
         expected_reads = master.num_reads;
         expected_beats = 0;
-        foreach (master.ar_queue[i]) begin
-            expected_ar[master.ar_queue[i].ax_id].push_back(master.ar_queue[i]);
-            expected_beats += int'(master.ar_queue[i].ax_len) + 1;
+        expect_reads(master);
+        void'($value$plusargs("init_phase=%d", init_phase));
+        void'($value$plusargs("concurrent_rw=%d", concurrent_rw));
+        void'($value$plusargs("stall_cycles=%d", stall_cycles));
+        void'($value$plusargs("hold_cycles=%d", hold_cycles));
+        void'($value$plusargs("capacity_test=%d", capacity_test));
+        void'($value$plusargs("data_case=%d", data_case));
+        if (init_phase) begin
+            init_master = new(vip);
+            init_master.write_fd = $fopen({stim_dir, "/init_write.txt"}, "r");
+            if (!init_master.write_fd) $fatal(1, "Missing initialization writes");
+            init_master.parse_write();
+            $fclose(init_master.write_fd);
+            init_master.num_writes = init_master.aw_queue.size();
+            expected_writes += init_master.num_writes;
+        end
+        if (concurrent_rw) begin
+            verify_master = new(vip);
+            verify_master.read_fd = $fopen({stim_dir, "/verify_read.txt"}, "r");
+            if (!verify_master.read_fd) $fatal(1, "Missing verification reads");
+            verify_master.parse_read();
+            $fclose(verify_master.read_fd);
+            verify_master.num_reads = verify_master.ar_queue.size();
+            expected_reads += verify_master.num_reads;
+            expect_reads(verify_master);
         end
         if (expected_writes == 0 || expected_reads == 0)
             $fatal(1, "Empty memory test");
@@ -315,8 +395,18 @@ module tb_nmu_cosim;
         @(posedge clk);
         scoreboard.enable_all_checks();
         scoreboard.monitor();
-        fork master.run_aw(); master.run_w(); master.wait_b(); join
-        fork master.run_ar(); master.wait_r(); join
+        if (init_phase) begin
+            fork init_master.run_aw(); init_master.run_w(); init_master.wait_b(); join
+        end
+        if (concurrent_rw) begin
+            concurrent_active = 1'b1;
+            master.run();
+            concurrent_active = 1'b0;
+            fork verify_master.run_ar(); verify_master.wait_r(); join
+        end else begin
+            fork master.run_aw(); master.run_w(); receive_b(); join
+            fork master.run_ar(); receive_r(); join
+        end
         repeat (10) @(posedge clk);
         if (b_count != expected_writes || r_count != expected_reads ||
             r_beats != expected_beats || checked_bytes == 0)
@@ -328,6 +418,20 @@ module tb_nmu_cosim;
             $fatal(1, "Outstanding/ID coverage not reached");
         $display("COVERAGE peak_w=%0d peak_r=%0d unique_w=%0d unique_r=%0d",
             peak_w, peak_r, peak_unique_w, peak_unique_r);
+        $display("STALL b=%0d r=%0d aw=%0d ar=%0d", b_stall_cnt, r_stall_cnt, aw_stall_cnt, ar_stall_cnt);
+        $display("CAPACITY b_full=%0d r_full=%0d dat_full=%0d wr_limit=%0d rd_limit=%0d",
+            b_full_cnt, r_full_cnt, dat_full_cnt, wr_limit_cnt, rd_limit_cnt);
+        $display("CONCURRENT live=%0d w_during_read=%0d r_during_write=%0d",
+            overlap_cnt, w_during_read_cnt, r_during_write_cnt);
+        if ((stall_cycles != 0 || hold_cycles != 0) &&
+                (b_stall_cnt == 0 || r_stall_cnt == 0))
+            $fatal(1, "Response backpressure was not exercised");
+        if (capacity_test && (b_full_cnt == 0 || wr_limit_cnt == 0 || rd_limit_cnt == 0 ||
+                aw_stall_cnt == 0 || ar_stall_cnt == 0 ||
+                (data_case ? dat_full_cnt == 0 : r_full_cnt == 0)))
+            $fatal(1, "Required capacity saturation was not reached");
+        if (concurrent_rw && (overlap_cnt == 0 || w_during_read_cnt == 0 || r_during_write_cnt == 0))
+            $fatal(1, "Read/write concurrency was not exercised");
         scoreboard.reset();
         $display("NMU_COSIM_COUNTS writes=%0d reads=%0d r_beats=%0d checked_bytes=%0d",
             b_count, r_count, r_beats, checked_bytes);
@@ -382,6 +486,22 @@ module tb_nmu_cosim;
             total_w += live_w[id]; total_r += live_r[id];
             if (live_w[id] != 0) unique_w++;
             if (live_r[id] != 0) unique_r++;
+        end
+        if (axi_rst_n) begin
+            if (vip.b_valid && !vip.b_ready) b_stall_cnt++;
+            if (vip.r_valid && !vip.r_ready) r_stall_cnt++;
+            if (vip.aw_valid && !vip.aw_ready) aw_stall_cnt++;
+            if (vip.ar_valid && !vip.ar_ready) ar_stall_cnt++;
+            if (dut.i_response_path.i_depacketize.i_buffer.b_full) b_full_cnt++;
+            if (dut.i_response_path.i_depacketize.i_buffer.r_full) r_full_cnt++;
+            if (|dut.i_response_path.i_depacketize.i_buffer.dat_full) dat_full_cnt++;
+            if (dut.i_request_path.i_id_remap.wr_exists_full) wr_limit_cnt++;
+            if (dut.i_request_path.i_id_remap.rd_exists_full) rd_limit_cnt++;
+            if (concurrent_active) begin
+                if (total_w != 0 && total_r != 0) overlap_cnt++;
+                if (total_r != 0 && vip.w_valid && vip.w_ready) w_during_read_cnt++;
+                if (total_w != 0 && vip.r_valid && vip.r_ready) r_during_write_cnt++;
+            end
         end
         if (total_w > peak_w) peak_w = total_w;
         if (total_r > peak_r) peak_r = total_r;

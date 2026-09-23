@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import base64
 import hashlib
 import json
@@ -8,7 +9,7 @@ import subprocess
 REMOTE = r"""import base64,glob,hashlib,json,os
 root='/home/mingwei/noc_project/nmu-cosim'
 os.chdir(root)
-names=['SHA256SUMS','constants.yml','profile.yml','patterns/cases.list','acceptance-final.log']
+names=['SHA256SUMS','constants.yml','profile.yml','patterns/cases.list','pattern.txt','acceptance-final.log']
 names+=glob.glob('build/report_wave*/*.log')+glob.glob('build/report_wave*/source-SHA256SUMS')
 names+=glob.glob('patterns/*/*.txt')+glob.glob('patterns/*/manifest.json')
 files=[]
@@ -27,7 +28,9 @@ code=base64.b64encode(REMOTE.encode()).decode()
 command='python3 -c "import base64;exec(base64.b64decode(\''+code+'\'))"'
 r=subprocess.run(ssh+[command],stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True,timeout=60)
 record=json.loads(next(line[len('REPORTS_JSON='):] for line in r.stdout.decode().splitlines() if line.startswith('REPORTS_JSON=')))
-out=Path(__file__).resolve().parent/'remote'
+parser=argparse.ArgumentParser()
+parser.add_argument('--output', type=Path, default=Path(__file__).resolve().parent/'remote')
+out=parser.parse_args().output.resolve()
 out.mkdir(exist_ok=True)
 for entry in record['files']:
     target=(out/entry['path']).resolve()

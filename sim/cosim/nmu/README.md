@@ -6,7 +6,7 @@ RTL NMU connects to LOCAL and C++ NSU connects to WEST of one C++ Router at (0,0
 
 The topology retains the existing 2x2 coordinate bounds, but only router (0,0) exists in the testbench. Both SAM windows select the single NSU. No mesh is instantiated.
 
-Patterns reuse gen_standalone_patterns.py with --profile cosim. Single/burst control/data names remain shared. Each case initializes data through writes, waits for all B responses, then reads it back. Transactions use disjoint addresses, initialized byte lanes and INCR bursts supported by the existing AXI scoreboard. Random inputs retain a reproducible seed. Partial-strobe, FIXED/WRAP and forced reorder coverage remains in standalone until supported here; these are not claimed as co-simulation acceptance.
+Patterns reuse gen_standalone_patterns.py with --profile cosim. Single/burst control/data names remain shared. The initial 14 cases complete writes before dependent readback. The additional cases below add explicit initialization and concurrent traffic phases. Transactions use disjoint addresses, initialized byte lanes and INCR bursts supported by the existing AXI scoreboard. Random inputs retain a reproducible seed. The additional directed catalog supplies explicit partial-write initialization and read/write concurrency phases. FIXED/WRAP and forced reorder remain outside this co-simulation coverage.
 
 C++ NMU ingress capacity is deferred because that model is absent. C++ NSU REQ ingress remains unbounded in the existing reference model, so this platform does not validate future NSU RTL backpressure or timing.
 
@@ -32,4 +32,21 @@ make nWave CASE=data_write_burst
 
 Boundary audit: NMU/NSU DAT RX depths, Router input VC depth and sender credit seeds all equal 32 in this profile. Global production defaults are unchanged. GCC 9.3 exists on be16 under `/cadtools/centos/spe21.1/tools.lnx86/cdsgcc/gcc/9.3/bin/g++`; VCS linking and runtime compatibility were verified by the 14-case matrix.
 
-The initial generated list omits forced reorder, full-capacity recovery, backpressure and in-flight reset cases until their actual model schedule is implemented and checked. No completion marker is an acceptance claim until counters, checker error handling and corruption detection are validated.
+Forced reorder and in-flight reset remain outside this generated list. PASS requires correct counts, scenario coverage and clean checker diagnostics. The corruption test has a separate expected-failure marker.
+
+## Additional directed cases
+
+All eight additions pass VCS. See [results](../../../docs/archive/nmu-cosim-84/additional/report.md) and the linked waveform guide.
+
+The shared catalog `sim/test_patterns/cosim/cases.json` adds these pairs:
+
+| Control | Data | Purpose |
+|---|---|---|
+| ctrl_backpressure | data_backpressure | Delay B/R acceptance after VALID and check stable payload |
+| ctrl_capacity_recover | data_capacity_recover | Fill NMU receive buffers and reach per-ID limits, then drain |
+| ctrl_partial_write | data_partial_write | Initialize, partially overwrite, and compare preserved/updated bytes |
+| ctrl_read_write | data_read_write | Read initialized region A while writing disjoint B, then read back B |
+
+Run each with `make run CASE=<name>` or `make nWave CASE=<name>` on the workstation. `pattern.txt` lists all 22 cases. Only the explicit backpressure/capacity cases delay response acceptance. DUT parameters and the C++ model are unchanged.
+
+Capacity cases require actual full receive buffers, remap-limit stalls and AW/AR stalls before completion. They exercise NMU resources, not the capacity of a future NSU RTL. Concurrent cases require live read/write overlap plus W/R transfers during opposite-direction outstanding traffic. All phases use the existing memory scoreboard.

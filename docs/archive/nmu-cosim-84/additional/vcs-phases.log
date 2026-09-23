@@ -1,0 +1,382 @@
+mkdir: cannot create directory ‘/local/mingwei’: No such file or directory
+chmod: cannot access ‘/local/mingwei’: No such file or directory
+l: Command not found.
+ln: failed to create symbolic link ‘/home/mingwei/tmp’: File exists
+TERM environment variable not set.
+[0;36m=== [0mWelcome ICL.R BE Workstation [ [0;32mbe16[0m ] [0;36m===[0m
+
+[0;36m*[0m e-Photon C-Shell/Python Starter [ [0;33m2015.12.12[0m ][0m
+[0;36m*[0m Alias Name Loader [ [0;33m2015.11.17[0m ][0m
+[0;36m*[0m EDA Tools Manager [ [0;33m2018.05.08[0m ][0m
+RuntimeError: Bad magic number in .pyc file
+[0;36m*[0m User's Define Tools Environment [ [0;33m2018.05.08[0m ][0m
+
+[0;36m*[0m Your space [0;36m[0m is under quota [0m
+
+vcs -full64 -sverilog -assert svaext -override_timescale=1ns/1ps -debug_access+all -f files.f -top tb_nmu_cosim -Mdir=/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/csrc -o /home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/simv -LDFLAGS "-L/home/mingwei/noc_project/nmu-cosim/build/dpi_3d223268b2ff -Wl,-rpath,/home/mingwei/noc_project/nmu-cosim/build/dpi_3d223268b2ff -lnmu_cmodel"  -l /home/mingwei/noc_project/nmu-cosim/build/report_wave0/compile.log
+                         Chronologic VCS (TM)
+       Version M-2017.03-SP1_Full64 -- Wed Sep 23 23:11:25 2026
+               Copyright (c) 1991-2017 by Synopsys Inc.
+                         ALL RIGHTS RESERVED
+
+This program is proprietary and confidential information of Synopsys Inc.
+and may be used and disclosed only as authorized in a license agreement
+controlling such use and disclosure.
+
+Parsing design file 'repo/specgen/generated/sv/ni_params_pkg.sv'
+Parsing design file 'repo/specgen/generated/sv/ni_signals_pkg.sv'
+Parsing design file 'repo/specgen/generated/sv/ni_flit_pkg.sv'
+Parsing design file 'topology_pkg.sv'
+Parsing design file 'repo/rtl/common/ni_types_pkg.sv'
+Parsing design file 'deps/common_cells/src/cc_pkg.sv'
+Parsing design file 'deps/common_cells/src/cc_binary_to_gray.sv'
+Parsing design file 'deps/common_cells/src/cc_gray_to_binary.sv'
+Parsing design file 'deps/common_cells/src/cc_spill_register_flushable.sv'
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_spill_register_flushable.sv'.
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Parsing included file 'deps/common_cells/include/common_cells/deprecated/registers.svh'.
+Back to file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_spill_register_flushable.sv'.
+Parsing design file 'deps/common_cells/src/cc_spill_register.sv'
+Parsing design file 'deps/common_cells/src/cc_stream_register.sv'
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_stream_register.sv'.
+Parsing design file 'deps/tech_cells_generic/src/rtl/tc_sync.sv'
+Parsing design file 'deps/common_cells/src/cc_cdc_fifo_gray.sv'
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_cdc_fifo_gray.sv'.
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_cdc_fifo_gray.sv'.
+Parsing design file 'deps/common_cells/src/cc_addr_decode_dync.sv'
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_addr_decode_dync.sv'.
+Parsing design file 'deps/common_cells/src/cc_addr_decode.sv'
+Parsing design file 'repo/rtl/common/axi_async_fifo.sv'
+Parsing design file 'repo/rtl/common/ni_sam.sv'
+Parsing design file 'repo/rtl/common/stream_register.sv'
+Parsing design file 'repo/rtl/nmu/request_fifo/request_fifo.sv'
+Parsing design file 'repo/rtl/nmu/sam/sam.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/cf_math_pkg.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/lzc.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv'
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_pkg.sv'
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_id_remap.sv'
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_id_remap.sv'.
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_id_remap.sv'.
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/assign.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_id_remap.sv'.
+Parsing design file 'deps/common_cells/src/cc_credit_counter.sv'
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_credit_counter.sv'.
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_credit_counter.sv'.
+Parsing design file 'deps/common_cells/src/cc_fifo.sv'
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_fifo.sv'.
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_fifo.sv'.
+Parsing design file 'repo/rtl/common/axi_if.sv'
+Parsing design file 'repo/rtl/nmu/ordering/reorder_storage.sv'
+Parsing design file 'repo/rtl/nmu/ordering/ordering.sv'
+Parsing design file 'repo/rtl/nmu/channel_assign/channel_assign.sv'
+Parsing design file 'repo/rtl/nmu/request_packetize/request_packetize.sv'
+Parsing design file 'repo/rtl/nmu/response_depacketize/response_buffer.sv'
+Parsing design file 'repo/rtl/nmu/response_depacketize/response_depacketize.sv'
+Parsing design file 'repo/rtl/nmu/response_fifo/response_fifo.sv'
+Parsing design file 'repo/rtl/nmu/response_path/response_path.sv'
+Parsing design file 'repo/rtl/nmu/request_path/id_remap.sv'
+Parsing design file 'repo/rtl/nmu/request_path/request_path.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/rtl/nmu/request_path/request_path.sv'.
+Parsing design file 'repo/rtl/nmu/top/nmu.sv'
+Parsing design file 'deps/tech_cells_generic/src/rtl/tc_clk.sv'
+Parsing design file 'deps/common_cells/src/cc_rstgen_bypass.sv'
+Parsing design file 'repo/sim/dv/common_verification-0.2.5/src/rand_id_queue.sv'
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_test.sv'
+Parsing design file 'repo/specgen/generated/sv/noc_types_pkg_vc2.sv'
+Parsing design file 'repo/ref_model/top/router_wrap.sv'
+Parsing design file 'repo/ref_model/top/nsu_wrap.sv'
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv'.
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/assign.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv'.
+Parsing design file 'repo/sim/cosim/nmu/tb_nmu_cosim.sv'
+Parsing library file 'repo/sim/dv/axi-0.39.7/src/axi_intf.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_intf.sv'.
+Top Level Modules:
+       tb_nmu_cosim
+TimeScale is 1 ns / 1 ps
+Notice: Ports coerced to inout, use -notice for details
+Starting vcs inline pass...
+31 unique modules to generate
+recompiling package vcs_paramclassrepository
+recompiling package ni_params_pkg
+recompiling package ni_signals_pkg
+recompiling package ni_flit_pkg
+recompiling package topology_pkg
+recompiling package ni_types_pkg
+recompiling package cc_pkg
+recompiling module ni_sam
+recompiling module nmu_sam
+recompiling package cf_math_pkg
+recompiling module lzc
+recompiling package axi_pkg
+recompiling module axi_id_remap_table
+recompiling module cc_credit_counter
+recompiling module cc_fifo
+recompiling module axi_if
+recompiling module nmu_ordering
+recompiling module nmu_channel_assign
+recompiling module nmu_request_packetize
+recompiling module nmu_id_remap
+recompiling module nmu_request_path
+recompiling module nmu
+recompiling package rand_id_queue_pkg
+recompiling package axi_test
+recompiling package noc_types_pkg
+recompiling module router_wrap
+recompiling module nsu_wrap
+recompiling module axi_sim_mem_intf
+recompiling module tb_nmu_cosim
+recompiling module AXI_BUS
+recompiling module AXI_BUS_DV
+All of 31 modules done
+make[1]: Entering directory `/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/csrc'
+make[1]: Warning: File `filelist.hsopt.llvm2_0.objs' has modification time 110 s in the future
+make[1]: Leaving directory `/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/csrc'
+make[1]: warning:  Clock skew detected.  Your build may be incomplete.
+make[1]: Entering directory `/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/csrc'
+make[1]: Warning: File `filelist.cu' has modification time 70 s in the future
+make[2]: Warning: File `filelist.cu' has modification time 70 s in the future
+rm -f _csrc*.so pre_vcsobj_*.so share_vcsobj_*.so
+make[2]: warning:  Clock skew detected.  Your build may be incomplete.
+make[2]: Warning: File `filelist.cu' has modification time 70 s in the future
+make[2]: warning:  Clock skew detected.  Your build may be incomplete.
+if [ -x /home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/simv ]; then chmod -x /home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/simv; fi
+g++  -o /home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/simv   -Wl,-rpath-link=./ -Wl,-rpath='$ORIGIN'/simv.daidir/ -Wl,-rpath=./simv.daidir/ -Wl,-rpath='$ORIGIN'/simv.daidir//scsim.db.dir  -L/home/mingwei/noc_project/nmu-cosim/build/dpi_3d223268b2ff -Wl,-rpath,/home/mingwei/noc_project/nmu-cosim/build/dpi_3d223268b2ff -lnmu_cmodel -rdynamic   objs/amcQw_d.o   _1381_archive_1.so  SIM_l.o       rmapats_mop.o rmapats.o rmar.o rmar_nd.o  rmar_llvm_0_1.o rmar_llvm_0_0.o          /home/mingwei/.toolsmgr/vcs/linux64/lib/libzerosoft_rt_stubs.so /home/mingwei/.toolsmgr/vcs/linux64/lib/libvirsim.so /home/mingwei/.toolsmgr/vcs/linux64/lib/liberrorinf.so /home/mingwei/.toolsmgr/vcs/linux64/lib/libsnpsmalloc.so    /home/mingwei/.toolsmgr/vcs/linux64/lib/libvcsnew.so /home/mingwei/.toolsmgr/vcs/linux64/lib/libsimprofile.so /home/mingwei/.toolsmgr/vcs/linux64/lib/libuclinative.so /home/mingwei/.toolsmgr/vcs/linux64/lib/vcs_tls.o   -Wl,-whole-archive /home/mingwei/.toolsmgr/vcs/linux64/lib/libvcsucli.so -Wl,-no-whole-archive       ./../simv.daidir/vc_hdrs.o    /home/mingwei/.toolsmgr/vcs/linux64/lib/vcs_save_restore_new.o -ldl  -lc -lm -lpthread -ldl 
+/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/simv up to date
+make[1]: warning:  Clock skew detected.  Your build may be incomplete.
+make[1]: Leaving directory `/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/csrc'
+CPU time: 2.634 seconds to compile + .441 seconds to elab + .389 seconds to link
+python3 run.py --binary "/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/simv" --case "ctrl_partial_write" --report "/home/mingwei/noc_project/nmu-cosim/build/report_wave0" 
+
+Note-[RT_BS] Larger stack needed
+  Note: Bumping stack limit from 8192 to 8193 Kbytes.
+
+Chronologic VCS simulator copyright 1991-2017
+Contains Synopsys proprietary information.
+Compiler version M-2017.03-SP1_Full64; Runtime version M-2017.03-SP1_Full64;  Sep 23 23:12 2026
+DAT_CREDIT_DEPTH router=32 nmu_rx=32 nsu_rx=32
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2522: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/ctrl_partial_write/read.txt opened successfully as -2147483645
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2527: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/ctrl_partial_write/write.txt opened successfully as -2147483644
+COVERAGE peak_w=12 peak_r=12 unique_w=1 unique_r=1
+STALL b=0 r=0 aw=0 ar=0
+CAPACITY b_full=0 r_full=0 dat_full=0 wr_limit=0 rd_limit=0
+CONCURRENT live=0 w_during_read=0 r_during_write=0
+NMU_COSIM_COUNTS writes=24 reads=12 r_beats=56 checked_bytes=210
+$finish called from file "repo/sim/cosim/nmu/tb_nmu_cosim.sv", line 439.
+$finish at simulation time              2745000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 2745000 ps
+CPU Time:      0.370 seconds;       Data structure size:   0.5Mb
+Wed Sep 23 23:13:30 2026
+NMU_COSIM_PASS
+
+python3 run.py --binary "/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/simv" --case "data_partial_write" --report "/home/mingwei/noc_project/nmu-cosim/build/report_wave0" 
+
+Note-[RT_BS] Larger stack needed
+  Note: Bumping stack limit from 8192 to 8193 Kbytes.
+
+Chronologic VCS simulator copyright 1991-2017
+Contains Synopsys proprietary information.
+Compiler version M-2017.03-SP1_Full64; Runtime version M-2017.03-SP1_Full64;  Sep 23 23:13 2026
+DAT_CREDIT_DEPTH router=32 nmu_rx=32 nsu_rx=32
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2522: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/data_partial_write/read.txt opened successfully as -2147483645
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2527: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/data_partial_write/write.txt opened successfully as -2147483644
+COVERAGE peak_w=12 peak_r=12 unique_w=1 unique_r=1
+STALL b=0 r=0 aw=0 ar=0
+CAPACITY b_full=0 r_full=0 dat_full=0 wr_limit=0 rd_limit=0
+CONCURRENT live=0 w_during_read=0 r_during_write=0
+NMU_COSIM_COUNTS writes=24 reads=12 r_beats=56 checked_bytes=694
+$finish called from file "repo/sim/cosim/nmu/tb_nmu_cosim.sv", line 439.
+$finish at simulation time              2805000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 2805000 ps
+CPU Time:      0.340 seconds;       Data structure size:   0.5Mb
+Wed Sep 23 23:14:11 2026
+NMU_COSIM_PASS
+
+python3 run.py --binary "/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/simv" --case "ctrl_read_write" --report "/home/mingwei/noc_project/nmu-cosim/build/report_wave0" 
+
+Note-[RT_BS] Larger stack needed
+  Note: Bumping stack limit from 8192 to 8193 Kbytes.
+
+Chronologic VCS simulator copyright 1991-2017
+Contains Synopsys proprietary information.
+Compiler version M-2017.03-SP1_Full64; Runtime version M-2017.03-SP1_Full64;  Sep 23 23:14 2026
+DAT_CREDIT_DEPTH router=32 nmu_rx=32 nsu_rx=32
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2522: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/ctrl_read_write/read.txt opened successfully as -2147483645
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2527: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/ctrl_read_write/write.txt opened successfully as -2147483644
+COVERAGE peak_w=16 peak_r=16 unique_w=1 unique_r=1
+STALL b=0 r=0 aw=0 ar=0
+CAPACITY b_full=0 r_full=0 dat_full=0 wr_limit=0 rd_limit=0
+CONCURRENT live=178 w_during_read=128 r_during_write=128
+NMU_COSIM_COUNTS writes=32 reads=32 r_beats=256 checked_bytes=2048
+$finish called from file "repo/sim/cosim/nmu/tb_nmu_cosim.sv", line 439.
+$finish at simulation time              5135000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 5135000 ps
+CPU Time:      0.440 seconds;       Data structure size:   0.5Mb
+Wed Sep 23 23:14:52 2026
+NMU_COSIM_PASS
+
+python3 run.py --binary "/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/simv" --case "data_read_write" --report "/home/mingwei/noc_project/nmu-cosim/build/report_wave0" 
+
+Note-[RT_BS] Larger stack needed
+  Note: Bumping stack limit from 8192 to 8193 Kbytes.
+
+Chronologic VCS simulator copyright 1991-2017
+Contains Synopsys proprietary information.
+Compiler version M-2017.03-SP1_Full64; Runtime version M-2017.03-SP1_Full64;  Sep 23 23:14 2026
+DAT_CREDIT_DEPTH router=32 nmu_rx=32 nsu_rx=32
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2522: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/data_read_write/read.txt opened successfully as -2147483645
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2527: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/data_read_write/write.txt opened successfully as -2147483644
+COVERAGE peak_w=16 peak_r=16 unique_w=1 unique_r=1
+STALL b=0 r=0 aw=0 ar=0
+CAPACITY b_full=0 r_full=0 dat_full=0 wr_limit=0 rd_limit=0
+CONCURRENT live=150 w_during_read=128 r_during_write=128
+NMU_COSIM_COUNTS writes=32 reads=32 r_beats=256 checked_bytes=16384
+$finish called from file "repo/sim/cosim/nmu/tb_nmu_cosim.sv", line 439.
+$finish at simulation time              5045000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 5045000 ps
+CPU Time:      0.530 seconds;       Data structure size:   0.5Mb
+Wed Sep 23 23:15:34 2026
+NMU_COSIM_PASS
+
+python3 run.py --binary "/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/simv" --case "ctrl_write_burst" --report "/home/mingwei/noc_project/nmu-cosim/build/report_wave0" 
+
+Note-[RT_BS] Larger stack needed
+  Note: Bumping stack limit from 8192 to 8193 Kbytes.
+
+Chronologic VCS simulator copyright 1991-2017
+Contains Synopsys proprietary information.
+Compiler version M-2017.03-SP1_Full64; Runtime version M-2017.03-SP1_Full64;  Sep 23 23:15 2026
+DAT_CREDIT_DEPTH router=32 nmu_rx=32 nsu_rx=32
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2522: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/ctrl_write_burst/read.txt opened successfully as -2147483645
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2527: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/ctrl_write_burst/write.txt opened successfully as -2147483644
+COVERAGE peak_w=12 peak_r=12 unique_w=1 unique_r=1
+STALL b=0 r=0 aw=0 ar=0
+CAPACITY b_full=0 r_full=0 dat_full=0 wr_limit=0 rd_limit=0
+CONCURRENT live=0 w_during_read=0 r_during_write=0
+NMU_COSIM_COUNTS writes=12 reads=12 r_beats=56 checked_bytes=210
+$finish called from file "repo/sim/cosim/nmu/tb_nmu_cosim.sv", line 439.
+$finish at simulation time              1845000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 1845000 ps
+CPU Time:      0.350 seconds;       Data structure size:   0.5Mb
+Wed Sep 23 23:16:15 2026
+NMU_COSIM_PASS
+
+python3 run.py --binary "/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/simv" --case "data_write_burst" --report "/home/mingwei/noc_project/nmu-cosim/build/report_wave0" 
+
+Note-[RT_BS] Larger stack needed
+  Note: Bumping stack limit from 8192 to 8193 Kbytes.
+
+Chronologic VCS simulator copyright 1991-2017
+Contains Synopsys proprietary information.
+Compiler version M-2017.03-SP1_Full64; Runtime version M-2017.03-SP1_Full64;  Sep 23 23:16 2026
+DAT_CREDIT_DEPTH router=32 nmu_rx=32 nsu_rx=32
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2522: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/data_write_burst/read.txt opened successfully as -2147483645
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2527: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/data_write_burst/write.txt opened successfully as -2147483644
+COVERAGE peak_w=12 peak_r=12 unique_w=1 unique_r=1
+STALL b=0 r=0 aw=0 ar=0
+CAPACITY b_full=0 r_full=0 dat_full=0 wr_limit=0 rd_limit=0
+CONCURRENT live=0 w_during_read=0 r_during_write=0
+NMU_COSIM_COUNTS writes=12 reads=12 r_beats=56 checked_bytes=694
+$finish called from file "repo/sim/cosim/nmu/tb_nmu_cosim.sv", line 439.
+$finish at simulation time              1885000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 1885000 ps
+CPU Time:      0.330 seconds;       Data structure size:   0.5Mb
+Wed Sep 23 23:16:56 2026
+NMU_COSIM_PASS
+
+python3 run.py --binary "/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/simv" --case "request_rand" --report "/home/mingwei/noc_project/nmu-cosim/build/report_wave0" 
+
+Note-[RT_BS] Larger stack needed
+  Note: Bumping stack limit from 8192 to 8193 Kbytes.
+
+Chronologic VCS simulator copyright 1991-2017
+Contains Synopsys proprietary information.
+Compiler version M-2017.03-SP1_Full64; Runtime version M-2017.03-SP1_Full64;  Sep 23 23:16 2026
+DAT_CREDIT_DEPTH router=32 nmu_rx=32 nsu_rx=32
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2522: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/request_rand/read.txt opened successfully as -2147483645
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2527: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/request_rand/write.txt opened successfully as -2147483644
+COVERAGE peak_w=25 peak_r=47 unique_w=8 unique_r=8
+STALL b=0 r=0 aw=114 ar=141
+CAPACITY b_full=0 r_full=0 dat_full=0 wr_limit=0 rd_limit=0
+CONCURRENT live=0 w_during_read=0 r_during_write=0
+NMU_COSIM_COUNTS writes=64 reads=64 r_beats=240 checked_bytes=1725
+$finish called from file "repo/sim/cosim/nmu/tb_nmu_cosim.sv", line 439.
+$finish at simulation time              5515000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 5515000 ps
+CPU Time:      0.390 seconds;       Data structure size:   0.5Mb
+Wed Sep 23 23:17:37 2026
+NMU_COSIM_PASS
+
+python3 run.py --binary "/home/mingwei/noc_project/nmu-cosim/build/vcs_wave0_53905bc621e5/simv" --case data_write_single --report "/home/mingwei/noc_project/nmu-cosim/build/report_wave0" --corrupt
+
+Note-[RT_BS] Larger stack needed
+  Note: Bumping stack limit from 8192 to 8193 Kbytes.
+
+Chronologic VCS simulator copyright 1991-2017
+Contains Synopsys proprietary information.
+Compiler version M-2017.03-SP1_Full64; Runtime version M-2017.03-SP1_Full64;  Sep 23 23:17 2026
+DAT_CREDIT_DEPTH router=32 nmu_rx=32 nsu_rx=32
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2522: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/data_write_single/read.txt opened successfully as -2147483645
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2527: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/data_write_single/write.txt opened successfully as -2147483644
+"repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2141: axi_test::\axi_scoreboard#(32'd3,32'd48,32'd512,32'd58,64'h0000000000000002)::handle_read .unnamed$$_1.unnamed$$_3.unnamed$$_4: started at 567000ps failed at 567000ps
+	Offending '(tst_data.size > 0)'
+Warning: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2142: axi_test.axi_scoreboard#(32'd3,32'd48,32'd512,32'd58,64'h0000000000000002)::handle_read.unnamed$$_1.unnamed$$_3.unnamed$$_4: at time 567000 ps
+Unexpected RData ID: 0 
+                             Addr:     000000000000 
+                             Byte Idx: 000000000000 
+                             Exp Data: '{'h0}  
+                             Act Data: 01 
+                             BeatData: 3f3e3d3c3b3a393837363534333231302f2e2d2c2b2a292827262524232221201f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020101
+COVERAGE peak_w=1 peak_r=1 unique_w=1 unique_r=1
+STALL b=0 r=0 aw=0 ar=0
+CAPACITY b_full=0 r_full=0 dat_full=0 wr_limit=0 rd_limit=0
+CONCURRENT live=0 w_during_read=0 r_during_write=0
+NMU_COSIM_COUNTS writes=1 reads=1 r_beats=1 checked_bytes=64
+$finish called from file "repo/sim/cosim/nmu/tb_nmu_cosim.sv", line 439.
+$finish at simulation time               675000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 675000 ps
+CPU Time:      0.270 seconds;       Data structure size:   0.5Mb
+Wed Sep 23 23:18:18 2026
+NMU_COSIM_CORRUPTION_DETECTED
+

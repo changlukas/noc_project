@@ -1,0 +1,274 @@
+[
+  {
+    "case": "ctrl_backpressure",
+    "source_log": "vcs-additional-final.log",
+    "coverage": {
+      "peak_w": 16,
+      "peak_r": 16,
+      "unique_w": 1,
+      "unique_r": 1
+    },
+    "stall": {
+      "b": 4,
+      "r": 512,
+      "aw": 0,
+      "ar": 0
+    },
+    "capacity": {
+      "b_full": 0,
+      "r_full": 396,
+      "dat_full": 0,
+      "wr_limit": 0,
+      "rd_limit": 0
+    },
+    "concurrent": {
+      "live": 0,
+      "w_during_read": 0,
+      "r_during_write": 0
+    },
+    "nmu_cosim_counts": {
+      "writes": 16,
+      "reads": 16,
+      "r_beats": 128,
+      "checked_bytes": 1024
+    }
+  },
+  {
+    "case": "ctrl_capacity_recover",
+    "source_log": "vcs-additional-final.log",
+    "coverage": {
+      "peak_w": 32,
+      "peak_r": 32,
+      "unique_w": 1,
+      "unique_r": 1
+    },
+    "stall": {
+      "b": 4096,
+      "r": 4096,
+      "aw": 4192,
+      "ar": 4310
+    },
+    "capacity": {
+      "b_full": 3880,
+      "r_full": 4080,
+      "dat_full": 0,
+      "wr_limit": 4006,
+      "rd_limit": 4317
+    },
+    "concurrent": {
+      "live": 0,
+      "w_during_read": 0,
+      "r_during_write": 0
+    },
+    "nmu_cosim_counts": {
+      "writes": 64,
+      "reads": 64,
+      "r_beats": 512,
+      "checked_bytes": 4096
+    }
+  },
+  {
+    "case": "ctrl_partial_write",
+    "source_log": "vcs-phases.log",
+    "coverage": {
+      "peak_w": 12,
+      "peak_r": 12,
+      "unique_w": 1,
+      "unique_r": 1
+    },
+    "stall": {
+      "b": 0,
+      "r": 0,
+      "aw": 0,
+      "ar": 0
+    },
+    "capacity": {
+      "b_full": 0,
+      "r_full": 0,
+      "dat_full": 0,
+      "wr_limit": 0,
+      "rd_limit": 0
+    },
+    "concurrent": {
+      "live": 0,
+      "w_during_read": 0,
+      "r_during_write": 0
+    },
+    "nmu_cosim_counts": {
+      "writes": 24,
+      "reads": 12,
+      "r_beats": 56,
+      "checked_bytes": 210
+    }
+  },
+  {
+    "case": "ctrl_read_write",
+    "source_log": "vcs-phases.log",
+    "coverage": {
+      "peak_w": 16,
+      "peak_r": 16,
+      "unique_w": 1,
+      "unique_r": 1
+    },
+    "stall": {
+      "b": 0,
+      "r": 0,
+      "aw": 0,
+      "ar": 0
+    },
+    "capacity": {
+      "b_full": 0,
+      "r_full": 0,
+      "dat_full": 0,
+      "wr_limit": 0,
+      "rd_limit": 0
+    },
+    "concurrent": {
+      "live": 178,
+      "w_during_read": 128,
+      "r_during_write": 128
+    },
+    "nmu_cosim_counts": {
+      "writes": 32,
+      "reads": 32,
+      "r_beats": 256,
+      "checked_bytes": 2048
+    }
+  },
+  {
+    "case": "data_backpressure",
+    "source_log": "vcs-additional-final.log",
+    "coverage": {
+      "peak_w": 16,
+      "peak_r": 16,
+      "unique_w": 1,
+      "unique_r": 1
+    },
+    "stall": {
+      "b": 4,
+      "r": 512,
+      "aw": 0,
+      "ar": 0
+    },
+    "capacity": {
+      "b_full": 0,
+      "r_full": 0,
+      "dat_full": 79,
+      "wr_limit": 0,
+      "rd_limit": 0
+    },
+    "concurrent": {
+      "live": 0,
+      "w_during_read": 0,
+      "r_during_write": 0
+    },
+    "nmu_cosim_counts": {
+      "writes": 16,
+      "reads": 16,
+      "r_beats": 128,
+      "checked_bytes": 8192
+    }
+  },
+  {
+    "case": "data_capacity_recover",
+    "source_log": "vcs-additional-final.log",
+    "coverage": {
+      "peak_w": 32,
+      "peak_r": 32,
+      "unique_w": 1,
+      "unique_r": 1
+    },
+    "stall": {
+      "b": 4096,
+      "r": 4096,
+      "aw": 4194,
+      "ar": 4312
+    },
+    "capacity": {
+      "b_full": 3880,
+      "r_full": 0,
+      "dat_full": 4064,
+      "wr_limit": 4008,
+      "rd_limit": 4319
+    },
+    "concurrent": {
+      "live": 0,
+      "w_during_read": 0,
+      "r_during_write": 0
+    },
+    "nmu_cosim_counts": {
+      "writes": 64,
+      "reads": 64,
+      "r_beats": 512,
+      "checked_bytes": 32768
+    }
+  },
+  {
+    "case": "data_partial_write",
+    "source_log": "vcs-phases.log",
+    "coverage": {
+      "peak_w": 12,
+      "peak_r": 12,
+      "unique_w": 1,
+      "unique_r": 1
+    },
+    "stall": {
+      "b": 0,
+      "r": 0,
+      "aw": 0,
+      "ar": 0
+    },
+    "capacity": {
+      "b_full": 0,
+      "r_full": 0,
+      "dat_full": 0,
+      "wr_limit": 0,
+      "rd_limit": 0
+    },
+    "concurrent": {
+      "live": 0,
+      "w_during_read": 0,
+      "r_during_write": 0
+    },
+    "nmu_cosim_counts": {
+      "writes": 24,
+      "reads": 12,
+      "r_beats": 56,
+      "checked_bytes": 694
+    }
+  },
+  {
+    "case": "data_read_write",
+    "source_log": "vcs-phases.log",
+    "coverage": {
+      "peak_w": 16,
+      "peak_r": 16,
+      "unique_w": 1,
+      "unique_r": 1
+    },
+    "stall": {
+      "b": 0,
+      "r": 0,
+      "aw": 0,
+      "ar": 0
+    },
+    "capacity": {
+      "b_full": 0,
+      "r_full": 0,
+      "dat_full": 0,
+      "wr_limit": 0,
+      "rd_limit": 0
+    },
+    "concurrent": {
+      "live": 150,
+      "w_during_read": 128,
+      "r_during_write": 128
+    },
+    "nmu_cosim_counts": {
+      "writes": 32,
+      "reads": 32,
+      "r_beats": 256,
+      "checked_bytes": 16384
+    }
+  }
+]

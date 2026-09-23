@@ -1,0 +1,20 @@
+
+Note-[RT_BS] Larger stack needed
+  Note: Bumping stack limit from 8192 to 8193 Kbytes.
+
+Chronologic VCS simulator copyright 1991-2017
+Contains Synopsys proprietary information.
+Compiler version M-2017.03-SP1_Full64; Runtime version M-2017.03-SP1_Full64;  Sep 23 22:00 2026
+DAT_CREDIT_DEPTH router=32 nmu_rx=32 nsu_rx=32
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2522: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/ctrl_rand/read.txt opened successfully as -2147483645
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2527: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-cosim/patterns/ctrl_rand/write.txt opened successfully as -2147483644
+COVERAGE peak_w=22 peak_r=53 unique_w=8 unique_r=8
+NMU_COSIM_PASS writes=64 reads=64 r_beats=240 checked_bytes=848
+$finish called from file "repo/sim/cosim/nmu/tb_nmu_cosim.sv", line 335.
+$finish at simulation time              6045000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 6045000 ps
+CPU Time:      0.400 seconds;       Data structure size:   0.5Mb
+Wed Sep 23 22:01:16 2026

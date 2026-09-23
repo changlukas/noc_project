@@ -1,0 +1,1 @@
+All 28 AXI read/write input files for the original 14 cases are byte-identical to the previous acceptance archive. New schedule keys default to zero for those cases. No production RTL, model source or generated parameter values changed.

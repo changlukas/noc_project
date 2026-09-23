@@ -1,5 +1,7 @@
 # NMU co-simulation acceptance at DAT depth 32
 
+Additional user-approved coverage is documented in [the four-scenario report](additional/report.md). The limits below describe the initial 14-case matrix.
+
 The initial 14-case VCS matrix passed on be16 with RTL NMU, one C++ Router, one C++ NSU and the existing AXI memory/scoreboard. It completed 284 writes, 284 readbacks, 988 R beats and 8,503 active-byte comparisons. Random cases use seed 1. These are functional results, not sustained-throughput measurements.
 
 ## Configuration

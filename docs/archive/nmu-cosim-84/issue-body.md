@@ -85,3 +85,16 @@ This is initial functional acceptance only. Partial-strobe holes, FIXED/WRAP bur
 Local focused C++ tests: 6 passed. Final Python sim/tools suite: 598 passed after correcting three existing whitespace-sensitive source assertions. No functional RTL or required check was removed. Final request_rand, corruption and FSDB-enabled data_write_burst checks also pass.
 
 Implementation and evidence: sim/cosim/nmu/ and docs/archive/nmu-cosim-84/report.md on branch feat/nmu-cosim-84 (implementation commit 23d38e8d), synchronized to /home/mingwei/noc_project/nmu-cosim. Issue remains OPEN pending user acceptance and the remaining coverage.
+
+## Additional user-approved acceptance: PASS
+
+All eight added cases pass VCS: ctrl_backpressure, data_backpressure, ctrl_capacity_recover, data_capacity_recover, ctrl_partial_write, data_partial_write, ctrl_read_write and data_read_write. Total 272 writes, 248 reads, 1,904 R beats and 65,416 checked bytes, including initialization and final readback.
+
+- B/R stalls and stable response payload were exercised.
+- Both capacity cases reached 32 outstanding requests per ID in each direction. B receive FIFO and control R / data DAT receive FIFOs became full. AW/AR stalled, then all transfers drained correctly after release.
+- Partial writes preserve masked bytes and update selected bytes after full initialization.
+- Concurrent cases use disjoint address regions and observe 128 W transfers during read outstanding and 128 R transfers during write outstanding, followed by write-region readback.
+
+Three affected baseline cases and the deliberate corruption test also pass. Full sim/tools Python suite: 599 passed. No production RTL, C++ source or DUT parameter change, and no C++ rebuild. Shared pattern.txt now lists 22 cases. Evidence: docs/archive/nmu-cosim-84/additional/report.md.
+
+Issue remains OPEN for user acceptance. Reset during traffic, forced reorder, FIXED/WRAP and additional seeds are not claimed. Existing model-capacity limitations remain documented.

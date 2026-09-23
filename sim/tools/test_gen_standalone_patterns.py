@@ -175,3 +175,51 @@ def test_cosim_memory_dependencies(tmp_path, mode):
         schedule = (tmp_path / name / "schedule.txt").read_text()
         assert "response_delay" not in schedule
         assert f"+backpressure={int(name == 'backpressure')}" in schedule
+
+
+def test_cosim_additional_memory_phases(tmp_path):
+    names = generate(tmp_path, REPO / "sim/cosim/nmu/topology.yml", 3,
+                     profile="cosim", catalog=REPO / "sim/test_patterns/cosim/cases.json")
+    assert len(names) == 8
+    for name in names:
+        root = tmp_path / name
+        writes = _parse_write(root / "write.txt")
+        reads = _parse_read(root / "read.txt")
+        init = _parse_write(root / "init_write.txt") if (root / "init_write.txt").exists() else []
+        verify = _parse_read(root / "verify_read.txt") if (root / "verify_read.txt").exists() else []
+        memory = {}
+        def apply(txns):
+            for txn in txns:
+                step = 1 << txn["size"]
+                assert txn["burst"] == 1
+                assert txn["addr"] >> 12 == (txn["addr"] + step*(txn["len"]+1)-1) >> 12
+                for beat, line in enumerate(txn["beats"]):
+                    data, strobe, _ = line.split()
+                    address = txn["addr"] + beat*step
+                    legal = ((1 << step)-1) << (address % 64)
+                    assert int(strobe, 16) & ~legal == 0
+                    for byte in range(step):
+                        lane = address % 64 + byte
+                        if int(strobe, 16) & (1 << lane):
+                            memory[address+byte] = (int(data, 16) >> (8*lane)) & 255
+        def addresses(txns):
+            return {addr for t in txns for addr in range(t["addr"], t["addr"] + (t["len"]+1)*(1 << t["size"]))}
+        apply(init)
+        initial = memory.copy()
+        if name.endswith("read_write"):
+            assert addresses(reads) <= memory.keys()
+            assert not addresses(reads) & addresses(writes)
+            assert addresses(verify) == addresses(writes)
+        apply(writes)
+        assert addresses(reads + verify) <= memory.keys()
+        if name.endswith("partial_write"):
+            assert memory.keys() == initial.keys()
+            assert any(memory[a] == initial[a] for a in memory)
+            assert any(memory[a] != initial[a] for a in memory)
+            for old, new in zip(init, writes):
+                assert old["addr"] == new["addr"]
+                for old_beat, new_beat in zip(old["beats"], new["beats"]):
+                    assert int(old_beat.split()[0], 16) ^ int(new_beat.split()[0], 16) == (1 << 512)-1
+        if name.endswith("capacity_recover"):
+            assert len(writes) == len(reads) == 64
+            assert sum(t["len"]+1 for t in reads) == 512

@@ -53,6 +53,9 @@ def prepare(rtl_stage, out):
     (out / "files.f").write_text("\n".join(source_list) + "\n")
     patterns = ROOT / "sim/test_patterns/cosim/generated/i3"
     cases = generate(patterns, topo, id_width=3, profile="cosim")
+    cases += generate(patterns, topo, id_width=3, profile="cosim",
+                      catalog=ROOT / "sim/test_patterns/cosim/cases.json")
+    (patterns / "cases.list").write_text("\n".join(cases) + "\n")
     (out / "pattern.txt").write_text("\n".join(cases) + "\n")
     for path in patterns.rglob("*"):
         if path.is_file():
