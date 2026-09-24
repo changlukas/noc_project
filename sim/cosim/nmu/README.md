@@ -52,3 +52,5 @@ Run each with `make run CASE=<name>` or `make nWave CASE=<name>` on the workstat
 Capacity cases require actual full receive buffers, remap-limit stalls and AW/AR stalls before completion. They exercise NMU resources, not the capacity of a future NSU RTL. Concurrent cases require live read/write overlap plus W/R transfers during opposite-direction outstanding traffic. All phases use the existing memory scoreboard.
 
 `make nWave` loads `signals.rc` with NMU request/response groups followed by Router NoC ports and NSU NoC/memory AXI ports. Router arrays use port 0 (LOCAL, NMU) and port 4 (WEST, NSU) in this topology. The selected FSDB path is substituted into `build/report_wave1/<CASE>.rc`. Override the template with `WAVE_RC=/path/to/signals.rc`.
+
+The standalone and co-simulation case lists differ. `cross_id_out_of_order`, `same_id_cross_dst_reorder` and other standalone-only cases are not co-simulation acceptance cases. Use `make list TESTBENCH=cosim` from the workstation root to select a supported case. Forced response reordering is not covered by this co-simulation topology.

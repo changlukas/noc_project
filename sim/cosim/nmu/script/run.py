@@ -12,9 +12,18 @@ p.add_argument("--report", required=True)
 p.add_argument("--wave", action="store_true")
 p.add_argument("--corrupt", action="store_true")
 a = p.parse_args()
+patterns = Path("patterns")
+cases = (patterns / "cases.list").read_text().split()
+if a.case not in cases:
+    p.error("Unsupported co-simulation CASE '{}'. Use make list TESTBENCH=cosim "
+            "from nmu-standalone/. Available cases: {}".format(a.case, ", ".join(cases)))
+stim = patterns / a.case
+for name in ("schedule.txt", "read.txt", "write.txt"):
+    if not (stim / name).is_file():
+        p.error("Incomplete co-simulation pattern '{}': missing {}. "
+                "Prepare and synchronize the co-simulation environment again.".format(a.case, stim / name))
 report = Path(a.report)
 report.mkdir(parents=True, exist_ok=True)
-stim = Path("patterns") / a.case
 args = [str(Path(a.binary).resolve()), "+stim_dir=" + str(stim.resolve())]
 args += (stim / "schedule.txt").read_text().split()
 if a.wave:
