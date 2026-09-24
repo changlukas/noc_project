@@ -50,3 +50,5 @@ The shared catalog `sim/test_patterns/cosim/cases.json` adds these pairs:
 Run each with `make run CASE=<name>` or `make nWave CASE=<name>` on the workstation. `pattern.txt` lists all 22 cases. Only the explicit backpressure/capacity cases delay response acceptance. DUT parameters and the C++ model are unchanged.
 
 Capacity cases require actual full receive buffers, remap-limit stalls and AW/AR stalls before completion. They exercise NMU resources, not the capacity of a future NSU RTL. Concurrent cases require live read/write overlap plus W/R transfers during opposite-direction outstanding traffic. All phases use the existing memory scoreboard.
+
+`make nWave` loads `signals.rc` with NMU request/response groups followed by Router NoC ports and NSU NoC/memory AXI ports. Router arrays use port 0 (LOCAL, NMU) and port 4 (WEST, NSU) in this topology. The selected FSDB path is substituted into `build/report_wave1/<CASE>.rc`. Override the template with `WAVE_RC=/path/to/signals.rc`.

@@ -4,6 +4,7 @@ SHELL := /bin/bash
 ROOT := $(CURDIR)
 CASE ?= ctrl_write_single
 WAVE ?= 0
+WAVE_RC ?= $(ROOT)/signals.rc
 CXX := /cadtools/centos/spe21.1/tools.lnx86/cdsgcc/gcc/9.3/bin/g++
 VCS ?= vcs
 VCS_HOME ?= /home/mingwei/.toolsmgr/vcs
@@ -51,7 +52,8 @@ regress: compile
 corrupt: compile
 	python3 run.py --binary "$(SIM)/simv" --case data_write_single --report "$(REPORT)" --corrupt
 nWave: run_wave
-	$(VERDI_HOME)/bin/nWave -ssf "$(BUILD)/report_wave1/$(CASE).fsdb"
+	@sed 's|@FSDB@|$(BUILD)/report_wave1/$(CASE).fsdb|g' "$(WAVE_RC)" > "$(BUILD)/report_wave1/$(CASE).rc"
+	$(VERDI_HOME)/bin/nWave -ssf "$(BUILD)/report_wave1/$(CASE).fsdb" -sswr "$(BUILD)/report_wave1/$(CASE).rc"
 run_wave:
 	$(MAKE) run WAVE=1 CASE=$(CASE)
 

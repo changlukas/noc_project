@@ -1,0 +1,421 @@
+Magic 271485
+Revision Verdi_M-2017.03-SP1
+
+viewPort 0 23 1463 752 330 90
+openDirFile -d / "" "@FSDB@"
+signalSpacing 5
+top 0
+activeDirFile "" "@FSDB@"
+
+addGroup "Clocks and NMU ports"
+addSubGroup "Clocks and reset" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/ACLK
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/ARESETn
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/noc_clk
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/noc_rst_n
+endSubGroup "Clocks and reset"
+addSubGroup "NoC ports" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/tx_req_flit_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/tx_req_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/tx_req_ready_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/rx_rsp_flit_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/rx_rsp_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/rx_rsp_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/tx_dat_flit_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/tx_dat_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/tx_dat_crdvalid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/rx_dat_flit_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/rx_dat_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/rx_dat_crdvalid_o
+endSubGroup "NoC ports"
+addGroup "Request: AXI to NoC"
+addSubGroup "AXI AW" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/awid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/awaddr
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/awlen
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/awsize
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/awburst
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/awuser
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/awvalid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/awready
+endSubGroup "AXI AW"
+addSubGroup "AXI W" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/wdata
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/wstrb
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/wlast
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/wvalid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/wready
+endSubGroup "AXI W"
+addSubGroup "AXI AR" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/arid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/araddr
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/arlen
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/arsize
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/arburst
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/arvalid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/arready
+endSubGroup "AXI AR"
+addSubGroup "ID remap request" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_req_i.aw
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_req_i.aw_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_resp_o.aw_ready
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_req_o.aw
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_req_o.aw_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_resp_i.aw_ready
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_req_i.w
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_req_i.w_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_resp_o.w_ready
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_req_o.w
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_req_o.w_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_resp_i.w_ready
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_req_i.ar
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_req_i.ar_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_resp_o.ar_ready
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_req_o.ar
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_req_o.ar_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_resp_i.ar_ready
+endSubGroup "ID remap request"
+addSubGroup "AW CDC FIFO" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_aw_fifo/src_clk_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_aw_fifo/src_rst_n_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_aw_fifo/src_data_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_aw_fifo/src_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_aw_fifo/src_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_aw_fifo/dst_clk_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_aw_fifo/dst_rst_n_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_aw_fifo/dst_data_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_aw_fifo/dst_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_aw_fifo/dst_ready_i
+endSubGroup "AW CDC FIFO"
+addSubGroup "W CDC FIFO" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_w_fifo/src_clk_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_w_fifo/src_rst_n_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_w_fifo/src_data_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_w_fifo/src_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_w_fifo/src_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_w_fifo/dst_clk_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_w_fifo/dst_rst_n_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_w_fifo/dst_data_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_w_fifo/dst_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_w_fifo/dst_ready_i
+endSubGroup "W CDC FIFO"
+addSubGroup "AR CDC FIFO" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_ar_fifo/src_clk_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_ar_fifo/src_rst_n_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_ar_fifo/src_data_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_ar_fifo/src_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_ar_fifo/src_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_ar_fifo/dst_clk_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_ar_fifo/dst_rst_n_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_ar_fifo/dst_data_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_ar_fifo/dst_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_request_fifo/i_ar_fifo/dst_ready_i
+endSubGroup "AR CDC FIFO"
+addSubGroup "SAM" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_sam/s_aw_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_sam/s_aw_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_sam/s_aw_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_sam/m_aw_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_sam/m_aw_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_sam/m_aw_ready_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_sam/s_ar_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_sam/s_ar_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_sam/s_ar_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_sam/m_ar_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_sam/m_ar_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_sam/m_ar_ready_i
+endSubGroup "SAM"
+addSubGroup "Ordering admission (response path)" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_aw_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_aw_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_aw_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_aw_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_aw_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_aw_ready_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_w_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_w_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_w_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_w_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_w_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_w_ready_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_ar_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_ar_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_ar_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_ar_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_ar_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_ar_ready_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/aw_can_accept
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/aw_reorder
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/aw_tag
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/ar_reorder
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/ar_tag
+endSubGroup "Ordering admission (response path)"
+addSubGroup "Packetize" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/s_aw_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/s_aw_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/s_aw_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/s_w_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/s_w_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/s_w_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/s_ar_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/s_ar_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/s_ar_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_channel_assign/m_req_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_channel_assign/m_req_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_channel_assign/m_req_ready_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_channel_assign/m_dat_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_channel_assign/m_dat_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_channel_assign/dat_credit_return_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/owner_empty
+endSubGroup "Packetize"
+addSubGroup "Packet candidates"
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/m_req_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/m_req_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/m_req_ready_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/m_dat_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/m_dat_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_packetize/m_dat_ready_i
+endSubGroup "Packet candidates"
+addGroup "Response: NoC to AXI"
+addSubGroup "Depacketize" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/s_rsp_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/s_rsp_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/s_rsp_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/m_b_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/m_b_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/m_b_ready_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/m_r_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/m_r_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/m_r_ready_i
+endSubGroup "Depacketize"
+addSubGroup "Decoded B FIFO" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/i_b_fifo/data_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/i_b_fifo/push_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/i_b_fifo/full_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/i_b_fifo/data_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/i_b_fifo/pop_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/i_b_fifo/empty_o
+endSubGroup "Decoded B FIFO"
+addSubGroup "Decoded R FIFO" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/i_r_fifo/data_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/i_r_fifo/push_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/i_r_fifo/full_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/i_r_fifo/data_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/i_r_fifo/pop_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/i_r_fifo/empty_o
+endSubGroup "Decoded R FIFO"
+addSubGroup "Ordering retirement" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_b_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_b_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_b_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_b_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_b_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_b_ready_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_r_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_r_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/s_r_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_r_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_r_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/m_r_ready_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/b_direct
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/r_direct
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/b_free_cnt
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/r_free_cnt
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/b_complete
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/r_complete
+endSubGroup "Ordering retirement"
+addSubGroup "DAT receive credits" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/rx_dat_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/rx_dat_flit_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/rx_dat_crdvalid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/dat_push
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/dat_pop
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/dat_full
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/dat_empty
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/r_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_depacketize/i_buffer/r_ready
+endSubGroup "DAT receive credits"
+addSubGroup "B storage" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/alloc_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/alloc_base_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/alloc_cnt_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/next_base_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/free_cnt_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/wr_data_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/wr_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/wr_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/wr_bypass_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/wr_base_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/wr_last_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/rd_addr_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/rd_data_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/rd_entry_complete_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/free_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/free_addr_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/i_b_storage/complete_o
+endSubGroup "B storage"
+addSubGroup "R storage (R_ROB_EN=1)" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/alloc_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/alloc_base_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/alloc_cnt_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/next_base_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/free_cnt_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/wr_data_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/wr_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/wr_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/wr_bypass_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/wr_base_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/wr_last_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/rd_addr_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/rd_data_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/rd_entry_complete_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/free_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/free_addr_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_ordering/gen_read_reorder_storage/i_r_storage/complete_o
+endSubGroup "R storage (R_ROB_EN=1)"
+addSubGroup "B CDC FIFO" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_b_fifo/src_clk_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_b_fifo/src_rst_n_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_b_fifo/src_data_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_b_fifo/src_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_b_fifo/src_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_b_fifo/dst_clk_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_b_fifo/dst_rst_n_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_b_fifo/dst_data_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_b_fifo/dst_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_b_fifo/dst_ready_i
+endSubGroup "B CDC FIFO"
+addSubGroup "R CDC FIFO" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_r_fifo/src_clk_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_r_fifo/src_rst_n_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_r_fifo/src_data_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_r_fifo/src_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_r_fifo/src_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_r_fifo/dst_clk_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_r_fifo/dst_rst_n_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_r_fifo/dst_data_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_r_fifo/dst_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_response_path/i_response_fifo/i_r_fifo/dst_ready_i
+endSubGroup "R CDC FIFO"
+addSubGroup "ID restore" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_resp_i.b
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_resp_i.b_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_req_o.b_ready
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_resp_o.b
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_resp_o.b_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_req_i.b_ready
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_resp_i.r
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_resp_i.r_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/mst_req_o.r_ready
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_resp_o.r
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_resp_o.r_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/dut/i_request_path/i_id_remap/slv_req_i.r_ready
+endSubGroup "ID restore"
+addSubGroup "AXI B" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/bid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/bresp
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/bvalid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/bready
+endSubGroup "AXI B"
+addSubGroup "AXI R" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/rid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/rdata
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/rresp
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/rlast
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/rvalid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/bus/rready
+endSubGroup "AXI R"
+
+
+addGroup "Router SV wrapper"
+
+addSubGroup "Router REQ ports" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/rx_req_flit
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/rx_req_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/rx_req_ready
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/tx_req_flit
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/tx_req_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/tx_req_ready
+endSubGroup "Router REQ ports"
+
+addSubGroup "Router RSP ports" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/rx_rsp_flit
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/rx_rsp_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/rx_rsp_ready
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/tx_rsp_flit
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/tx_rsp_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/tx_rsp_ready
+endSubGroup "Router RSP ports"
+
+addSubGroup "Router DAT ports" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/rx_dat_flit
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/rx_dat_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/rx_dat_crdvalid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/tx_dat_flit
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/tx_dat_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_router/tx_dat_crdvalid
+endSubGroup "Router DAT ports"
+
+addGroup "NSU SV wrapper"
+
+addSubGroup "NSU REQ and RSP" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/rx_req_flit_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/rx_req_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/rx_req_ready_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/tx_rsp_flit_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/tx_rsp_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/tx_rsp_ready_i
+endSubGroup "NSU REQ and RSP"
+
+addSubGroup "NSU DAT and credits" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/rx_dat_flit_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/rx_dat_valid_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/rx_dat_crdvalid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/tx_dat_flit_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/tx_dat_valid_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/tx_dat_crdvalid_i
+endSubGroup "NSU DAT and credits"
+
+addSubGroup "NSU memory AXI AW" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.awid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.awaddr
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.awlen
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.awsize
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.awburst
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.awvalid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_rsp_i.awready
+endSubGroup "NSU memory AXI AW"
+
+addSubGroup "NSU memory AXI W" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.wdata
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.wstrb
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.wlast
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.wvalid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_rsp_i.wready
+endSubGroup "NSU memory AXI W"
+
+addSubGroup "NSU memory AXI B" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.bready
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_rsp_i.bid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_rsp_i.bresp
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_rsp_i.bvalid
+endSubGroup "NSU memory AXI B"
+
+addSubGroup "NSU memory AXI AR" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.arid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.araddr
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.arlen
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.arsize
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.arburst
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.arvalid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_rsp_i.arready
+endSubGroup "NSU memory AXI AR"
+
+addSubGroup "NSU memory AXI R" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_req_o.rready
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_rsp_i.rid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_rsp_i.rdata
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_rsp_i.rresp
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_rsp_i.rlast
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_cosim/i_nsu/axi_rsp_i.rvalid
+endSubGroup "NSU memory AXI R"
