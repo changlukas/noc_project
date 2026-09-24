@@ -9,10 +9,12 @@ import subprocess
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--mixed-only", action="store_true")
+parser.add_argument("--rx-only", action="store_true")
+parser.add_argument("--report", default="build/buffer-pipeline/focused")
 options = parser.parse_args()
 os.environ.setdefault("VCS_ARCH_OVERRIDE", "linux")
 root = Path.cwd()
-out = root / "build/buffer-pipeline/focused"
+out = root / options.report
 out.mkdir(parents=True, exist_ok=True)
 lines = (root / "files.f").read_text().splitlines()
 lines = [line for line in lines if not line.endswith(("tb_nmu_cosim.sv", "router_wrap.sv", "nsu_wrap.sv"))]
@@ -33,6 +35,8 @@ cases = [
 ]
 results = []
 for top, params in cases:
+    if options.rx_only and (top != "tb_nmu_response_depacketize" or params["NUM_DAT_VC"] != 2):
+        continue
     if options.mixed_only and "AW_REG_TYPE" not in params:
         continue
     group = "response_depacketize" if "response_depacketize" in top else "request_packetize"

@@ -1,0 +1,58 @@
+--- a/docs/nmu-spec.md
++++ b/docs/nmu-spec.md
+@@ -234,7 +234,7 @@
+-**Target integration overlay.** RSP uses independent B and NarrowR class FIFOs in `noc_clk`.
+-DAT Read uses one receive FIFO per eligible VC, selected by `vc_id`, with per-VC credit.
+-The decoded R heads merge at beat granularity before ordering and the R dual-clock FIFO.
+-There is no additional deep shared DataR queue. B and R may therefore assert `bvalid` and `rvalid` in
+-the same `ACLK` cycle and each waits only on its own ready. `DataB` and `DataR` use different
+-physical networks. `NarrowB` and `NarrowR` share RSP bandwidth but become independent after B/R
+-assignment. The current C++ model does not implement this CDC or the target receive-FIFO timing.
++**Target integration overlay.** RSP enters one shared raw-flit FIFO in `noc_clk` before
++B/control-R assignment. A blocked head holds every later RSP flit. DAT Read uses one
++receive FIFO per eligible VC with per-VC credit. Channel assignment routes the RSP head
++to B or arbitrates it with DAT heads for R at beat granularity, then unpack decodes the
++selected flits. A blocked RSP B head does not block eligible DAT-to-R traffic. Control R
++and DAT share downstream R backpressure. Ordering/ROB and the B/R output CDC FIFOs follow
++unpack. The current C++ model does not implement this CDC or receive-FIFO timing.
+@@ -310 +310 @@
+-| NMU_DEPKT_Q_DEPTH [model/legacy] | 16 | 1..1024 | NMU RTL instead uses B_RX_FIFO_DEPTH and R_RX_FIFO_DEPTH, default 32 |
++| NMU_DEPKT_Q_DEPTH [model/legacy] | 16 | 1..1024 | NMU RTL instead uses RSP_RX_FIFO_DEPTH, default 32 |
+@@ -628 +628 @@
+-The response path is independent B/control-R and per-read-VC DAT input FIFOs, R beat selection, response decoding, ordering/ROB, B/R output CDC FIFOs, then ID restoration. Input-buffer channel decode only selects storage. Pack/unpack output slices are optional and default to bypass. ROB storage is separate from transport FIFO capacity.
++The response path is shared raw RSP and per-read-VC DAT input FIFOs, channel assignment, response decoding, ordering/ROB, B/R output CDC FIFOs, then ID restoration. RSP B/control-R selection occurs only after the shared FIFO. A blocked RSP head holds later RSP flits. Pack/unpack output slices are optional and default to bypass. ROB storage is separate from transport FIFO capacity.
+@@ -637 +637 @@
+-| `B_RX_FIFO_DEPTH`, `R_RX_FIFO_DEPTH` | 32 | RSP input B and control-R FIFO entries |
++| `RSP_RX_FIFO_DEPTH` | 32 | Shared raw RSP input FIFO entries |
+--- a/docs/nmu-verification-plan.md
++++ b/docs/nmu-verification-plan.md
+@@ -184,2 +184,2 @@
+-| N0-RSP-03 | simultaneous RSP B/NarrowR and DAT DataR arrivals | both class FIFOs can accept/progress in one `noc_clk` cycle; DAT acceptance uses the selected VC credit and returns one registered credit in the cycle after pop |
+-| N0-RSP-04 | fill the RSP class FIFO while DAT Read continues, then fill DAT Read while RSP continues | backpressure is face-local; neither class consumes the other's storage or authority |
++| N0-RSP-03 | simultaneous RSP B/NarrowR and DAT DataR arrivals | RSP and DAT FIFOs can accept concurrently; shared RSP preserves head order before B/R assignment; DAT acceptance uses the selected VC credit and returns one registered credit in the cycle after pop |
++| N0-RSP-04 | block B then R at the shared RSP head; exercise independent DAT traffic | later RSP entries wait behind the head; blocked B does not stop DAT-to-R; both read sources obey R backpressure |
+@@ -199 +199 @@
+-| N1-RSP-02 | sustained RSP and DAT Read input, alternating which class FIFO is near full | neither physical input creates head-of-line blocking in the other |
++| N1-RSP-02 | sustained RSP and DAT Read input, alternating which class FIFO is near full | RSP and DAT retain separate input capacity; downstream R backpressure can block both read sources |
+@@ -576,0 +577,4 @@
++
++### Shared RSP input FIFO acceptance (2026-09-24)
++
++The RX correction uses one raw RSP input FIFO before channel assignment. The focused response test must prove B-head and R-head blocking of later RSP entries, full/backpressure recovery, DAT progress behind a blocked RSP B head, stall stability, reset flush and registered credit conservation. User-requested validation is limited to this focused test and control/data burst read/write plus cross_id_out_of_order co-simulation. The older full buffer-placement regression is historical evidence, not a rerun requirement for this correction.
+--- a/docs/trade-off.md
++++ b/docs/trade-off.md
+@@ -788,0 +789,8 @@
++
++## NMU RX buffer before channel assignment (2026-09-24)
++
++User-approved correction: RSP ingress enters one raw-flit cc_fifo before channel decoding. Its head is routed to B or control R and advances only when that selected path accepts it. Later RSP entries wait behind a blocked head. DAT already uses an independent NoC network and retains its per-read-VC input FIFOs. A separate RX channel-assignment module selects between the RSP control-R head and DAT heads for the R output, using the existing held-beat round-robin arbiter. No queue is added between assignment and unpack. Optional unpack slices remain configurable and default to bypass.
++
++Replace two 32-entry RSP class FIFOs with one 32-entry RSP FIFO. This removes one 32-flit storage bank and its pointers and avoids a channel decoder in the external RSP-ready path. The head decode and R arbitration remain combinational after storage. Default empty-to-head latency remains one cycle and the ready, eligible output can accept one flit per cycle. B and control-R can no longer both leave RSP storage in one cycle. Blocking within RSP and reduced combined RSP capacity are intentional. A blocked B head does not block eligible DAT-to-R traffic. A blocked R output still shares arbitration backpressure between control R and DAT. Synthesis area, frequency and power remain unmeasured.
++
++RSP_RX_FIFO_DEPTH defaults to 32 and replaces B_RX_FIFO_DEPTH/R_RX_FIFO_DEPTH. DAT_RX_VC_DEPTH remains 32. DAT credits return one cycle after the actual DAT receive-FIFO pop. ROB, output CDC and optional unpack register capacities remain unchanged.
+--- a/rtl/README.md
++++ b/rtl/README.md
+@@ -353 +353,2 @@
+-| `nmu/response_depacketize/response_buffer` | RX RSP ready/valid and RX DAT credit -> selected B/R flits | Independent B/control-R and per-read-VC DAT input FIFOs, beat arbitration and credit return |
++| `nmu/response_depacketize/response_buffer` | RX RSP ready/valid and RX DAT credit -> raw FIFO heads | Shared RSP and per-read-VC DAT input FIFOs, credit return after DAT pop |
++| `nmu/channel_assign/rx_channel_assign` | Raw RSP/DAT FIFO heads -> selected B/R flits | RSP head decode, R beat arbitration, no payload FIFO |

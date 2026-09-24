@@ -10,8 +10,7 @@ module nmu_response_path #(
     parameter int unsigned NOC_DAT_VC_MODE        = ni_params_pkg::NOC_DAT_VC_MODE,
     parameter int unsigned DAT_RX_VC_DEPTH        = 32,
     parameter int unsigned AXI_FIFO_DEPTH         = 32,
-    parameter int unsigned B_RX_FIFO_DEPTH        = 32,
-    parameter int unsigned R_RX_FIFO_DEPTH        = 32,
+    parameter int unsigned RSP_RX_FIFO_DEPTH      = 32,
     parameter int unsigned B_FIFO_DEPTH           = AXI_FIFO_DEPTH,
     parameter int unsigned R_FIFO_DEPTH           = AXI_FIFO_DEPTH,
     parameter int unsigned B_REG_TYPE             = 0,
@@ -105,12 +104,15 @@ module nmu_response_path #(
     wire ni_flit_pkg::rsp_flit_t buffered_b;
     wire ni_flit_pkg::dat_flit_t buffered_r;
     wire buffered_b_valid, buffered_b_ready, buffered_r_valid, buffered_r_ready;
+    wire ni_flit_pkg::rsp_flit_t rx_rsp_head;
+    wire ni_flit_pkg::dat_flit_t [NUM_DAT_VC-1:0] rx_dat_head;
+    wire rx_rsp_valid, rx_rsp_ready;
+    wire [NUM_DAT_VC-1:0] rx_dat_valid, rx_dat_ready;
     nmu_response_buffer #(
-        .B_FIFO_DEPTH    (B_RX_FIFO_DEPTH),
-        .R_FIFO_DEPTH    (R_RX_FIFO_DEPTH),
-        .NUM_DAT_VC      (NUM_DAT_VC     ),
-        .DAT_VC_MODE     (NOC_DAT_VC_MODE),
-        .DAT_RX_VC_DEPTH (DAT_RX_VC_DEPTH)
+        .RSP_FIFO_DEPTH  (RSP_RX_FIFO_DEPTH),
+        .NUM_DAT_VC      (NUM_DAT_VC       ),
+        .DAT_VC_MODE     (NOC_DAT_VC_MODE  ),
+        .DAT_RX_VC_DEPTH (DAT_RX_VC_DEPTH  )
     ) i_rx_buffer (
         .clk_i               (noc_clk_i                              ),
         .rst_n_i             (noc_rst_n_i                            ),
@@ -120,12 +122,30 @@ module nmu_response_path #(
         .s_rsp_i             (ni_flit_pkg::rsp_flit_t'(rx_rsp_flit_i)),
         .s_rsp_valid_i       (rx_rsp_valid_i                         ),
         .s_rsp_ready_o       (rx_rsp_ready_o                         ),
-        .m_b_o               (buffered_b                             ),
-        .m_b_valid_o         (buffered_b_valid                       ),
-        .m_b_ready_i         (buffered_b_ready                       ),
-        .m_r_o               (buffered_r                             ),
-        .m_r_valid_o         (buffered_r_valid                       ),
-        .m_r_ready_i         (buffered_r_ready                       )
+        .m_rsp_o             (rx_rsp_head                            ),
+        .m_rsp_valid_o       (rx_rsp_valid                           ),
+        .m_rsp_ready_i       (rx_rsp_ready                           ),
+        .m_dat_o             (rx_dat_head                            ),
+        .m_dat_valid_o       (rx_dat_valid                           ),
+        .m_dat_ready_i       (rx_dat_ready                           )
+    );
+    nmu_rx_channel_assign #(
+        .NUM_DAT_VC (NUM_DAT_VC)
+    ) i_rx_channel_assign (
+        .clk_i         (noc_clk_i       ),
+        .rst_n_i       (noc_rst_n_i     ),
+        .s_rsp_i       (rx_rsp_head     ),
+        .s_rsp_valid_i (rx_rsp_valid    ),
+        .s_rsp_ready_o (rx_rsp_ready    ),
+        .s_dat_i       (rx_dat_head     ),
+        .s_dat_valid_i (rx_dat_valid    ),
+        .s_dat_ready_o (rx_dat_ready    ),
+        .m_b_o         (buffered_b      ),
+        .m_b_valid_o   (buffered_b_valid),
+        .m_b_ready_i   (buffered_b_ready),
+        .m_r_o         (buffered_r      ),
+        .m_r_valid_o   (buffered_r_valid),
+        .m_r_ready_i   (buffered_r_ready)
     );
     nmu_response_depacketize #(
         .B_REG_TYPE (B_REG_TYPE),

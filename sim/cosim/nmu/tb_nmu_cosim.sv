@@ -127,8 +127,7 @@ module tb_nmu_cosim #(
         .AXI_FIFO_DEPTH (IO_FIFO_DEPTH),
         .REQ_FIFO_DEPTH (IO_FIFO_DEPTH),
         .DAT_TX_FIFO_DEPTH (IO_FIFO_DEPTH),
-        .B_RX_FIFO_DEPTH (IO_FIFO_DEPTH),
-        .R_RX_FIFO_DEPTH (IO_FIFO_DEPTH),
+        .RSP_RX_FIFO_DEPTH (IO_FIFO_DEPTH),
         .SRC_ID (ni_flit_pkg::SRC_ID_WIDTH'(NMU_ID))
     ) dut (
         .ACLK              (clk),
@@ -760,8 +759,8 @@ module tb_nmu_cosim #(
             if (vip.r_valid && !vip.r_ready) r_stall_cnt++;
             if (vip.aw_valid && !vip.aw_ready) aw_stall_cnt++;
             if (vip.ar_valid && !vip.ar_ready) ar_stall_cnt++;
-            if (dut.i_response_path.i_rx_buffer.b_full) b_full_cnt++;
-            if (dut.i_response_path.i_rx_buffer.r_full) r_full_cnt++;
+            if ((dut.i_response_path.i_rx_buffer.rsp_full && dut.i_response_path.i_rx_channel_assign.is_b)) b_full_cnt++;
+            if ((dut.i_response_path.i_rx_buffer.rsp_full && dut.i_response_path.i_rx_channel_assign.is_r)) r_full_cnt++;
             if (|dut.i_response_path.i_rx_buffer.dat_full) dat_full_cnt++;
             if (dut.i_request_path.i_id_remap.wr_exists_full) wr_limit_cnt++;
             if (dut.i_request_path.i_id_remap.rd_exists_full) rd_limit_cnt++;

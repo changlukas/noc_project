@@ -1,0 +1,77 @@
+{
+  "focused": [
+    {
+      "top": "tb_nmu_response_depacketize",
+      "parameters": {
+        "NUM_DAT_VC": 2,
+        "DAT_RX_VC_DEPTH": 2
+      },
+      "pass": true,
+      "log": "/home/mingwei/noc_project/nmu-standalone/cosim/build/rx-channel-order/focused/tb_nmu_response_depacketize_41036c0b/sim.log"
+    }
+  ],
+  "cases": [
+    {
+      "case": "ctrl_write_burst",
+      "passed": true,
+      "writes": 12,
+      "reads": 12,
+      "r_beats": 56,
+      "checked_bytes": 210
+    },
+    {
+      "case": "ctrl_read_burst",
+      "passed": true,
+      "writes": 12,
+      "reads": 12,
+      "r_beats": 56,
+      "checked_bytes": 210
+    },
+    {
+      "case": "data_write_burst",
+      "passed": true,
+      "writes": 12,
+      "reads": 12,
+      "r_beats": 56,
+      "checked_bytes": 694
+    },
+    {
+      "case": "data_read_burst",
+      "passed": true,
+      "writes": 12,
+      "reads": 12,
+      "r_beats": 56,
+      "checked_bytes": 694
+    },
+    {
+      "case": "cross_id_out_of_order",
+      "passed": true,
+      "writes": 16,
+      "reads": 16,
+      "r_beats": 16,
+      "checked_bytes": 128
+    }
+  ],
+  "totals": {
+    "writes": 64,
+    "reads": 64,
+    "r_beats": 240,
+    "checked_bytes": 1936
+  },
+  "dpi_unchanged": {
+    "sha256": "b4eacba6139b468691c890de702c5ec92a712b5f470b7f5f08653c7a42f99196",
+    "size": 12988400,
+    "mtime": 1790170879.3665185
+  },
+  "rc": {
+    "cosim_signals": 515,
+    "missing": [],
+    "standalone_changed_paths_mapped_to_same_dut": 20,
+    "unmapped": [],
+    "fsdb_sha256": "d5dc4d13339a06fcfa2f660bf975d29b4101383eabb03c54a3336d4cd119379f"
+  },
+  "source_sync": {
+    "cosim_verified_files": 675,
+    "standalone_verified_files": 204
+  }
+}

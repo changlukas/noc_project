@@ -670,3 +670,11 @@ DAT enqueue consumes local FIFO space, not downstream credit. A work-conserving 
 RX B/control-R queues remain separate to avoid introducing response-class head-of-line blocking after reception. Their ingress decode is part of the input buffer; full field reconstruction is outside the buffer. DAT credit returns when the receive FIFO entry is released. ROB and ID tables remain stateful and unchanged.
 
 Compare storage bits and sustained transfer behavior in focused validation. No claim of area, clock frequency or universal latency improvement is made before measurement. A shared DAT FIFO was rejected because a credit-starved head VC would block otherwise eligible VCs.
+
+## NMU RX buffer before channel assignment (2026-09-24)
+
+User-approved correction: RSP ingress enters one raw-flit cc_fifo before channel decoding. Its head is routed to B or control R and advances only when that selected path accepts it. Later RSP entries wait behind a blocked head. DAT already uses an independent NoC network and retains its per-read-VC input FIFOs. A separate RX channel-assignment module selects between the RSP control-R head and DAT heads for the R output, using the existing held-beat round-robin arbiter. No queue is added between assignment and unpack. Optional unpack slices remain configurable and default to bypass.
+
+Replace two 32-entry RSP class FIFOs with one 32-entry RSP FIFO. This removes one 32-flit storage bank and its pointers and avoids a channel decoder in the external RSP-ready path. The head decode and R arbitration remain combinational after storage. Default empty-to-head latency remains one cycle and the ready, eligible output can accept one flit per cycle. B and control-R can no longer both leave RSP storage in one cycle. Blocking within RSP and reduced combined RSP capacity are intentional. A blocked B head does not block eligible DAT-to-R traffic. A blocked R output still shares arbitration backpressure between control R and DAT. Synthesis area, frequency and power remain unmeasured.
+
+RSP_RX_FIFO_DEPTH defaults to 32 and replaces B_RX_FIFO_DEPTH/R_RX_FIFO_DEPTH. DAT_RX_VC_DEPTH remains 32. DAT credits return one cycle after the actual DAT receive-FIFO pop. ROB, output CDC and optional unpack register capacities remain unchanged.

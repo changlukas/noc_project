@@ -1,0 +1,30 @@
+[
+  {
+    "file": "rtl/nmu/channel_assign/rx_channel_assign.sv",
+    "tokens_unchanged": true,
+    "sha256_at_named_connection_alignment": "ecabaf47a307f709b3200c81c5655fe8cb8ad4fe741f95723d44021d72a581a3",
+    "final_sha256": "b8eb0e8b2dd0c5959abddf711ae19157abca37fe8052525b284af9fd34d19c79",
+    "additional_alignment": "Port and simple-assignment LHS spacing only; RHS text preserved"
+  },
+  {
+    "file": "rtl/nmu/response_depacketize/response_buffer.sv",
+    "tokens_unchanged": true,
+    "sha256_at_named_connection_alignment": "6566bc3d237babf66be6a2056b49359b228f264d2bded6bb813182ebe17ff8b3",
+    "final_sha256": "b3f534010198e052596b464237e67c7395f7fb0acef1855fdf9e26a62be2867d",
+    "additional_alignment": "Port and simple-assignment LHS spacing only; RHS text preserved"
+  },
+  {
+    "file": "rtl/nmu/response_path/response_path.sv",
+    "tokens_unchanged": true,
+    "sha256_at_named_connection_alignment": "aeb06e09eb6ec98753c77a5dbb38c1f9f957d8b11f7cf43763798ffeddb7e729",
+    "final_sha256": "aeb06e09eb6ec98753c77a5dbb38c1f9f957d8b11f7cf43763798ffeddb7e729",
+    "additional_alignment": "none"
+  },
+  {
+    "file": "rtl/nmu/top/nmu.sv",
+    "tokens_unchanged": true,
+    "sha256_at_named_connection_alignment": "2abeb7f4b62198ba0dfbb53550affd2200dd40c9181f98306c7a72fa6a8fd317",
+    "final_sha256": "2abeb7f4b62198ba0dfbb53550affd2200dd40c9181f98306c7a72fa6a8fd317",
+    "additional_alignment": "none"
+  }
+]

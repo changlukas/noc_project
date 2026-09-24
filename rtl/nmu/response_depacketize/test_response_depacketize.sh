@@ -27,6 +27,7 @@ task_sources=(
     repo/sim/dv/common_cells-1.37.0/src/lzc.sv
     repo/sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv
     repo/rtl/nmu/response_depacketize/response_buffer.sv
+    repo/rtl/nmu/channel_assign/rx_channel_assign.sv
     repo/rtl/nmu/response_depacketize/response_depacketize.sv
 )
 task_compile() {

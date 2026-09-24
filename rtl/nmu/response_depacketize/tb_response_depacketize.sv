@@ -31,6 +31,10 @@ module tb_nmu_response_depacketize #(
     rsp_flit_t buffered_b;
     dat_flit_t buffered_r;
     wire buffered_b_valid, buffered_b_ready, buffered_r_valid, buffered_r_ready;
+    wire ni_flit_pkg::rsp_flit_t rx_rsp_head;
+    wire ni_flit_pkg::dat_flit_t [NUM_DAT_VC-1:0] rx_dat_head;
+    wire rx_rsp_valid, rx_rsp_ready;
+    wire [NUM_DAT_VC-1:0] rx_dat_valid, rx_dat_ready;
     nmu_response_buffer #(
         .RSP_FIFO_DEPTH  (2              ),
         .NUM_DAT_VC      (NUM_DAT_VC     ),
@@ -45,12 +49,30 @@ module tb_nmu_response_depacketize #(
         .s_dat_i             (dat          ),
         .s_dat_valid_i       (dat_valid    ),
         .dat_credit_return_o (credit_return),
-        .m_b_o               (buffered_b            ),
-        .m_b_valid_o         (buffered_b_valid      ),
-        .m_b_ready_i         (buffered_b_ready      ),
-        .m_r_o               (buffered_r            ),
-        .m_r_valid_o         (buffered_r_valid      ),
-        .m_r_ready_i         (buffered_r_ready      )
+        .m_rsp_o               (rx_rsp_head            ),
+        .m_rsp_valid_o         (rx_rsp_valid      ),
+        .m_rsp_ready_i         (rx_rsp_ready      ),
+        .m_dat_o               (rx_dat_head            ),
+        .m_dat_valid_o         (rx_dat_valid      ),
+        .m_dat_ready_i         (rx_dat_ready      )
+    );
+    nmu_rx_channel_assign #(
+        .NUM_DAT_VC (NUM_DAT_VC)
+    ) i_rx_channel_assign (
+        .clk_i         (clk),
+        .rst_n_i       (rst_n_i),
+        .s_rsp_i       (rx_rsp_head),
+        .s_rsp_valid_i (rx_rsp_valid),
+        .s_rsp_ready_o (rx_rsp_ready),
+        .s_dat_i       (rx_dat_head),
+        .s_dat_valid_i (rx_dat_valid),
+        .s_dat_ready_o (rx_dat_ready),
+        .m_b_o         (buffered_b),
+        .m_b_valid_o   (buffered_b_valid),
+        .m_b_ready_i   (buffered_b_ready),
+        .m_r_o         (buffered_r),
+        .m_r_valid_o   (buffered_r_valid),
+        .m_r_ready_i   (buffered_r_ready)
     );
     nmu_response_depacketize #(
         .B_REG_TYPE (REG_TYPE),
@@ -127,7 +149,7 @@ module tb_nmu_response_depacketize #(
             end
             if (credit_return !== '0) $fatal(1, "credit pulse during reset");
         end else if (fault == 0) begin
-            if (buffered_r_ready && |i_buffer.r_valid && !buffered_r_valid) $fatal(1, "avoidable R output bubble");
+            if (buffered_r_ready && |i_rx_channel_assign.r_valid && !buffered_r_valid) $fatal(1, "avoidable R output bubble");
             if (held && (!r_valid || r !== held_r)) $fatal(1, "stalled R changed");
             held = r_valid && !r_ready; held_r = r;
             if (!$onehot0(credit_return)) $fatal(1, "multiple DAT pops");
@@ -169,7 +191,7 @@ module tb_nmu_response_depacketize #(
     always @(negedge rst_n_i) begin
         #1ps;
         if (i_buffer.credit_return_reg !== '0 ||
-            i_buffer.b_empty !== 1'b1 || i_buffer.r_empty !== 1'b1 ||
+            i_buffer.rsp_empty !== 1'b1 ||
             i_buffer.dat_empty !== '1)
             $fatal(1, "Response FIFO/credit reset waited for a clock edge");
     end
@@ -220,6 +242,42 @@ module tb_nmu_response_depacketize #(
             @(negedge clk);
         end while (!drained);
         if (recoveries == 0 || parallel_ingress == 0) $fatal(1, "vacuous full/parallel coverage");
+        // Shared RSP head blocks the opposite AXI class, but not independent DAT.
+        if (REG_TYPE == 0) begin : rsp_head_wait
+            int start_b, start_r, start_dat;
+            start_b = total_b;
+            start_r = rd_cnt[NUM_DAT_VC];
+            start_dat = rd_cnt[FIRST_VC];
+            b_ready = 0;
+            set_rsp(0); @(negedge clk);
+            set_rsp(1); @(negedge clk); rsp_valid = 0;
+            set_dat(FIRST_VC); @(negedge clk); dat_valid = 0;
+            repeat (4) @(negedge clk);
+            if (total_b != start_b || rd_cnt[NUM_DAT_VC] != start_r ||
+                !i_buffer.rsp_full || rsp_ready || !buffered_b_valid)
+                $fatal(1, "RSP bypassed blocked B head");
+            if (rd_cnt[FIRST_VC] != start_dat+1)
+                $fatal(1, "blocked RSP B head blocked DAT");
+            b_ready = 1;
+            repeat (4) @(negedge clk);
+            if (total_b != start_b+1 || rd_cnt[NUM_DAT_VC] != start_r+1)
+                $fatal(1, "B-head recovery lost RSP response");
+
+            start_b = total_b;
+            start_r = rd_cnt[NUM_DAT_VC];
+            r_ready = 0;
+            set_rsp(1); @(negedge clk);
+            set_rsp(0); @(negedge clk); rsp_valid = 0;
+            repeat (4) @(negedge clk);
+            if (total_b != start_b || rd_cnt[NUM_DAT_VC] != start_r ||
+                !i_buffer.rsp_full || rsp_ready || buffered_b_valid)
+                $fatal(1, "RSP bypassed blocked R head");
+            r_ready = 1;
+            repeat (4) @(negedge clk);
+            if (total_b != start_b+1 || rd_cnt[NUM_DAT_VC] != start_r+1)
+                $fatal(1, "R-head recovery lost RSP response");
+            $display("PASS shared RSP head wait: B/R, R/B, independent DAT, full/recovery");
+        end
         begin : throughput
             int sent, cycles, start_r;
             sent = 0; cycles = 0; start_r = total_r;

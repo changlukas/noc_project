@@ -303,7 +303,7 @@ behavior. Defaults below are the shipped values.
 | READ_ROB_ENABLED | 1 | {0,1} | RTL `generate if`: Normal R RoB or RoB-less per-ID ordering-domain counters |
 | NMU_MAX_TXNS_PER_ID | 32 | 1..256 | Per-ID order-list depth |
 | NMU_QUEUE_DEPTH [current model] | 16 | 1..1024 | Single-clock AxiSlavePort AW/W/AR/B/R queues |
-| NMU_DEPKT_Q_DEPTH [model/legacy] | 16 | 1..1024 | NMU RTL instead uses B_RX_FIFO_DEPTH and R_RX_FIFO_DEPTH, default 32 |
+| NMU_DEPKT_Q_DEPTH [model/legacy] | 16 | 1..1024 | NMU RTL instead uses RSP_RX_FIFO_DEPTH, default 32 |
 | NMU_ARBITER_FIFO_DEPTH [current model] | 4 | 1..64 | Wormhole per-input and VC pending queues; not target NI VC storage |
 | AW_SAM_REG_TYPE | 0 | {0,1,2} | AW decode-to-RoB slice: bypass, simple register, full skid |
 | AR_SAM_REG_TYPE | 0 | {0,1,2} | AR decode-to-RoB slice, independently selected |
@@ -621,7 +621,7 @@ For the integrator: this block does not order responses across different AXI IDs
 
 The RTL request path is ID remap, AW/W/AR input CDC FIFOs, SAM and ordering admission, write context, packet encoding, channel/VC assignment, then REQ and per-write-VC DAT output FIFOs. Encoding itself contains no transaction FIFO. One AW context is retained until the final W beat enters its output slice. The next AW may replace it on that cycle. External AW outstanding capacity still includes the input FIFO and ID/order tables.
 
-The response path is independent B/control-R and per-read-VC DAT input FIFOs, R beat selection, response decoding, ordering/ROB, B/R output CDC FIFOs, then ID restoration. Input-buffer channel decode only selects storage. Pack/unpack output slices are optional and default to bypass. ROB storage is separate from transport FIFO capacity.
+The response path is shared raw RSP and per-read-VC DAT input FIFOs, channel assignment, response decoding, ordering/ROB, B/R output CDC FIFOs, then ID restoration. RSP B/control-R selection occurs only after the shared FIFO. A blocked RSP head holds later RSP flits. Pack/unpack output slices are optional and default to bypass. ROB storage is separate from transport FIFO capacity.
 
 | NMU top parameter | Default | Meaning |
 |---|---|---|
@@ -630,7 +630,7 @@ The response path is independent B/control-R and per-read-VC DAT input FIFOs, R 
 | `B_FIFO_DEPTH`, `R_FIFO_DEPTH` | `AXI_FIFO_DEPTH` | Independently configurable RX output CDC FIFO depths |
 | `REQ_FIFO_DEPTH` | 32 | Encoded REQ output FIFO entries |
 | `DAT_TX_FIFO_DEPTH` | 32 | Encoded DAT output FIFO entries per active write VC |
-| `B_RX_FIFO_DEPTH`, `R_RX_FIFO_DEPTH` | 32 | RSP input B and control-R FIFO entries |
+| `RSP_RX_FIFO_DEPTH` | 32 | Shared raw RSP input FIFO entries |
 | `DAT_RX_VC_DEPTH` | 32 | DAT input entries per active read VC, matching upstream advertised credit |
 | `REQ_AW_REG_TYPE`, `REQ_W_REG_TYPE`, `REQ_AR_REG_TYPE` | 0 | Independent REQ encoding output slices |
 | `DAT_AW_REG_TYPE`, `DAT_W_REG_TYPE` | 0 | Independent DAT encoding output slices |

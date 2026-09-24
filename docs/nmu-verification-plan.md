@@ -196,7 +196,7 @@ is non-conforming follow-on work and is not accepted as target RTL evidence.
 | N1-DAT-03 | continuous DAT Write with simultaneous REQ and returning DAT Read pressure | ingress ready and egress credits remain separate; each direction makes progress when its own authority is available |
 | N1-DAT-04 | long all-credit-zero interval followed by exact returns | the blocked ordered sequence drains exactly once and all counters return to their seeded values |
 | N1-RSP-01 | B and R heads release together while both AXI ready signals toggle independently | same-cycle valid is observed; each channel transfers exactly its predicted sequence |
-| N1-RSP-02 | sustained RSP and DAT Read input, alternating which class FIFO is near full | neither physical input creates head-of-line blocking in the other |
+| N1-RSP-02 | sustained RSP and DAT Read input, alternating which class FIFO is near full | RSP and DAT retain separate input capacity; downstream R backpressure can block both read sources |
 | N1-RSP-03 | B and NarrowR contend on RSP while DataR arrives on DAT | RSP bandwidth is shared only before depacketization; DataR is independent and B/R output order remains legal |
 | N1-RSP-04 | simultaneous request issue, response arrival, and AXI retirement | state changes are acceptance-qualified; no channel waits for an unrelated handshake |
 
@@ -502,3 +502,7 @@ the required accepted events is not package evidence.
 ### RTL buffer placement acceptance (2026-09-24)
 
 Validate pack/unpack output slices at types 0/1/2, hold under backpressure, reset with occupied buffers, independent VC progress while one VC lacks credit, and exact credit conservation. Reuse focused injection/response tests and the co-simulation memory checker. Default transport depths are 32; directed capacity tests must generate enough outstanding work or explicitly select smaller depths. Do not weaken full/recovery checks when increasing default capacity. See `archive/nmu-buffer-pipeline/architecture.md` for the parameter contract.
+
+### Shared RSP input FIFO acceptance (2026-09-24)
+
+The RX correction uses one raw RSP input FIFO before channel assignment. The focused response test must prove B-head and R-head blocking of later RSP entries, full/backpressure recovery, DAT progress behind a blocked RSP B head, stall stability, reset flush and registered credit conservation. User-requested validation is limited to this focused test and control/data burst read/write plus cross_id_out_of_order co-simulation. The older full buffer-placement regression is historical evidence, not a rerun requirement for this correction.

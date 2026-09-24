@@ -350,7 +350,8 @@ reset behavior, proposed replacement, DV evidence, and license impact must first
 | `nmu/nmu_rob` | decoded AW/AR and returning B/R metadata -> ordered request/response streams | Per-ID order lists, B/R slot pools, `READ_ROB_ENABLED` behavior, ordering tags, collective admission |
 | `nmu/request_packetize/request_packetize` | ordered AXI request records and W context -> encoded REQ/DAT channels | Combinational field mapping and optional output slices; no transaction FIFO |
 | `nmu/channel_assign/request_buffer` | assigned REQ/DAT flits -> NoC link | REQ and per-write-VC DAT output FIFOs; credit-qualified DAT arbitration |
-| `nmu/response_depacketize/response_buffer` | RX RSP ready/valid and RX DAT credit -> selected B/R flits | Independent B/control-R and per-read-VC DAT input FIFOs, beat arbitration and credit return |
+| `nmu/response_depacketize/response_buffer` | RX RSP ready/valid and RX DAT credit -> raw FIFO heads | Shared RSP and per-read-VC DAT input FIFOs, credit return after DAT pop |
+| `nmu/channel_assign/rx_channel_assign` | Raw RSP/DAT FIFO heads -> selected B/R flits | RSP head decode, R beat arbitration, no payload FIFO |
 | `nmu/response_depacketize/response_depacketize` | selected B/R flits -> decoded AXI response records | Combinational reconstruction and optional B/R output slices |
 | `nmu/nmu` | production faces above | Parameter guards and child wiring only; no duplicate queue or transaction state |
 

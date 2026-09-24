@@ -29,8 +29,11 @@ sources:
   - nmu/ordering/reorder_storage.sv
   - nmu/ordering/ordering.sv
   - nmu/channel_assign/channel_assign.sv
+  - nmu/request_path/write_context.sv
+  - nmu/channel_assign/request_buffer.sv
   - nmu/request_packetize/request_packetize.sv
   - nmu/response_depacketize/response_buffer.sv
+  - nmu/channel_assign/rx_channel_assign.sv
   - nmu/response_depacketize/response_depacketize.sv
   - nmu/response_path/response_path.sv
   - nmu/top/nmu.sv

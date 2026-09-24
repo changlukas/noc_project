@@ -211,14 +211,20 @@ addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_depacket
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_depacketize/m_r_ready_i
 endSubGroup "Depacketize"
 addSubGroup "RX B FIFO" -e FALSE
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_rsp_fifo/data_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_rsp_fifo/push_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_rsp_fifo/full_o
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_rsp_fifo/data_o
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_rsp_fifo/pop_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_rsp_fifo/empty_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_b_fifo/data_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_b_fifo/push_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_b_fifo/full_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_b_fifo/data_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_b_fifo/pop_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_b_fifo/empty_o
 endSubGroup "RX B FIFO"
 addSubGroup "RX control R FIFO" -e FALSE
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_r_fifo/data_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_r_fifo/push_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_r_fifo/full_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_r_fifo/data_o
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_r_fifo/pop_i
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/i_r_fifo/empty_o
 endSubGroup "RX control R FIFO"
 addSubGroup "Ordering retirement" -e FALSE
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/s_b_i
@@ -248,20 +254,8 @@ addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffe
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/dat_pop
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/dat_full
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/dat_empty
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/s_rsp_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/s_rsp_valid_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/s_rsp_ready_o
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/s_dat_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/s_dat_valid_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/s_dat_ready_o
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/m_b_o
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/m_b_valid_o
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/m_b_ready_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/m_r_o
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/m_r_valid_o
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/m_r_ready_i
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/r_valid
-addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_channel_assign/r_ready
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/r_valid
+addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_rx_buffer/r_ready
 endSubGroup "DAT receive credits"
 addSubGroup "B storage" -e FALSE
 addSignal -h 15 -UNSIGNED -HEX /tb_nmu_standalone/dut/i_response_path/i_ordering/i_b_storage/alloc_valid_i

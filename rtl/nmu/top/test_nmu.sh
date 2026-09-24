@@ -65,6 +65,7 @@ task_sources=(
     "$task_root/rtl/nmu/channel_assign/request_buffer.sv"
     "$task_root/rtl/nmu/request_packetize/request_packetize.sv"
     "$task_root/rtl/nmu/response_depacketize/response_buffer.sv"
+    "$task_root/rtl/nmu/channel_assign/rx_channel_assign.sv"
     "$task_root/rtl/nmu/response_depacketize/response_depacketize.sv"
     "$task_root/rtl/nmu/response_fifo/response_fifo.sv"
     "$task_root/rtl/nmu/response_path/response_path.sv"
