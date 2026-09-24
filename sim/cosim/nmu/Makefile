@@ -13,7 +13,7 @@ prepare:
 lint: prepare
 	cd "$(OUT)" && verilator --lint-only --timing --assert -Wno-fatal -f files.f --top-module tb_nmu_cosim
 sync: prepare
-	python3 "$(ROOT)/sim/tools/sync_nmu_workstation.py" --source "$(OUT)" --remote-dir /home/mingwei/noc_project/nmu-cosim
+	python3 "$(ROOT)/sim/tools/sync_nmu_workstation.py" --source "$(OUT)" --remote-dir /home/mingwei/noc_project/nmu-standalone/cosim
 
 compile run sim regress run_wave corrupt nWave: prepare
 	$(MAKE) -C "$(OUT)" $@ CASE=$(CASE)

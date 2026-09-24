@@ -70,7 +70,7 @@ No Router RTL, NSU RTL, full mesh, collective traffic, compute workload, same-di
 
 ## Approved platform organization
 
-Use sim/cosim/nmu/, top tb_nmu_cosim, and workstation /home/mingwei/noc_project/nmu-cosim/. Keep sim/standalone/nmu/ and shared sim/test_patterns/. Initial AXI/NoC clocks match and use existing two-stage reset synchronization. No intentional stalls outside explicit backpressure cases. User approved implementation; issue remains open until user accepts results.
+Use sim/cosim/nmu/, top tb_nmu_cosim, and workstation /home/mingwei/noc_project/nmu-standalone/cosim/. Keep sim/standalone/nmu/ and shared sim/test_patterns/. Initial AXI/NoC clocks match and use existing two-stage reset synchronization. No intentional stalls outside explicit backpressure cases. User approved implementation; issue remains open until user accepts results.
 
 ## VCS functional acceptance (2026-09-23)
 
@@ -84,7 +84,7 @@ This is initial functional acceptance only. Partial-strobe holes, FIXED/WRAP bur
 
 Local focused C++ tests: 6 passed. Final Python sim/tools suite: 598 passed after correcting three existing whitespace-sensitive source assertions. No functional RTL or required check was removed. Final request_rand, corruption and FSDB-enabled data_write_burst checks also pass.
 
-Implementation and evidence: sim/cosim/nmu/ and docs/archive/nmu-cosim-84/report.md on branch feat/nmu-cosim-84 (implementation commit 23d38e8d), synchronized to /home/mingwei/noc_project/nmu-cosim. Issue remains OPEN pending user acceptance and the remaining coverage.
+Implementation and evidence: sim/cosim/nmu/ and docs/archive/nmu-cosim-84/report.md on branch feat/nmu-cosim-84 (implementation commit 23d38e8d), synchronized to /home/mingwei/noc_project/nmu-standalone/cosim. Issue remains OPEN pending user acceptance and the remaining coverage.
 
 ## Additional user-approved acceptance: PASS
 

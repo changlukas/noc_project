@@ -1,0 +1,3 @@
+docker exec -w /workspace noc-kv-dev python3 -m pytest sim/tools/test_standalone_clean.py -q
+4 passed in 0.17s
+Python compilation: package_nmu_standalone.py and collect.py PASS

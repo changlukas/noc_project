@@ -17,7 +17,7 @@ Prepare with `make prepare` in this directory, using an existing standalone depe
 On be16:
 
 ```sh
-cd /home/mingwei/noc_project/nmu-cosim
+cd /home/mingwei/noc_project/nmu-standalone/cosim
 make run CASE=ctrl_write_single
 make sim CASE=request_rand
 make regress

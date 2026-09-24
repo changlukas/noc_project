@@ -96,12 +96,8 @@ def package(run_dir, output, directory=False, block_patterns=None, id_width=8):
         shutil.copy2(repo / "sim/standalone/nmu/config.mk", root / "script/config.mk")
         (root / "script/nWaveLog").mkdir()
         shutil.copy2(repo / "sim/standalone/nmu/signals.rc", root / "script/nWaveLog/signals.rc")
-        (root / "Makefile").write_text(
-            ".DEFAULT_GOAL := help\n"
-            ".PHONY: help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report clean dat_regress in_order_perf out_of_order_perf mixed_perf list\n"
-            "help compile run sim regress block_regress legacy_regress run_wave run_wave_view nWave view fault report clean dat_regress in_order_perf out_of_order_perf mixed_perf:\n"
-            "\t$(MAKE) --no-print-directory -C script $@\n"
-            "list:\n\t@cat pattern_list.txt\n")
+        shutil.copy2(repo / "sim/standalone/nmu/workstation.mk", root / "Makefile")
+        shutil.copy2(repo / "sim/standalone/nmu/workstation-layout.md", root / "LAYOUT.md")
         descriptions = {
             "ctrl_write_single": "Single control write",
             "ctrl_read_single": "Single control read",

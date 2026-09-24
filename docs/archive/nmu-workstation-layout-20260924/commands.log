@@ -1,0 +1,104 @@
+[0;36m=== [0mWelcome ICL.R BE Workstation [ [0;32mbe16[0m ] [0;36m===[0m
+
+[0;36m*[0m e-Photon C-Shell/Python Starter [ [0;33m2015.12.12[0m ][0m
+[0;36m*[0m Alias Name Loader [ [0;33m2015.11.17[0m ][0m
+[0;36m*[0m EDA Tools Manager [ [0;33m2018.05.08[0m ][0m
+[0;36m*[0m User's Define Tools Environment [ [0;33m2018.05.08[0m ][0m
+
+[0;36m*[0m Your space [0;36m[0m is under quota [0m
+
+NMU standalone control/data/random patterns
+
+First run (compile + simulate): make run CASE=ctrl_write_burst
+After compilation (reuse binary): make sim CASE=ctrl_write_burst
+Shared scenarios (5-12): MODE=control|data|rand, default control
+Random example: make sim CASE=same_id_outstanding MODE=rand SEED=7
+Fixed ctrl_*/data_* cases select their own mode; request_rand mixes both.
+Full matrix: make regress
+Waveform: make run_wave CASE=ctrl_write_burst
+Display this list: make list
+
+ 1. ctrl_write_single
+    Single control write
+ 2. ctrl_read_single
+    Single control read
+ 3. ctrl_write_burst
+    Control write bursts: SIZE, FIXED/INCR/WRAP, WSTRB, LAST
+ 4. ctrl_read_burst
+    Control read bursts: SIZE, FIXED/INCR/WRAP, lanes, LAST
+ 5. same_id_in_order
+    Same ID, requests and responses in order
+ 6. same_id_outstanding
+    Same ID, multiple outstanding transactions
+ 7. multi_id_outstanding
+    Multiple IDs and outstanding transactions
+ 8. cross_id_out_of_order
+    Out-of-order responses across IDs
+ 9. same_id_cross_dst_reorder
+    Same ID across destinations, B/R reordering
+10. outstanding_full_recover
+    Capacity pressure and recovery, including ID remap reuse
+11. backpressure
+    REQ and AXI response stalls
+12. reset_inflight
+    Coordinated reset with transactions in flight
+13. data_write_single
+    Single data write
+14. data_write_burst
+    Data write bursts: SIZE, FIXED/INCR/WRAP, WSTRB, LAST
+15. data_read_single
+    Single data read
+16. data_read_burst
+    Data read bursts: full data bus, beat count, LAST
+17. ctrl_rand
+    Seeded control requests
+18. data_rand
+    Seeded data requests
+19. request_rand
+    Seeded mixed control/data requests
+
+Default simulator: VCS. Local override: SIMULATOR=verilator.
+AW/W/AR use the original axi_file_master.run(); no TB outstanding cap.
+Changing CASE reuses the binary. Changing DUT settings or WAVE may need compilation.
+Pattern ID width must match the compiled DUT.
+Legacy traffic patterns: neighbor, uniform_random, hotspot, directed.
+Run legacy suite: make legacy_regress
+ctrl_write_single
+ctrl_read_single
+ctrl_write_burst
+ctrl_read_burst
+same_id_in_order
+same_id_outstanding
+multi_id_outstanding
+data_write_single
+data_write_burst
+data_read_single
+data_read_burst
+ctrl_rand
+data_rand
+request_rand
+ctrl_backpressure
+ctrl_capacity_recover
+ctrl_partial_write
+ctrl_read_write
+data_backpressure
+data_capacity_recover
+data_partial_write
+data_read_write
+make --no-print-directory -C cosim run_wave
+make run WAVE=1 CASE=data_read_write
+python3 run.py --binary "/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_669883983ccc/simv" --case "data_read_write" --report "/home/mingwei/noc_project/nmu-standalone/cosim/build/report_wave1" --wave
+mkdir: cannot create directory ‘/local/mingwei’: No such file or directory
+chmod: cannot access ‘/local/mingwei’: No such file or directory
+l: Command not found.
+ln: failed to create symbolic link ‘/home/mingwei/tmp’: File exists
+TERM environment variable not set.
+RuntimeError: Bad magic number in .pyc file
+make: Warning: File `Makefile' has modification time 100 s in the future
+make: warning:  Clock skew detected.  Your build may be incomplete.
+make: Warning: File `Makefile' has modification time 100 s in the future
+make: warning:  Clock skew detected.  Your build may be incomplete.
+make: Warning: File `Makefile' has modification time 100 s in the future
+make[2]: Warning: File `/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_669883983ccc/simv' has modification time 103 s in the future
+make[2]: warning:  Clock skew detected.  Your build may be incomplete.
+make: warning:  Clock skew detected.  Your build may be incomplete.

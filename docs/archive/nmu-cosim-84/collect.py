@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 
 REMOTE = r"""import base64,glob,hashlib,json,os
-root='/home/mingwei/noc_project/nmu-cosim'
+root='/home/mingwei/noc_project/nmu-standalone/cosim'
 os.chdir(root)
 names=['SHA256SUMS','constants.yml','profile.yml','patterns/cases.list','pattern.txt','acceptance-final.log']
 names+=glob.glob('build/report_wave*/*.log')+glob.glob('build/report_wave*/source-SHA256SUMS')
