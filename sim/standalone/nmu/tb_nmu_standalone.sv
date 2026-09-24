@@ -114,7 +114,7 @@ module tb_nmu_standalone #(
         tx_credit <= '0;
         if (!noc_rst_n) begin
             for (int vc = 0; vc < ni_params_pkg::NUM_DAT_VC; vc++)
-                rx_available[vc] = ni_params_pkg::NOC_ROUTER_VC_DEPTH;
+                rx_available[vc] = dut.DAT_RX_VC_DEPTH;
         end else begin
             if (dat_valid) tx_credit[int'(tx_dat.header[VC_ID_LSB +: VC_ID_WIDTH])] <= 1'b1;
             for (int vc = 0; vc < ni_params_pkg::NUM_DAT_VC; vc++)
@@ -748,7 +748,7 @@ module tb_nmu_standalone #(
         if ($value$plusargs("perf_trace=%s", path)) begin
             perf_fd = $fopen(path, "w");
             if (perf_fd == 0) $fatal(1, "cannot open performance trace");
-            $fdisplay(perf_fd, "cycle,aw_v,aw_r,w_v,w_r,ar_v,ar_r,b_v,b_r,r_v,r_r,fifo_aw_v,fifo_aw_r,fifo_w_v,fifo_w_r,fifo_ar_v,fifo_ar_r,pkt_aw_v,pkt_aw_r,pkt_w_v,pkt_w_r,pkt_ar_v,pkt_ar_r,req_v,req_r,req_ch,dat_v,dat_ch,rsp_v,rsp_r,rx_dat_v,owner_empty,owner_full,cw_full,dw_full,ar_full,aw_admit,ar_admit,db_v,db_r,dr_v,dr_r,ob_v,ob_r,or_v,or_r,b_free,r_free,b_sel,r_sel,b_direct,r_direct,b_fill_ready,r_fill_ready,b_tagged,r_tagged,b_id,r_id,b_retire_id,r_retire_id,b_pending,r_pending,remap_state,remap_aw_v,remap_aw_r,remap_ar_v,remap_ar_r,wr_exists,wr_exists_full,wr_full,rd_exists,rd_exists_full,rd_full");
+            $fdisplay(perf_fd, "cycle,aw_v,aw_r,w_v,w_r,ar_v,ar_r,b_v,b_r,r_v,r_r,fifo_aw_v,fifo_aw_r,fifo_w_v,fifo_w_r,fifo_ar_v,fifo_ar_r,pkt_aw_v,pkt_aw_r,pkt_w_v,pkt_w_r,pkt_ar_v,pkt_ar_r,req_v,req_r,req_ch,dat_v,dat_ch,rsp_v,rsp_r,rx_dat_v,wr_context_empty,wr_context_active,req_fifo_full,dat_full_mask,dat_empty_mask,aw_admit,ar_admit,db_v,db_r,dr_v,dr_r,ob_v,ob_r,or_v,or_r,b_free,r_free,b_sel,r_sel,b_direct,r_direct,b_fill_ready,r_fill_ready,b_tagged,r_tagged,b_id,r_id,b_retire_id,r_retire_id,b_pending,r_pending,remap_state,remap_aw_v,remap_aw_r,remap_ar_v,remap_ar_r,wr_exists,wr_exists_full,wr_full,rd_exists,rd_exists_full,rd_full");
         end
     end
     always @(posedge noc_clk) begin
@@ -793,11 +793,11 @@ module tb_nmu_standalone #(
                 rsp_valid,
                 rsp_ready,
                 rx_dat_valid,
-                dut.i_request_path.i_packetize.owner_empty,
-                dut.i_request_path.i_packetize.owner_full,
-                dut.i_request_path.i_packetize.narrow_w_full,
-                dut.i_request_path.i_packetize.data_w_full,
-                dut.i_request_path.i_packetize.ar_full,
+                !dut.i_request_path.i_write_context.active_reg,
+                dut.i_request_path.i_write_context.active_reg,
+                dut.i_request_path.i_tx_buffer.req_full,
+                dut.i_request_path.i_tx_buffer.dat_full,
+                dut.i_request_path.i_tx_buffer.dat_empty,
                 dut.i_response_path.i_ordering.aw_can_accept,
                 dut.i_response_path.i_ordering.ar_can_accept,
                 dut.i_response_path.decoded_b_valid,

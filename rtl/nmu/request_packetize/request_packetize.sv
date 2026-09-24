@@ -4,9 +4,13 @@
 `timescale 1ns / 1ps
 `default_nettype none
 
-// Packetize REQ/DAT independently; accepted AW order determines W ownership.
+// Combinational flit encoding with optional per-channel output registers.
 module nmu_request_packetize #(
-    parameter int unsigned                               FIFO_DEPTH = ni_params_pkg::NOC_FIFO_DEPTH,
+    parameter int unsigned REQ_AW_REG_TYPE                           = 0,
+    parameter int unsigned REQ_W_REG_TYPE                            = 0,
+    parameter int unsigned REQ_AR_REG_TYPE                           = 0,
+    parameter int unsigned DAT_AW_REG_TYPE                           = 0,
+    parameter int unsigned DAT_W_REG_TYPE                            = 0,
     parameter logic [ni_flit_pkg::SRC_ID_WIDTH-1:0]      SRC_ID      = '0,
     parameter logic [ni_flit_pkg::SRC_PORT_ID_WIDTH-1:0] SRC_PORT_ID = '0
 ) (
@@ -15,6 +19,8 @@ module nmu_request_packetize #(
     input  wire ni_types_pkg::nmu_aw_request_t                                    s_aw_i,
     input  wire logic                                                             s_aw_valid_i,
     output wire logic                                                             s_aw_ready_o,
+    input  wire ni_types_pkg::nmu_aw_request_t                                    s_w_aw_i,
+    input  wire logic                            [ni_flit_pkg::AXI_LEN_WIDTH-1:0] s_w_beat_i,
     input  wire ni_signals_pkg::axi_w_t                                           s_w_i,
     input  wire logic                                                             s_w_valid_i,
     output wire logic                                                             s_w_ready_o,
@@ -32,35 +38,15 @@ module nmu_request_packetize #(
 
     localparam logic [ni_flit_pkg::AXI_BURST_WIDTH-1:0] AXI_BURST_INCR = 2'b01;
     localparam logic [ni_flit_pkg::AXI_BURST_WIDTH-1:0] AXI_BURST_WRAP = 2'b10;
-    if (FIFO_DEPTH < 2 || (FIFO_DEPTH & (FIFO_DEPTH-1)) != 0) begin : gen_invalid_fifo_depth
-        initial $fatal(0, "Error: FIFO_DEPTH must be a power of two >= 2 (instance %m)");
-    end
     typedef struct packed {
         ni_signals_pkg::axi_w_t                                         axi;
         ni_types_pkg::nmu_aw_request_t                                  owner;
         logic                          [ni_flit_pkg::AXI_LEN_WIDTH-1:0] beat_index;
     } write_beat_t;
 
-    logic                               [ni_flit_pkg::AXI_LEN_WIDTH-1:0] owner_beat_index_reg, owner_beat_index_next;
-    wire ni_types_pkg::nmu_aw_request_t                                  owner_head;
-    wire logic                                                           owner_full, owner_empty;
-    wire ni_types_pkg::nmu_aw_request_t                                  narrow_aw_head;
-    wire logic                                                           narrow_aw_full, narrow_aw_empty;
-    wire ni_types_pkg::nmu_aw_request_t                                  data_aw_head;
-    wire logic                                                           data_aw_full, data_aw_empty;
-    wire ni_types_pkg::nmu_ar_request_t                                  ar_head;
-    wire logic                                                           ar_full, ar_empty;
-    wire write_beat_t                                                    narrow_w_head;
-    wire logic                                                           narrow_w_full, narrow_w_empty;
-    wire write_beat_t                                                    data_w_head;
-    wire logic                                                           data_w_full, data_w_empty;
-    wire write_beat_t write_beat = '{
-        axi: s_w_i, owner: owner_head, beat_index: owner_beat_index_reg
-    };
-    wire logic aw_is_data = s_aw_i.meta.route.domain.is_data;
-    wire logic aw_accept = s_aw_valid_i && s_aw_ready_o;
-    wire logic w_accept = s_w_valid_i && s_w_ready_o;
-    wire logic ar_accept = s_ar_valid_i && s_ar_ready_o;
+    wire write_beat_t write_beat = '{axi: s_w_i, owner: s_w_aw_i, beat_index: s_w_beat_i};
+    wire aw_is_data = s_aw_i.meta.route.domain.is_data;
+    wire w_is_data = s_w_aw_i.meta.route.domain.is_data;
     function automatic logic [ni_flit_pkg::HEADER_WIDTH-1:0] make_header(
         input logic [ni_flit_pkg::AXI_CH_WIDTH-1:0] axi_ch,
         input ni_types_pkg::nmu_request_t meta,
@@ -137,7 +123,7 @@ module nmu_request_packetize #(
                       ni_flit_pkg::NOC_NARROW_DATA_WIDTH)-1:0] lane;
         value = '0;
         if (narrow) begin
-            beat_bytes  = (ni_params_pkg::AXI_ADDR_WIDTH+1)'(1) << beat.owner.axi.awsize;
+            beat_bytes = (ni_params_pkg::AXI_ADDR_WIDTH+1)'(1) << beat.owner.axi.awsize;
             burst_beats = (ni_flit_pkg::AXI_LEN_WIDTH+1)'(beat.owner.axi.awlen) +
                 (ni_flit_pkg::AXI_LEN_WIDTH+1)'(1);
             wrap_bytes = beat_bytes * burst_beats;
@@ -167,169 +153,114 @@ module nmu_request_packetize #(
         return value;
     endfunction
 
-    assign s_aw_ready_o = rst_n_i && !owner_full &&
-        (aw_is_data ? !data_aw_full : !narrow_aw_full);
-    assign s_w_ready_o = rst_n_i && !owner_empty &&
-        (owner_head.meta.route.domain.is_data ? !data_w_full : !narrow_w_full);
-    assign s_ar_ready_o = rst_n_i && !ar_full;
-
-    // Candidate order: REQ AW/W/AR and DAT AW/W.
     ni_flit_pkg::req_flit_t [NUM_NMU_REQ_CH-1:0] req_flit;
     ni_flit_pkg::dat_flit_t [NUM_NMU_DAT_CH-1:0] dat_flit;
-    assign m_req_valid_o[NMU_REQ_AW_IDX] = rst_n_i && !narrow_aw_empty;
-    assign m_req_valid_o[NMU_REQ_W_IDX]  = rst_n_i && !narrow_w_empty;
-    assign m_req_valid_o[NMU_REQ_AR_IDX] = rst_n_i && !ar_empty;
-    assign m_dat_valid_o[NMU_DAT_AW_IDX] = rst_n_i && !data_aw_empty;
-    assign m_dat_valid_o[NMU_DAT_W_IDX]  = rst_n_i && !data_w_empty;
-    for (genvar i = 0; i < NUM_NMU_REQ_CH; i++) begin : gen_req
-        assign m_req_o[i] = m_req_valid_o[i] ? req_flit[i] : '0;
+    wire ni_flit_pkg::req_flit_t [NUM_NMU_REQ_CH-1:0] req_output;
+    wire ni_flit_pkg::dat_flit_t [NUM_NMU_DAT_CH-1:0] dat_output;
+    for (genvar n = 0; n < NUM_NMU_REQ_CH; n++) begin : gen_req_output
+        assign m_req_o[n] = m_req_valid_o[n] ? req_output[n] : '0;
     end
-    for (genvar i = 0; i < NUM_NMU_DAT_CH; i++) begin : gen_dat
-        assign m_dat_o[i] = m_dat_valid_o[i] ? dat_flit[i] : '0;
+    for (genvar n = 0; n < NUM_NMU_DAT_CH; n++) begin : gen_dat_output
+        assign m_dat_o[n] = m_dat_valid_o[n] ? dat_output[n] : '0;
     end
+    wire [NUM_NMU_REQ_CH-1:0] req_valid, req_ready;
+    wire [NUM_NMU_DAT_CH-1:0] dat_valid, dat_ready;
+    assign req_valid[NMU_REQ_AW_IDX] = rst_n_i && s_aw_valid_i && !aw_is_data;
+    assign req_valid[NMU_REQ_W_IDX]  = rst_n_i && s_w_valid_i && !w_is_data;
+    assign req_valid[NMU_REQ_AR_IDX] = rst_n_i && s_ar_valid_i;
+    assign dat_valid[NMU_DAT_AW_IDX] = rst_n_i && s_aw_valid_i && aw_is_data;
+    assign dat_valid[NMU_DAT_W_IDX]  = rst_n_i && s_w_valid_i && w_is_data;
+    assign s_aw_ready_o              = rst_n_i && (aw_is_data ? dat_ready[NMU_DAT_AW_IDX] : req_ready[NMU_REQ_AW_IDX]);
+    assign s_w_ready_o               = rst_n_i && (w_is_data ? dat_ready[NMU_DAT_W_IDX] : req_ready[NMU_REQ_W_IDX]);
+    assign s_ar_ready_o              = rst_n_i && req_ready[NMU_REQ_AR_IDX];
     always_comb begin
-        req_flit                        = '0;
-        dat_flit                        = '0;
+        req_flit = '0;
+        dat_flit = '0;
         req_flit[NMU_REQ_AW_IDX].header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_NarrowAw),
-            narrow_aw_head.meta, narrow_aw_head.collective_op, narrow_aw_head.collective_mask,
-            '0, !narrow_aw_head.meta.ordering_req, 1'b0);
-        req_flit[NMU_REQ_AW_IDX].payload = ni_flit_pkg::AW_WIDTH'(pack_aw(narrow_aw_head));
+            s_aw_i.meta, s_aw_i.collective_op, s_aw_i.collective_mask,
+            '0, !s_aw_i.meta.ordering_req, 1'b0);
+        req_flit[NMU_REQ_AW_IDX].payload = ni_flit_pkg::AW_WIDTH'(pack_aw(s_aw_i));
         req_flit[NMU_REQ_W_IDX].header   = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_NarrowW),
-            narrow_w_head.owner.meta, narrow_w_head.owner.collective_op, narrow_w_head.owner.collective_mask,
-            '0, !narrow_w_head.owner.meta.ordering_req, narrow_w_head.axi.wlast);
-        req_flit[NMU_REQ_W_IDX].payload = ni_flit_pkg::AW_WIDTH'(pack_w(narrow_w_head, 1'b1));
+            write_beat.owner.meta, write_beat.owner.collective_op, write_beat.owner.collective_mask,
+            '0, !write_beat.owner.meta.ordering_req, write_beat.axi.wlast);
+        req_flit[NMU_REQ_W_IDX].payload = ni_flit_pkg::AW_WIDTH'(pack_w(write_beat, 1'b1));
         req_flit[NMU_REQ_AR_IDX].header = make_header(ni_flit_pkg::AXI_CH_WIDTH'(
-            ar_head.meta.route.domain.is_data ? ni_flit_pkg::AXI_CH_DataAr : ni_flit_pkg::AXI_CH_NarrowAr),
-            ar_head.meta, '0, '0, '0, 1'b0, 1'b1);
-        req_flit[NMU_REQ_AR_IDX].payload = ni_flit_pkg::AW_WIDTH'(pack_ar(ar_head));
+            s_ar_i.meta.route.domain.is_data ? ni_flit_pkg::AXI_CH_DataAr : ni_flit_pkg::AXI_CH_NarrowAr),
+            s_ar_i.meta, '0, '0, '0, 1'b0, 1'b1);
+        req_flit[NMU_REQ_AR_IDX].payload = ni_flit_pkg::AW_WIDTH'(pack_ar(s_ar_i));
         dat_flit[NMU_DAT_AW_IDX].header  = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataAw),
-            data_aw_head.meta, data_aw_head.collective_op, data_aw_head.collective_mask,
-            '0, !data_aw_head.meta.ordering_req, 1'b0);
-        dat_flit[NMU_DAT_AW_IDX].payload = pack_aw(data_aw_head);
+            s_aw_i.meta, s_aw_i.collective_op, s_aw_i.collective_mask,
+            '0, !s_aw_i.meta.ordering_req, 1'b0);
+        dat_flit[NMU_DAT_AW_IDX].payload = pack_aw(s_aw_i);
         dat_flit[NMU_DAT_W_IDX].header   = make_header(ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataW),
-            data_w_head.owner.meta, data_w_head.owner.collective_op, data_w_head.owner.collective_mask,
-            '0, !data_w_head.owner.meta.ordering_req, data_w_head.axi.wlast);
-        dat_flit[NMU_DAT_W_IDX].payload = pack_w(data_w_head, 1'b0);
+            write_beat.owner.meta, write_beat.owner.collective_op, write_beat.owner.collective_mask,
+            '0, !write_beat.owner.meta.ordering_req, write_beat.axi.wlast);
+        dat_flit[NMU_DAT_W_IDX].payload = pack_w(write_beat, 1'b0);
     end
-    cc_fifo #(
-        .Depth       (FIFO_DEPTH                    ),
-        .FallThrough (1'b0                          ),
-        .data_t      (ni_types_pkg::nmu_aw_request_t)
-    ) i_owner_fifo (
-        .clk_i   (clk_i                  ),
-        .rst_ni  (rst_n_i                ),
-        .clr_i   (1'b0                   ),
-        .flush_i (1'b0                   ),
-        .full_o  (owner_full             ),
-        .empty_o (owner_empty            ),
-        .usage_o (                       ),
-        .data_i  (s_aw_i                 ),
-        .push_i  (aw_accept              ),
-        .data_o  (owner_head             ),
-        .pop_i   (w_accept && s_w_i.wlast)
+    stream_register #(
+        .REG_TYPE (REQ_AW_REG_TYPE        ),
+        .data_t   (ni_flit_pkg::req_flit_t)
+    ) i_req_aw_reg (
+        .clk_i     (clk_i                                                    ),
+        .rst_n_i   (rst_n_i                                                  ),
+        .s_data_i  (req_valid[NMU_REQ_AW_IDX] ? req_flit[NMU_REQ_AW_IDX] : '0),
+        .s_valid_i (req_valid[NMU_REQ_AW_IDX]                                ),
+        .s_ready_o (req_ready[NMU_REQ_AW_IDX]                                ),
+        .m_data_o  (req_output[NMU_REQ_AW_IDX]                               ),
+        .m_valid_o (m_req_valid_o[NMU_REQ_AW_IDX]                            ),
+        .m_ready_i (m_req_ready_i[NMU_REQ_AW_IDX]                            )
     );
-
-    cc_fifo #(
-        .Depth       (FIFO_DEPTH                    ),
-        .FallThrough (1'b0                          ),
-        .data_t      (ni_types_pkg::nmu_aw_request_t)
-    ) i_narrow_aw_fifo (
-        .clk_i   (clk_i                                                         ),
-        .rst_ni  (rst_n_i                                                       ),
-        .clr_i   (1'b0                                                          ),
-        .flush_i (1'b0                                                          ),
-        .full_o  (narrow_aw_full                                                ),
-        .empty_o (narrow_aw_empty                                               ),
-        .usage_o (                                                              ),
-        .data_i  (s_aw_i                                                        ),
-        .push_i  (aw_accept && !aw_is_data                                      ),
-        .data_o  (narrow_aw_head                                                ),
-        .pop_i   (m_req_valid_o[NMU_REQ_AW_IDX] && m_req_ready_i[NMU_REQ_AW_IDX])
+    stream_register #(
+        .REG_TYPE (REQ_W_REG_TYPE         ),
+        .data_t   (ni_flit_pkg::req_flit_t)
+    ) i_req_w_reg (
+        .clk_i     (clk_i                                                  ),
+        .rst_n_i   (rst_n_i                                                ),
+        .s_data_i  (req_valid[NMU_REQ_W_IDX] ? req_flit[NMU_REQ_W_IDX] : '0),
+        .s_valid_i (req_valid[NMU_REQ_W_IDX]                               ),
+        .s_ready_o (req_ready[NMU_REQ_W_IDX]                               ),
+        .m_data_o  (req_output[NMU_REQ_W_IDX]                              ),
+        .m_valid_o (m_req_valid_o[NMU_REQ_W_IDX]                           ),
+        .m_ready_i (m_req_ready_i[NMU_REQ_W_IDX]                           )
     );
-
-    cc_fifo #(
-        .Depth       (FIFO_DEPTH                    ),
-        .FallThrough (1'b0                          ),
-        .data_t      (ni_types_pkg::nmu_aw_request_t)
-    ) i_data_aw_fifo (
-        .clk_i   (clk_i                                                         ),
-        .rst_ni  (rst_n_i                                                       ),
-        .clr_i   (1'b0                                                          ),
-        .flush_i (1'b0                                                          ),
-        .full_o  (data_aw_full                                                  ),
-        .empty_o (data_aw_empty                                                 ),
-        .usage_o (                                                              ),
-        .data_i  (s_aw_i                                                        ),
-        .push_i  (aw_accept && aw_is_data                                       ),
-        .data_o  (data_aw_head                                                  ),
-        .pop_i   (m_dat_valid_o[NMU_DAT_AW_IDX] && m_dat_ready_i[NMU_DAT_AW_IDX])
+    stream_register #(
+        .REG_TYPE (REQ_AR_REG_TYPE        ),
+        .data_t   (ni_flit_pkg::req_flit_t)
+    ) i_req_ar_reg (
+        .clk_i     (clk_i                                                    ),
+        .rst_n_i   (rst_n_i                                                  ),
+        .s_data_i  (req_valid[NMU_REQ_AR_IDX] ? req_flit[NMU_REQ_AR_IDX] : '0),
+        .s_valid_i (req_valid[NMU_REQ_AR_IDX]                                ),
+        .s_ready_o (req_ready[NMU_REQ_AR_IDX]                                ),
+        .m_data_o  (req_output[NMU_REQ_AR_IDX]                               ),
+        .m_valid_o (m_req_valid_o[NMU_REQ_AR_IDX]                            ),
+        .m_ready_i (m_req_ready_i[NMU_REQ_AR_IDX]                            )
     );
-
-    cc_fifo #(
-        .Depth       (FIFO_DEPTH                    ),
-        .FallThrough (1'b0                          ),
-        .data_t      (ni_types_pkg::nmu_ar_request_t)
-    ) i_ar_fifo (
-        .clk_i   (clk_i                                                         ),
-        .rst_ni  (rst_n_i                                                       ),
-        .clr_i   (1'b0                                                          ),
-        .flush_i (1'b0                                                          ),
-        .full_o  (ar_full                                                       ),
-        .empty_o (ar_empty                                                      ),
-        .usage_o (                                                              ),
-        .data_i  (s_ar_i                                                        ),
-        .push_i  (ar_accept                                                     ),
-        .data_o  (ar_head                                                       ),
-        .pop_i   (m_req_valid_o[NMU_REQ_AR_IDX] && m_req_ready_i[NMU_REQ_AR_IDX])
+    stream_register #(
+        .REG_TYPE (DAT_AW_REG_TYPE        ),
+        .data_t   (ni_flit_pkg::dat_flit_t)
+    ) i_dat_aw_reg (
+        .clk_i     (clk_i                                                    ),
+        .rst_n_i   (rst_n_i                                                  ),
+        .s_data_i  (dat_valid[NMU_DAT_AW_IDX] ? dat_flit[NMU_DAT_AW_IDX] : '0),
+        .s_valid_i (dat_valid[NMU_DAT_AW_IDX]                                ),
+        .s_ready_o (dat_ready[NMU_DAT_AW_IDX]                                ),
+        .m_data_o  (dat_output[NMU_DAT_AW_IDX]                               ),
+        .m_valid_o (m_dat_valid_o[NMU_DAT_AW_IDX]                            ),
+        .m_ready_i (m_dat_ready_i[NMU_DAT_AW_IDX]                            )
     );
-
-    cc_fifo #(
-        .Depth       (FIFO_DEPTH  ),
-        .FallThrough (1'b0        ),
-        .data_t      (write_beat_t)
-    ) i_narrow_w_fifo (
-        .clk_i   (clk_i                                                       ),
-        .rst_ni  (rst_n_i                                                     ),
-        .clr_i   (1'b0                                                        ),
-        .flush_i (1'b0                                                        ),
-        .full_o  (narrow_w_full                                               ),
-        .empty_o (narrow_w_empty                                              ),
-        .usage_o (                                                            ),
-        .data_i  (write_beat                                                  ),
-        .push_i  (w_accept && !owner_head.meta.route.domain.is_data           ),
-        .data_o  (narrow_w_head                                               ),
-        .pop_i   (m_req_valid_o[NMU_REQ_W_IDX] && m_req_ready_i[NMU_REQ_W_IDX])
+    stream_register #(
+        .REG_TYPE (DAT_W_REG_TYPE         ),
+        .data_t   (ni_flit_pkg::dat_flit_t)
+    ) i_dat_w_reg (
+        .clk_i     (clk_i                                                  ),
+        .rst_n_i   (rst_n_i                                                ),
+        .s_data_i  (dat_valid[NMU_DAT_W_IDX] ? dat_flit[NMU_DAT_W_IDX] : '0),
+        .s_valid_i (dat_valid[NMU_DAT_W_IDX]                               ),
+        .s_ready_o (dat_ready[NMU_DAT_W_IDX]                               ),
+        .m_data_o  (dat_output[NMU_DAT_W_IDX]                              ),
+        .m_valid_o (m_dat_valid_o[NMU_DAT_W_IDX]                           ),
+        .m_ready_i (m_dat_ready_i[NMU_DAT_W_IDX]                           )
     );
-
-    cc_fifo #(
-        .Depth       (FIFO_DEPTH  ),
-        .FallThrough (1'b0        ),
-        .data_t      (write_beat_t)
-    ) i_data_w_fifo (
-        .clk_i   (clk_i                                                       ),
-        .rst_ni  (rst_n_i                                                     ),
-        .clr_i   (1'b0                                                        ),
-        .flush_i (1'b0                                                        ),
-        .full_o  (data_w_full                                                 ),
-        .empty_o (data_w_empty                                                ),
-        .usage_o (                                                            ),
-        .data_i  (write_beat                                                  ),
-        .push_i  (w_accept && owner_head.meta.route.domain.is_data            ),
-        .data_o  (data_w_head                                                 ),
-        .pop_i   (m_dat_valid_o[NMU_DAT_W_IDX] && m_dat_ready_i[NMU_DAT_W_IDX])
-    );
-
-    always_comb begin
-        owner_beat_index_next = owner_beat_index_reg;
-        if (w_accept)
-            owner_beat_index_next = s_w_i.wlast ? '0 : owner_beat_index_reg + 1'b1;
-    end
-    always @(posedge clk_i or negedge rst_n_i) begin
-        if (~rst_n_i) begin
-            owner_beat_index_reg <= '0;
-        end else begin
-            owner_beat_index_reg <= owner_beat_index_next;
-        end
-    end
 endmodule
 `resetall

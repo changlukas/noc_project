@@ -1,0 +1,187 @@
+%Warning-WIDTHCONCAT: deps/common_cells/src/cc_cdc_fifo_gray.sv:296:18: Replication of more that --replication-limit 8192 is suspect: 16576
+                                                                      : ... note: In instance 'tb_nmu_cosim.dut.i_response_path.i_response_fifo.i_r_fifo.i_cc_cdc_fifo_gray.i_src.i_src_data'
+  296 |       data_q <= ('0);
+      |                  ^~
+                      ... For warning description see https://verilator.org/warn/WIDTHCONCAT?v=5.048
+                      ... Use "/* verilator lint_off WIDTHCONCAT */" and lint_on around source to disable this message.
+%Warning-WIDTHCONCAT: deps/common_cells/src/cc_cdc_fifo_gray.sv:296:18: Replication of more that --replication-limit 8192 is suspect: 18464
+                                                                      : ... note: In instance 'tb_nmu_cosim.dut.i_request_path.i_request_fifo.i_w_fifo.i_cc_cdc_fifo_gray.i_src.i_src_data'
+  296 |       data_q <= ('0);
+      |                  ^~
+%Warning-ASCRANGE: repo/sim/dv/axi-0.39.7/src/axi_intf.sv:483:17: Ascending bit range vector: left < right of bit range: [-1:0]
+                                                                : ... note: In instance 'tb_nmu_cosim.gen_nsu[3].i_nsu'
+  483 |   typedef logic [AXI_ADDR_WIDTH-1:0] addr_t;
+      |                 ^
+                   ... For warning description see https://verilator.org/warn/ASCRANGE?v=5.048
+                   ... Use "/* verilator lint_off ASCRANGE */" and lint_on around source to disable this message.
+%Warning-ASCRANGE: repo/sim/dv/axi-0.39.7/src/axi_intf.sv:484:17: Ascending bit range vector: left < right of bit range: [-1:0]
+                                                                : ... note: In instance 'tb_nmu_cosim.gen_nsu[3].i_nsu'
+  484 |   typedef logic [AXI_DATA_WIDTH-1:0] data_t;
+      |                 ^
+%Warning-ASCRANGE: repo/sim/dv/axi-0.39.7/src/axi_intf.sv:485:17: Ascending bit range vector: left < right of bit range: [-1:0]
+                                                                : ... note: In instance 'tb_nmu_cosim.gen_nsu[3].i_nsu'
+  485 |   typedef logic [AXI_STRB_WIDTH-1:0] strb_t;
+      |                 ^
+%Warning-WIDTHEXPAND: repo/sim/cosim/nmu/tb_nmu_cosim.sv:489:20: Operator ASSIGN expects 32 bits on the Assign RHS, but Assign RHS's SEL generates 4 bits.
+                                                               : ... note: In instance 'tb_nmu_cosim'
+  489 |                 ch = ingress_rsp.header[ni_flit_pkg::AXI_CH_LSB +: ni_flit_pkg::AXI_CH_WIDTH];
+      |                    ^
+                      ... For warning description see https://verilator.org/warn/WIDTHEXPAND?v=5.048
+                      ... Use "/* verilator lint_off WIDTHEXPAND */" and lint_on around source to disable this message.
+%Warning-WIDTHEXPAND: repo/sim/cosim/nmu/tb_nmu_cosim.sv:491:21: Operator ASSIGN expects 32 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+                                                               : ... note: In instance 'tb_nmu_cosim'
+  491 |                 tag = ingress_rsp.header[ni_flit_pkg::ORDERING_TAG_LSB +: ni_flit_pkg::ORDERING_TAG_WIDTH];
+      |                     ^
+%Warning-WIDTHEXPAND: repo/sim/cosim/nmu/tb_nmu_cosim.sv:492:21: Operator ASSIGN expects 32 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+                                                               : ... note: In instance 'tb_nmu_cosim'
+  492 |                 dst = ingress_rsp.header[ni_flit_pkg::SRC_ID_LSB +: ni_flit_pkg::SRC_ID_WIDTH];
+      |                     ^
+%Warning-WIDTHEXPAND: repo/sim/cosim/nmu/tb_nmu_cosim.sv:494:24: Operator ASSIGN expects 32 bits on the Assign RHS, but Assign RHS's SEL generates 3 bits.
+                                                               : ... note: In instance 'tb_nmu_cosim'
+  494 |                     id = ingress_rsp.payload[ni_flit_pkg::NARROW_R_RID_LSB +: ni_flit_pkg::NARROW_R_RID_WIDTH];
+      |                        ^
+%Warning-WIDTHEXPAND: repo/sim/cosim/nmu/tb_nmu_cosim.sv:498:24: Operator ASSIGN expects 32 bits on the Assign RHS, but Assign RHS's SEL generates 3 bits.
+                                                               : ... note: In instance 'tb_nmu_cosim'
+  498 |                     id = ingress_rsp.payload[ni_flit_pkg::B_BID_LSB +: ni_flit_pkg::B_BID_WIDTH];
+      |                        ^
+%Warning-WIDTHEXPAND: repo/sim/cosim/nmu/tb_nmu_cosim.sv:503:20: Operator ASSIGN expects 32 bits on the Assign RHS, but Assign RHS's SEL generates 3 bits.
+                                                               : ... note: In instance 'tb_nmu_cosim'
+  503 |                 id = ingress_dat.payload[ni_flit_pkg::DATA_R_RID_LSB +: ni_flit_pkg::DATA_R_RID_WIDTH];
+      |                    ^
+%Warning-WIDTHEXPAND: repo/sim/cosim/nmu/tb_nmu_cosim.sv:504:21: Operator ASSIGN expects 32 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+                                                               : ... note: In instance 'tb_nmu_cosim'
+  504 |                 tag = ingress_dat.header[ni_flit_pkg::ORDERING_TAG_LSB +: ni_flit_pkg::ORDERING_TAG_WIDTH];
+      |                     ^
+%Warning-WIDTHEXPAND: repo/sim/cosim/nmu/tb_nmu_cosim.sv:505:21: Operator ASSIGN expects 32 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+                                                               : ... note: In instance 'tb_nmu_cosim'
+  505 |                 dst = ingress_dat.header[ni_flit_pkg::SRC_ID_LSB +: ni_flit_pkg::SRC_ID_WIDTH];
+      |                     ^
+%Warning-WIDTHEXPAND: repo/sim/cosim/nmu/tb_nmu_cosim.sv:511:20: Operator ASSIGN expects 32 bits on the Assign RHS, but Assign RHS's SEL generates 3 bits.
+                                                               : ... note: In instance 'tb_nmu_cosim'
+  511 |                 id = dut.i_response_path.i_ordering.m_b_o.bid;
+      |                    ^
+%Warning-WIDTHEXPAND: repo/sim/cosim/nmu/tb_nmu_cosim.sv:517:49: Operator NEQ expects 32 bits on the RHS, but RHS's SEL generates 8 bits.
+                                                               : ... note: In instance 'tb_nmu_cosim'
+  517 |                         (txn.reorder && txn.tag != dut.i_response_path.i_ordering.s_b_i.meta.ordering_tag))
+      |                                                 ^~
+%Warning-WIDTHEXPAND: repo/sim/cosim/nmu/tb_nmu_cosim.sv:520:49: Operator NEQ expects 32 bits on the RHS, but RHS's VARXREF 'b_storage_rd_addr' generates 8 bits.
+                                                               : ... note: In instance 'tb_nmu_cosim'
+  520 |                     if (!txn.reorder || txn.tag != dut.i_response_path.i_ordering.b_storage_rd_addr)
+      |                                                 ^~
+%Warning-WIDTHTRUNC: repo/sim/cosim/nmu/tb_nmu_cosim.sv:625:17: Logical operator LOGNOT expects 1 bit on the LHS, but LHS's MEMBERSEL 'write_fd' generates 32 bits.
+                                                              : ... note: In instance 'tb_nmu_cosim'
+  625 |             if (!init_master.write_fd) $fatal(1, "Missing initialization writes");
+      |                 ^
+                     ... For warning description see https://verilator.org/warn/WIDTHTRUNC?v=5.048
+                     ... Use "/* verilator lint_off WIDTHTRUNC */" and lint_on around source to disable this message.
+%Warning-WIDTHTRUNC: repo/sim/cosim/nmu/tb_nmu_cosim.sv:622:9: Logical operator IF expects 1 bit on the If, but If's VARREF 'init_phase' generates 32 bits.
+                                                             : ... note: In instance 'tb_nmu_cosim'
+  622 |         if (init_phase) begin
+      |         ^~
+%Warning-WIDTHTRUNC: repo/sim/cosim/nmu/tb_nmu_cosim.sv:634:17: Logical operator LOGNOT expects 1 bit on the LHS, but LHS's MEMBERSEL 'read_fd' generates 32 bits.
+                                                              : ... note: In instance 'tb_nmu_cosim'
+  634 |             if (!verify_master.read_fd) $fatal(1, "Missing verification reads");
+      |                 ^
+%Warning-WIDTHTRUNC: repo/sim/cosim/nmu/tb_nmu_cosim.sv:631:9: Logical operator IF expects 1 bit on the If, but If's VARREF 'concurrent_rw' generates 32 bits.
+                                                             : ... note: In instance 'tb_nmu_cosim'
+  631 |         if (concurrent_rw) begin
+      |         ^~
+%Warning-WIDTHTRUNC: repo/sim/cosim/nmu/tb_nmu_cosim.sv:649:9: Logical operator IF expects 1 bit on the If, but If's VARREF 'init_phase' generates 32 bits.
+                                                             : ... note: In instance 'tb_nmu_cosim'
+  649 |         if (init_phase) begin
+      |         ^~
+%Warning-WIDTHTRUNC: repo/sim/cosim/nmu/tb_nmu_cosim.sv:652:9: Logical operator IF expects 1 bit on the If, but If's VARREF 'concurrent_rw' generates 32 bits.
+                                                             : ... note: In instance 'tb_nmu_cosim'
+  652 |         if (concurrent_rw) begin
+      |         ^~
+%Warning-WIDTHTRUNC: repo/sim/cosim/nmu/tb_nmu_cosim.sv:682:27: Logical operator LOGAND expects 1 bit on the LHS, but LHS's VARREF 'capacity_test' generates 32 bits.
+                                                              : ... note: In instance 'tb_nmu_cosim'
+  682 |         if (capacity_test && (b_full_cnt == 0 || wr_limit_cnt == 0 || rd_limit_cnt == 0 ||
+      |                           ^~
+%Warning-WIDTHTRUNC: repo/sim/cosim/nmu/tb_nmu_cosim.sv:684:28: Logical operator COND expects 1 bit on the Conditional Test, but Conditional Test's VARREF 'data_case' generates 32 bits.
+                                                              : ... note: In instance 'tb_nmu_cosim'
+  684 |                 (data_case ? dat_full_cnt == 0 : r_full_cnt == 0)))
+      |                            ^
+%Warning-WIDTHTRUNC: repo/sim/cosim/nmu/tb_nmu_cosim.sv:686:27: Logical operator LOGAND expects 1 bit on the LHS, but LHS's VARREF 'concurrent_rw' generates 32 bits.
+                                                              : ... note: In instance 'tb_nmu_cosim'
+  686 |         if (concurrent_rw && (overlap_cnt == 0 || w_during_read_cnt == 0 || r_during_write_cnt == 0))
+      |                           ^~
+%Warning-WIDTHEXPAND: repo/sim/cosim/nmu/tb_nmu_cosim.sv:737:54: Operator DIV expects 48 bits on the LHS, but LHS's VARREF 'AXI_DATA_WIDTH' generates 32 bits.
+                                                               : ... note: In instance 'tb_nmu_cosim'
+  737 |                 lane = int'(address % (AXI_DATA_WIDTH/8)) + byte_idx;
+      |                                                      ^
+%Warning-UNSIGNED: repo/sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv:212:37: Comparison is constant due to unsigned arithmetic
+                                                                            : ... note: In instance 'tb_nmu_cosim.dut.i_response_path.i_rx_buffer.i_r_arb'
+  212 |           assign upper_mask[i] = (i >  rr_q) ? req_d[i] : 1'b0;
+      |                                     ^
+                   ... For warning description see https://verilator.org/warn/UNSIGNED?v=5.048
+                   ... Use "/* verilator lint_off UNSIGNED */" and lint_on around source to disable this message.
+%Warning-UNSIGNED: repo/sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv:213:37: Comparison is constant due to unsigned arithmetic
+                                                                            : ... note: In instance 'tb_nmu_cosim.dut.i_response_path.i_rx_buffer.i_r_arb'
+  213 |           assign lower_mask[i] = (i <= rr_q) ? req_d[i] : 1'b0;
+      |                                     ^~
+%Warning-UNSIGNED: repo/rtl/nmu/response_depacketize/response_buffer.sv:167:34: Comparison is constant due to unsigned arithmetic
+                                                                              : ... note: In instance 'tb_nmu_cosim.dut.i_response_path.i_rx_buffer'
+  167 |                     int'(dat_vc) < RD_VC_BASE || int'(dat_vc) >= NUM_DAT_VC)
+      |                                  ^
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:322:26: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  322 |         mon_w_valid_o[i] <= #(ApplDelay) mon_w[i].valid;
+      |                          ^~
+                     ... For warning description see https://verilator.org/warn/INITIALDLY?v=5.048
+                     ... Use "/* verilator lint_off INITIALDLY */" and lint_on around source to disable this message.
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:323:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  323 |         mon_w_addr_o[i] <= #(ApplDelay) mon_w[i].addr;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:324:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  324 |         mon_w_data_o[i] <= #(ApplDelay) mon_w[i].data;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:325:23: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  325 |         mon_w_id_o[i] <= #(ApplDelay) mon_w[i].id;
+      |                       ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:326:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  326 |         mon_w_user_o[i] <= #(ApplDelay) mon_w[i].user;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:327:31: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  327 |         mon_w_beat_count_o[i] <= #(ApplDelay) mon_w[i].beat_count;
+      |                               ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:328:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  328 |         mon_w_last_o[i] <= #(ApplDelay) mon_w[i].last;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:329:26: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  329 |         mon_r_valid_o[i] <= #(ApplDelay) mon_r[i].valid;
+      |                          ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:330:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  330 |         mon_r_addr_o[i] <= #(ApplDelay) mon_r[i].addr;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:331:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  331 |         mon_r_data_o[i] <= #(ApplDelay) mon_r[i].data;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:332:23: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  332 |         mon_r_id_o[i] <= #(ApplDelay) mon_r[i].id;
+      |                       ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:333:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  333 |         mon_r_user_o[i] <= #(ApplDelay) mon_r[i].user;
+      |                         ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:334:31: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  334 |         mon_r_beat_count_o[i] <= #(ApplDelay) mon_r[i].beat_count;
+      |                               ^~
+%Warning-INITIALDLY: repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv:335:25: Non-blocking assignment '<=' in initial/final block
+                                                                     : ... This will be executed as a blocking assignment '='!
+  335 |         mon_r_last_o[i] <= #(ApplDelay) mon_r[i].last;
+      |                         ^~
+- V e r i l a t i o n   R e p o r t: Verilator 5.048 2026-04-26 rev v5.048
+- Verilator: Built from 14.959 MB sources in 101 modules, into 3.355 MB in 39 C++ files needing 0.000 MB
+- Verilator: Walltime 0.555 s (elab=0.094, cvt=0.340, bld=0.000); cpu 0.505 s on 1 threads; allocated 57.332 MB

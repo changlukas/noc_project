@@ -656,3 +656,17 @@ are retained. Cross-direction decode and ATOP arbitration are unnecessary in thi
 NMU configuration. Actual area, power and maximum frequency are [TBD] pending
 synthesis. Table lookup and downstream-ready paths remain combinational; no
 critical-path improvement is assumed without timing evidence.
+
+## NMU buffer placement and output pipeline (2026-09-24)
+
+Approved transport storage: independent AXI AW/W/AR input CDC FIFOs and B/R output CDC FIFOs, REQ TX output FIFO, DAT TX per-write-VC output FIFOs, RX B/control-R FIFOs and per-read-VC DAT FIFOs. Each depth is independently configurable at NMU top and defaults to 32 entries. ROB capacity is unchanged and excluded from transport FIFO accounting. Existing CDC primitives remain unchanged. Synchronous transport storage uses cc_fifo without fall-through.
+
+Remove the five packetizer payload queues and the duplicated AW owner queue. Retain one active write context until its final W beat enters the packetizer output slice. Accept the next AW on the same cycle as that final beat when downstream permits. This reduces metadata replication but limits address look-ahead to the current write plus any configured output slice. AW must not wait for W availability at channel assignment, because W context is established by AW acceptance. Packet locking still prevents an unrelated packet from splitting AW/W on the same network/VC.
+
+Pack and unpack use combinational transforms and existing configurable register slices, default bypass. Registered modes store data and metadata together. Added slices cost one/two payload entries per selected channel and one cycle minimum latency. Bypass lengthens combinational ready/data paths; timing and frequency remain [TBD] pending synthesis.
+
+DAT enqueue consumes local FIFO space, not downstream credit. A work-conserving round-robin output arbiter selects nonempty write VCs with credit, consumes credit only on actual transmission, and preserves each VC's order. Per-VC buffering avoids cross-VC head-of-line blocking at the output at a cost proportional to active write VCs times depth times DAT width. Upstream W association still follows AXI order and is not a same-direction bypass mechanism.
+
+RX B/control-R queues remain separate to avoid introducing response-class head-of-line blocking after reception. Their ingress decode is part of the input buffer; full field reconstruction is outside the buffer. DAT credit returns when the receive FIFO entry is released. ROB and ID tables remain stateful and unchanged.
+
+Compare storage bits and sustained transfer behavior in focused validation. No claim of area, clock frequency or universal latency improvement is made before measurement. A shared DAT FIFO was rejected because a credit-starved head VC would block otherwise eligible VCs.

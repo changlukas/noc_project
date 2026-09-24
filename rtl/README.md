@@ -348,8 +348,10 @@ reset behavior, proposed replacement, DV evidence, and license impact must first
 | `nmu/nmu_axi_cdc` | AXI slave records across ACLK <-> noc_clk | Exactly five AXI-channel CDC instances; no SAM, ordering, or packet state |
 | `nmu/sam/nmu_sam` | accepted AW/AR -> destination, port, class, collective metadata | Instantiates the shared `ni_sam` for AW and AR, performs burst-footprint and collective validation/translation; AW and AR timing cuts use `stream_register` |
 | `nmu/nmu_rob` | decoded AW/AR and returning B/R metadata -> ordered request/response streams | Per-ID order lists, B/R slot pools, `READ_ROB_ENABLED` behavior, ordering tags, collective admission |
-| `nmu/request_packetize/nmu_request_packetize` | ordered AXI request records plus Router credits -> TX REQ/TX DAT | Field mapping, global AW-to-W metadata ownership, independent REQ/DAT class FIFOs and packet locks, mode-eligible DAT VC choice, and sender credit counters; the fused leaf avoids a duplicate packetized-flit queue boundary |
-| `nmu/nmu_depacketize` | RX RSP ready/valid and RX DAT credit -> decoded AXI B/R records for `nmu_rob` | RSP class FIFO, DAT Read per-VC FIFOs and beat-level merge, channel legality/decode, and credit return |
+| `nmu/request_packetize/request_packetize` | ordered AXI request records and W context -> encoded REQ/DAT channels | Combinational field mapping and optional output slices; no transaction FIFO |
+| `nmu/channel_assign/request_buffer` | assigned REQ/DAT flits -> NoC link | REQ and per-write-VC DAT output FIFOs; credit-qualified DAT arbitration |
+| `nmu/response_depacketize/response_buffer` | RX RSP ready/valid and RX DAT credit -> selected B/R flits | Independent B/control-R and per-read-VC DAT input FIFOs, beat arbitration and credit return |
+| `nmu/response_depacketize/response_depacketize` | selected B/R flits -> decoded AXI response records | Combinational reconstruction and optional B/R output slices |
 | `nmu/nmu` | production faces above | Parameter guards and child wiring only; no duplicate queue or transaction state |
 
 ## NSU packages (Stage 3)
@@ -413,3 +415,6 @@ harness pass.
 build obtains its source order and transitive include files from that dependency; no primitive RTL
 is copied into this repository. Exact source, revision, selected modules, and license are recorded
 in the Provenance section of `docs/verification-environment.md`.
+
+
+NMU RTL transport FIFO defaults are 32 entries per channel or active VC, independently configurable. Pack/unpack slices default to bypass. The complete parameter and credit contract is in [buffer placement](../docs/archive/nmu-buffer-pipeline/architecture.md). Generated common NI defaults and C++ model queue defaults are unchanged.

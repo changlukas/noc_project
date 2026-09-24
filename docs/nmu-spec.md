@@ -196,8 +196,8 @@ current candidate set. `READ_WRITE_SPLIT` requires `DAT_NUM_VC` in {2, 4, 6, 8} 
 restricts NMU `DataAw` / `DataW` to the lower half [0, `DAT_NUM_VC/2`). `DataW` inherits
 the VC selected for its owning `DataAw` in either mode. The mode is system-wide: every
 DAT router output applies the same class mask before assigning or restamping `vc_id`.
-The target allocator reads the heads of the DAT Write class FIFO, selects only among VCs with
-Router credit, stamps `vc_id`, and has no per-VC pending queue. The current C++ model implements
+The target allocator selects among mode-eligible VCs with local output FIFO space and stamps `vc_id`.
+Each write VC has a local output FIFO. A separate link arbiter selects nonempty VCs with Router credit. The current C++ model implements
 `SHARED` only and retains per-VC pending queues; target alignment remains tracked in
 `docs/known-limitations.md`.
 
@@ -295,15 +295,15 @@ behavior. Defaults below are the shipped values.
 | NOC_RSP_FLIT_WIDTH | 126 | fixed | RSP ingress flit port |
 | NOC_DAT_FLIT_WIDTH | 633 | fixed | DAT flit ports, both directions |
 | NOC_ROUTER_VC_DEPTH | 8 | power of two, >= 2 | Router LOCAL input VC FIFO depth and NMU DAT sender-credit seed |
-| `NOC_NI_DAT_RX_VC_DEPTH` | `NOC_ROUTER_VC_DEPTH` (8) | power of two, >= 2 | NMU DataR receive FIFO depth per eligible VC and Router LOCAL sender-credit seed |
-| AXI_FIFO_DEPTH | 8 | power of two, >= 2 | Common AW/W/AR/B/R dual-clock FIFO depth |
-| `NOC_FIFO_DEPTH` | 8 | positive power of two | REQ/RSP synchronous class FIFO depth; DAT receive capacity is per VC |
+| `DAT_RX_VC_DEPTH` | 32 | power of two, >= 2 | NMU DataR receive FIFO depth per eligible VC and Router LOCAL sender-credit seed |
+| AXI_FIFO_DEPTH | 32 | power of two, >= 2 | NMU compatibility default for independently configurable AW/W/AR/B/R CDC depths |
+| `NOC_FIFO_DEPTH` [generated legacy default] | 8 | positive power of two | NMU RTL instead uses the independent transport depths below, default 32 |
 | NMU_ROB_B_DEPTH | 128 | 1..256 | B slot pool |
 | NMU_ROB_R_DEPTH | 128 | 1..256 | R slot pool |
 | READ_ROB_ENABLED | 1 | {0,1} | RTL `generate if`: Normal R RoB or RoB-less per-ID ordering-domain counters |
 | NMU_MAX_TXNS_PER_ID | 32 | 1..256 | Per-ID order-list depth |
 | NMU_QUEUE_DEPTH [current model] | 16 | 1..1024 | Single-clock AxiSlavePort AW/W/AR/B/R queues |
-| NMU_DEPKT_Q_DEPTH | 16 | 1..1024 | Depacketize B/R queues |
+| NMU_DEPKT_Q_DEPTH [model/legacy] | 16 | 1..1024 | NMU RTL instead uses B_RX_FIFO_DEPTH and R_RX_FIFO_DEPTH, default 32 |
 | NMU_ARBITER_FIFO_DEPTH [current model] | 4 | 1..64 | Wormhole per-input and VC pending queues; not target NI VC storage |
 | AW_SAM_REG_TYPE | 0 | {0,1,2} | AW decode-to-RoB slice: bypass, simple register, full skid |
 | AR_SAM_REG_TYPE | 0 | {0,1,2} | AR decode-to-RoB slice, independently selected |
@@ -616,3 +616,26 @@ Hint: the per-beat R fill (beat i of a burst lands at base+i via a per-base arri
 ### 7.2 Not guaranteed (informative)
 
 For the integrator: this block does not order responses across different AXI IDs, and does not order a read after a write to the same address issued on a different ID. Both are the upstream master's or system's concern.
+
+### NMU RTL transport buffers and output slices (2026-09-24)
+
+The RTL request path is ID remap, AW/W/AR input CDC FIFOs, SAM and ordering admission, write context, packet encoding, channel/VC assignment, then REQ and per-write-VC DAT output FIFOs. Encoding itself contains no transaction FIFO. One AW context is retained until the final W beat enters its output slice. The next AW may replace it on that cycle. External AW outstanding capacity still includes the input FIFO and ID/order tables.
+
+The response path is independent B/control-R and per-read-VC DAT input FIFOs, R beat selection, response decoding, ordering/ROB, B/R output CDC FIFOs, then ID restoration. Input-buffer channel decode only selects storage. Pack/unpack output slices are optional and default to bypass. ROB storage is separate from transport FIFO capacity.
+
+| NMU top parameter | Default | Meaning |
+|---|---|---|
+| `AXI_FIFO_DEPTH` | 32 | Compatibility default for the five AXI channel depths below |
+| `AW_FIFO_DEPTH`, `W_FIFO_DEPTH`, `AR_FIFO_DEPTH` | `AXI_FIFO_DEPTH` | Independently configurable TX input CDC FIFO depths |
+| `B_FIFO_DEPTH`, `R_FIFO_DEPTH` | `AXI_FIFO_DEPTH` | Independently configurable RX output CDC FIFO depths |
+| `REQ_FIFO_DEPTH` | 32 | Encoded REQ output FIFO entries |
+| `DAT_TX_FIFO_DEPTH` | 32 | Encoded DAT output FIFO entries per active write VC |
+| `B_RX_FIFO_DEPTH`, `R_RX_FIFO_DEPTH` | 32 | RSP input B and control-R FIFO entries |
+| `DAT_RX_VC_DEPTH` | 32 | DAT input entries per active read VC, matching upstream advertised credit |
+| `REQ_AW_REG_TYPE`, `REQ_W_REG_TYPE`, `REQ_AR_REG_TYPE` | 0 | Independent REQ encoding output slices |
+| `DAT_AW_REG_TYPE`, `DAT_W_REG_TYPE` | 0 | Independent DAT encoding output slices |
+| `B_REG_TYPE`, `R_REG_TYPE` | 0 | Independent response decoding output slices |
+
+Register types use the existing slice implementation: 0 bypass, 1 simple, 2 spill. CDC depths are powers of two and at least two. `DAT_RX_VC_DEPTH` retains that restriction. Synchronous REQ depth is a positive power of two at NMU top; the remaining synchronous output/class depths must be positive. Existing ROB defaults and generated C++ defaults are unchanged. The module defaults above override the older common NI depth defaults for this RTL integration.
+
+DAT VC assignment uses local output FIFO space. It does not consume downstream credit. The link output arbiter selects a nonempty VC with credit, preserves order within each VC, and consumes credit on the actual transmitted flit. Credit returned in the same cycle can authorize that transfer. Registered receive credit returns one cycle after the receive FIFO pop, independent of a later unpack output register or ROB retirement.

@@ -6,6 +6,8 @@ CASE ?= ctrl_write_single
 WAVE ?= 0
 MODE ?= auto
 RSP_DELAY ?= 2
+REG_TYPE ?= 0
+IO_FIFO_DEPTH ?= 32
 WAVE_RC ?= $(ROOT)/signals.rc
 CXX := /cadtools/centos/spe21.1/tools.lnx86/cdsgcc/gcc/9.3/bin/g++
 VCS ?= vcs
@@ -25,7 +27,7 @@ SV_SRC := $(shell find repo deps -name '*.sv' -o -name '*.svh') topology_pkg.sv
 ifeq ($(WAVE),1)
 WAVE_FLAGS := +define+DUMP_WAVE -P $(PLI_DIR)/novas.tab $(PLI_DIR)/pli.a
 endif
-VCS_FLAGS := -full64 -sverilog -assert svaext -override_timescale=1ns/1ps -debug_access+all -f files.f -top tb_nmu_cosim -pvalue+tb_nmu_cosim.RSP_DELAY_CYCLES=$(RSP_DELAY)
+VCS_FLAGS := -full64 -sverilog -assert svaext -override_timescale=1ns/1ps -debug_access+all -f files.f -top tb_nmu_cosim -pvalue+tb_nmu_cosim.RSP_DELAY_CYCLES=$(RSP_DELAY) -pvalue+tb_nmu_cosim.OUTPUT_REG_TYPE=$(REG_TYPE) -pvalue+tb_nmu_cosim.IO_FIFO_DEPTH=$(IO_FIFO_DEPTH)
 DPI := $(BUILD)/dpi_$(shell python3 build_key.py cpp "$(CPPFLAGS) $(CXX)")
 YAML_BUILD := $(BUILD)/yaml_$(shell python3 build_key.py yaml "$(CPPFLAGS) $(CXX)")
 SIM := $(BUILD)/vcs_wave$(WAVE)_$(shell python3 build_key.py sv "$(VCS_FLAGS) $(WAVE_FLAGS) $(DPI)")

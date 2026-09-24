@@ -1,0 +1,309 @@
+{
+  "cosim_cases": 24,
+  "totals": {
+    "writes": 1100,
+    "reads": 1076,
+    "r_beats": 5740,
+    "checked_bytes": 214709
+  },
+  "focused": [
+    {
+      "top": "tb_nmu_request_packetize",
+      "parameters": {},
+      "pass": true,
+      "log": "/home/mingwei/noc_project/nmu-standalone/cosim/build/buffer-pipeline/focused/tb_nmu_request_packetize_3cdbc907/sim.log"
+    },
+    {
+      "top": "tb_nmu_request_packetize_stall",
+      "parameters": {},
+      "pass": true,
+      "log": "/home/mingwei/noc_project/nmu-standalone/cosim/build/buffer-pipeline/focused/tb_nmu_request_packetize_stall_29fa53b4/sim.log"
+    },
+    {
+      "top": "tb_nmu_request_packetize_stress",
+      "parameters": {
+        "REG_TYPE": 0,
+        "NUM_DAT_VC": 2
+      },
+      "pass": true,
+      "log": "/home/mingwei/noc_project/nmu-standalone/cosim/build/buffer-pipeline/focused/tb_nmu_request_packetize_stress_a44ed3de/sim.log"
+    },
+    {
+      "top": "tb_nmu_request_packetize_stress",
+      "parameters": {
+        "REG_TYPE": 1,
+        "NUM_DAT_VC": 2
+      },
+      "pass": true,
+      "log": "/home/mingwei/noc_project/nmu-standalone/cosim/build/buffer-pipeline/focused/tb_nmu_request_packetize_stress_ff27de51/sim.log"
+    },
+    {
+      "top": "tb_nmu_request_packetize_stress",
+      "parameters": {
+        "REG_TYPE": 2,
+        "NUM_DAT_VC": 6,
+        "DAT_VC_MODE": 1
+      },
+      "pass": true,
+      "log": "/home/mingwei/noc_project/nmu-standalone/cosim/build/buffer-pipeline/focused/tb_nmu_request_packetize_stress_0597775d/sim.log"
+    },
+    {
+      "top": "tb_nmu_request_packetize_stress",
+      "parameters": {
+        "REG_TYPE": 0,
+        "NUM_DAT_VC": 1
+      },
+      "pass": true,
+      "log": "/home/mingwei/noc_project/nmu-standalone/cosim/build/buffer-pipeline/focused/tb_nmu_request_packetize_stress_8e94284a/sim.log"
+    },
+    {
+      "top": "tb_nmu_response_depacketize",
+      "parameters": {
+        "NUM_DAT_VC": 2,
+        "DAT_RX_VC_DEPTH": 2
+      },
+      "pass": true,
+      "log": "/home/mingwei/noc_project/nmu-standalone/cosim/build/buffer-pipeline/focused/tb_nmu_response_depacketize_cee668dd/sim.log"
+    },
+    {
+      "top": "tb_nmu_response_depacketize",
+      "parameters": {
+        "NUM_DAT_VC": 6,
+        "DAT_VC_MODE": 1,
+        "DAT_RX_VC_DEPTH": 8
+      },
+      "pass": true,
+      "log": "/home/mingwei/noc_project/nmu-standalone/cosim/build/buffer-pipeline/focused/tb_nmu_response_depacketize_afca59a0/sim.log"
+    },
+    {
+      "top": "tb_nmu_request_packetize_stress",
+      "parameters": {
+        "AW_REG_TYPE": 2,
+        "W_REG_TYPE": 0,
+        "AR_REG_TYPE": 1
+      },
+      "pass": true,
+      "log": "/home/mingwei/noc_project/nmu-standalone/cosim/build/buffer-pipeline/focused/tb_nmu_request_packetize_stress_dd45d929/sim.log"
+    },
+    {
+      "top": "tb_nmu_request_packetize_stress",
+      "parameters": {
+        "AW_REG_TYPE": 0,
+        "W_REG_TYPE": 2,
+        "AR_REG_TYPE": 1
+      },
+      "pass": true,
+      "log": "/home/mingwei/noc_project/nmu-standalone/cosim/build/buffer-pipeline/focused/tb_nmu_request_packetize_stress_84096f54/sim.log"
+    }
+  ],
+  "runs": [
+    {
+      "name": "mixed",
+      "command": [
+        "python3",
+        "test_pipeline.py",
+        "--mixed-only"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "regress",
+      "command": [
+        "make",
+        "regress",
+        "WAVE=1"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "corrupt",
+      "command": [
+        "make",
+        "corrupt",
+        "WAVE=1"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "compile-reg1",
+      "command": [
+        "make",
+        "compile",
+        "REG_TYPE=1"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "reg1_ctrl_write_burst",
+      "command": [
+        "make",
+        "sim",
+        "REG_TYPE=1",
+        "CASE=ctrl_write_burst"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "reg1_data_write_burst",
+      "command": [
+        "make",
+        "sim",
+        "REG_TYPE=1",
+        "CASE=data_write_burst"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "reg1_request_rand",
+      "command": [
+        "make",
+        "sim",
+        "REG_TYPE=1",
+        "CASE=request_rand"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "reg1_same_id_cross_dst_reorder",
+      "command": [
+        "make",
+        "sim",
+        "REG_TYPE=1",
+        "CASE=same_id_cross_dst_reorder"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "reg1_data_backpressure",
+      "command": [
+        "make",
+        "sim",
+        "REG_TYPE=1",
+        "CASE=data_backpressure"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "compile-reg2",
+      "command": [
+        "make",
+        "compile",
+        "REG_TYPE=2"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "reg2_ctrl_write_burst",
+      "command": [
+        "make",
+        "sim",
+        "REG_TYPE=2",
+        "CASE=ctrl_write_burst"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "reg2_data_write_burst",
+      "command": [
+        "make",
+        "sim",
+        "REG_TYPE=2",
+        "CASE=data_write_burst"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "reg2_request_rand",
+      "command": [
+        "make",
+        "sim",
+        "REG_TYPE=2",
+        "CASE=request_rand"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "reg2_same_id_cross_dst_reorder",
+      "command": [
+        "make",
+        "sim",
+        "REG_TYPE=2",
+        "CASE=same_id_cross_dst_reorder"
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "reg2_data_backpressure",
+      "command": [
+        "make",
+        "sim",
+        "REG_TYPE=2",
+        "CASE=data_backpressure"
+      ],
+      "returncode": 0
+    }
+  ],
+  "standalone": [
+    {
+      "case": "data_write_burst",
+      "command": [
+        "make",
+        "run_wave",
+        "WAVE=1",
+        "CASE=data_write_burst"
+      ],
+      "pass_result": true
+    },
+    {
+      "case": "same_id_cross_dst_reorder",
+      "command": [
+        "make",
+        "sim",
+        "WAVE=1",
+        "CASE=same_id_cross_dst_reorder"
+      ],
+      "pass_result": true
+    },
+    {
+      "case": "request_rand",
+      "command": [
+        "make",
+        "sim",
+        "WAVE=1",
+        "CASE=request_rand"
+      ],
+      "pass_result": true
+    }
+  ],
+  "rc": [
+    {
+      "platform": "cosim",
+      "signals": 509,
+      "missing": [],
+      "wave": "/home/mingwei/noc_project/nmu-standalone/cosim/build/report_wave1/data_write_burst.fsdb",
+      "sha256": "7505620a3be9e233efff7dea23971ffb18e05aa3babdf943abfd3b8a90751081"
+    },
+    {
+      "platform": "standalone",
+      "signals": 284,
+      "missing": [],
+      "wave": "/home/mingwei/noc_project/nmu-standalone/build/vcs_i8_n5_b128_r1_wave1/waves/data_write_burst_auto_s1.fsdb",
+      "sha256": "3fef8c7500393aca30697ef27633c406ce6553c4885ba04e53e337a548696208"
+    }
+  ],
+  "python_passed": 602,
+  "corruption_detected": true,
+  "unchanged_dpi": {
+    "path": "build/dpi_3d223268b2ff/libnmu_cmodel.so",
+    "sha256": "b4eacba6139b468691c890de702c5ec92a712b5f470b7f5f08653c7a42f99196",
+    "size": 12988400,
+    "mtime": 1790170879.3665185
+  },
+  "storage_bits": {
+    "req": 4352,
+    "dat": 40512,
+    "context": 185,
+    "old_at_depth32": 68800,
+    "old_at_depth8": 17200
+  }
+}

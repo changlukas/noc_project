@@ -1,0 +1,17 @@
+{
+  "files": [
+    "rtl/nmu/channel_assign/channel_assign.sv",
+    "rtl/nmu/channel_assign/request_buffer.sv",
+    "rtl/nmu/request_fifo/request_fifo.sv",
+    "rtl/nmu/request_packetize/request_inject_tb_dut.sv",
+    "rtl/nmu/request_packetize/request_packetize.sv",
+    "rtl/nmu/request_path/request_path.sv",
+    "rtl/nmu/request_path/write_context.sv",
+    "rtl/nmu/response_depacketize/response_buffer.sv",
+    "rtl/nmu/response_depacketize/response_depacketize.sv",
+    "rtl/nmu/response_fifo/response_fifo.sv",
+    "rtl/nmu/response_path/response_path.sv",
+    "rtl/nmu/top/nmu.sv"
+  ],
+  "check": "Lexical token equality against exact tested source blobs; see format-equivalence.json"
+}

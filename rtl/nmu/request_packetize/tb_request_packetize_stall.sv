@@ -76,18 +76,28 @@ module tb_nmu_request_packetize_stall;
     endtask
 
 
+    int dat_count = 0;
+    always @(posedge clk) begin
+        if (!rst_n_i) dat_count = 0;
+        else if (m_dat_valid) begin
+            if (int'(m_dat.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB]) !=
+                    (dat_count == 0 ? ni_flit_pkg::AXI_CH_DataAw : ni_flit_pkg::AXI_CH_DataW))
+                $fatal(1, "post-reset DAT order mismatch");
+            dat_count++;
+        end
+    end
     ni_flit_pkg::req_flit_t held_req;
     always @(negedge rst_n_i) begin
         #1ps;
         if ({dut.i_channel_assign.req_write_lock_reg,
              dut.i_channel_assign.dat_write_lock_reg} !== '0 ||
-            dut.i_packetize.owner_empty !== 1'b1)
+            dut.i_write_context.active_reg !== 1'b0)
             $fatal(1, "Request state did not reset asynchronously");
     end
     for (genvar vc = 0; vc < NUM_DAT_VC; vc++) begin : gen_reset_check
         always @(negedge rst_n_i) begin
             #1ps;
-            if (int'(dut.i_channel_assign.gen_credit[vc].i_credit.credit_o) !== ROUTER_VC_DEPTH)
+            if (int'(dut.i_tx_buffer.gen_dat_vc[vc].gen_write.i_credit.credit_o) !== ROUTER_VC_DEPTH)
                 $fatal(1, "DAT credits did not reset asynchronously");
         end
     end
@@ -143,13 +153,9 @@ module tb_nmu_request_packetize_stall;
         if (m_req_valid || m_dat_valid) $fatal(1, "reset retained queued traffic");
         push_aw(1, 8'h32, 2, 48'h1000);
         push_w(512'hfeed);
-        #1;
-        if (!m_dat_valid) $fatal(1, "reset did not reseed DAT credits");
-        @(posedge clk); #1;
-        if (!m_dat_valid || int'(m_dat.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB]) != ni_flit_pkg::AXI_CH_DataW)
-            $fatal(1, "post-reset DAT write did not progress");
-        @(posedge clk); #1;
-        if (m_dat_valid || m_req_valid) $fatal(1, "reset replayed stale traffic");
+        repeat (3) @(negedge clk);
+        if (dat_count != 2 || m_dat_valid || m_req_valid)
+            $fatal(1, "reset did not drain exactly one DAT write");
         $display("PASS: REQ selection holds both winners, drains exactly, and flushes on reset");
         $finish;
     end

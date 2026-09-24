@@ -52,6 +52,14 @@ def prepare(rtl_stage, out):
                      "sim/cosim/nmu/tb_nmu_cosim.sv"):
         copy(ROOT / relative, "repo/" + relative)
         source_list.append("repo/" + relative)
+    for relative in (
+        "rtl/nmu/request_packetize/request_inject_tb_dut.sv",
+        "rtl/nmu/request_packetize/tb_request_packetize.sv",
+        "rtl/nmu/request_packetize/tb_request_packetize_stall.sv",
+        "rtl/nmu/request_packetize/tb_request_packetize_stress.sv",
+        "rtl/nmu/response_depacketize/tb_response_depacketize.sv",
+    ):
+        copy(ROOT / relative, "repo/" + relative)
     topo = ROOT / "sim/cosim/nmu/topology.yml"
     (out / "topology_pkg.sv").write_text(emit_sam_pkg(yaml.safe_load(topo.read_text())))
     (out / "files.f").write_text("\n".join(source_list) + "\n")
@@ -102,6 +110,7 @@ def prepare(rtl_stage, out):
                                    emitter.emit(constants_path, "cosim"))
     copy(ROOT / "sim/cosim/nmu/script/Makefile", "Makefile")
     copy(ROOT / "sim/cosim/nmu/script/run.py", "run.py")
+    copy(ROOT / "sim/cosim/nmu/script/test_pipeline.py", "test_pipeline.py")
     copy(ROOT / "sim/cosim/nmu/script/build_key.py", "build_key.py")
     names = [path for path in out.rglob("*") if path.is_file() and
              path.name != "SHA256SUMS" and "build" not in path.relative_to(out).parts]

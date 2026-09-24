@@ -221,8 +221,23 @@ def test_cosim_additional_memory_phases(tmp_path):
                 for old_beat, new_beat in zip(old["beats"], new["beats"]):
                     assert int(old_beat.split()[0], 16) ^ int(new_beat.split()[0], 16) == (1 << 512)-1
         if name.endswith("capacity_recover"):
-            assert len(writes) == len(reads) == 64
-            assert sum(t["len"]+1 for t in reads) == 512
+            lines = (root / "write.txt").read_text().splitlines()
+            pos = 0
+            for txn in writes:
+                assert int(lines[pos + 11]) < 256
+                pos += 12 + txn["len"] + 1
+            assert len(writes) == len(reads) == 320
+            assert sum(t["len"]+1 for t in reads) == 320 * (8 if name.startswith("data") else 4)
+            assert {t["addr"] >> 32 for t in writes} == {0, 1, 2, 3}
+            assert len({t["id"] for t in writes}) == 8
+            for ident in {t["id"] for t in writes}:
+                stream = [t for t in writes if t["id"] == ident]
+                assert len(stream) > 32
+                assert len({t["addr"] >> 32 for t in stream}) == 1
+            assert len(addresses(writes)) == sum((t["len"]+1)*(1 << t["size"]) for t in writes)
+            for t in writes:
+                local = t["addr"] % (1 << 32)
+                assert local + (t["len"]+1)*(1 << t["size"]) <= (0x2000000 if name.startswith("data") else 0x2001000)
 
 
 @pytest.mark.parametrize("mode", ["control", "data", "rand"])

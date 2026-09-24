@@ -75,6 +75,22 @@ module tb_nmu_request_packetize;
         s_w_valid = 1'b0;
     endtask
 
+    int dat_count = 0;
+    always @(posedge clk) begin
+        if (rst_n_i && m_dat_valid) begin
+            if (dat_count % 2 == 0) begin
+                if (m_dat.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB] != ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataAw) ||
+                        m_dat.header[ni_flit_pkg::DST_ID_MSB:ni_flit_pkg::DST_ID_LSB] != 8'h32)
+                    $fatal(1, "DAT AW mismatch");
+            end else begin
+                if (m_dat.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB] != ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataW) ||
+                        m_dat.payload[ni_flit_pkg::DATA_W_WDATA_MSB:ni_flit_pkg::DATA_W_WDATA_LSB] != (dat_count == 1 ? 512'hfeed_face : 512'h1234_5678) ||
+                        !m_dat.header[ni_flit_pkg::FLIT_TAIL_LSB])
+                    $fatal(1, "DAT W mismatch");
+            end
+            dat_count++;
+        end
+    end
     initial begin
         logic [511:0] narrow_data;
         s_aw              = '0;
@@ -100,28 +116,22 @@ module tb_nmu_request_packetize;
 
         m_req_ready = 1'b1;
         #1;
-        assert (m_req_valid && m_dat_valid)
+        assert (m_req_valid)
             else $fatal(1, "REQ and DAT AW were not independently available");
         assert (m_req.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB] ==
                 ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_NarrowAw));
-        assert (m_dat.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB] ==
-                ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataAw));
         assert (m_req.header[ni_flit_pkg::SRC_ID_MSB:ni_flit_pkg::SRC_ID_LSB] == 8'h12);
-        assert (m_dat.header[ni_flit_pkg::DST_ID_MSB:ni_flit_pkg::DST_ID_LSB] == 8'h32);
         @(posedge clk);
         #1;
-        assert (m_req_valid && m_dat_valid)
+        assert (m_req_valid)
             else $fatal(1, "REQ and DAT W did not transfer in parallel");
         assert (m_req.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB] ==
                 ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_NarrowW));
-        assert (m_dat.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB] ==
-                ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataW));
         assert (m_req.payload[ni_flit_pkg::NARROW_W_WDATA_MSB:
                               ni_flit_pkg::NARROW_W_WDATA_LSB] ==
                 64'h0123_4567_89ab_cdef)
             else $fatal(1, "narrow W did not extract the AW-addressed lane");
-        assert (m_req.header[ni_flit_pkg::FLIT_TAIL_LSB] &&
-                m_dat.header[ni_flit_pkg::FLIT_TAIL_LSB]);
+        assert (m_req.header[ni_flit_pkg::FLIT_TAIL_LSB]);
         @(posedge clk);
 
         // A Data-class AR always rides REQ and is a single-flit packet.
@@ -160,10 +170,10 @@ module tb_nmu_request_packetize;
         dat_credit_return[0] = 1'b1;
         #1;
         assert (m_dat_valid);
-        assert (m_dat.header[ni_flit_pkg::AXI_CH_MSB:ni_flit_pkg::AXI_CH_LSB] ==
-                ni_flit_pkg::AXI_CH_WIDTH'(ni_flit_pkg::AXI_CH_DataW));
         @(posedge clk);
 
+        @(negedge clk); dat_credit_return = '0;
+        if (dat_count != 4) $fatal(1, "DAT transfer count mismatch");
         $display("PASS: NMU request packetization and independent REQ/DAT scheduling");
         $finish;
     end

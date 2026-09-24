@@ -3,7 +3,8 @@
 module tb_nmu_response_depacketize #(
     parameter int NUM_DAT_VC = 2,
     parameter int DAT_VC_MODE = 0,
-    parameter int DAT_RX_VC_DEPTH = 2
+    parameter int DAT_RX_VC_DEPTH = 2,
+    parameter int REG_TYPE = 0
 );
     import ni_flit_pkg::*;
     import ni_types_pkg::*;
@@ -19,6 +20,7 @@ module tb_nmu_response_depacketize #(
     logic b_valid, r_valid, b_ready = 1, r_ready = 0;
     int wr_cnt [NUM_DAT_VC+1], rd_cnt [NUM_DAT_VC+1];
     int credit [NUM_DAT_VC];
+    int fifo_rd_cnt [NUM_DAT_VC];
     int total_r = 0, total_b = 0, recoveries = 0, parallel_ingress = 0;
     logic [NUM_DAT_VC-1:0] expected_credit = '0;
     nmu_r_response_t held_r;
@@ -26,12 +28,15 @@ module tb_nmu_response_depacketize #(
     int fault = 0;
     initial void'($value$plusargs("fault=%d", fault));
 
-    nmu_response_depacketize #(
+    rsp_flit_t buffered_b;
+    dat_flit_t buffered_r;
+    wire buffered_b_valid, buffered_b_ready, buffered_r_valid, buffered_r_ready;
+    nmu_response_buffer #(
         .RSP_FIFO_DEPTH  (2              ),
         .NUM_DAT_VC      (NUM_DAT_VC     ),
         .DAT_VC_MODE     (DAT_VC_MODE    ),
         .DAT_RX_VC_DEPTH (DAT_RX_VC_DEPTH)
-    ) dut (
+    ) i_buffer (
         .clk_i               (clk          ),
         .rst_n_i             (rst_n_i      ),
         .s_rsp_i             (rsp          ),
@@ -40,12 +45,22 @@ module tb_nmu_response_depacketize #(
         .s_dat_i             (dat          ),
         .s_dat_valid_i       (dat_valid    ),
         .dat_credit_return_o (credit_return),
-        .m_b_o               (b            ),
-        .m_b_valid_o         (b_valid      ),
-        .m_b_ready_i         (b_ready      ),
-        .m_r_o               (r            ),
-        .m_r_valid_o         (r_valid      ),
-        .m_r_ready_i         (r_ready      )
+        .m_b_o               (buffered_b            ),
+        .m_b_valid_o         (buffered_b_valid      ),
+        .m_b_ready_i         (buffered_b_ready      ),
+        .m_r_o               (buffered_r            ),
+        .m_r_valid_o         (buffered_r_valid      ),
+        .m_r_ready_i         (buffered_r_ready      )
+    );
+    nmu_response_depacketize #(
+        .B_REG_TYPE (REG_TYPE),
+        .R_REG_TYPE (REG_TYPE)
+    ) dut (
+        .clk_i (clk), .rst_n_i (rst_n_i),
+        .s_b_i (buffered_b), .s_b_valid_i (buffered_b_valid), .s_b_ready_o (buffered_b_ready),
+        .s_r_i (buffered_r), .s_r_valid_i (buffered_r_valid), .s_r_ready_o (buffered_r_ready),
+        .m_b_o (b), .m_b_valid_o (b_valid), .m_b_ready_i (b_ready),
+        .m_r_o (r), .m_r_valid_o (r_valid), .m_r_ready_i (r_ready)
     );
 
     function automatic nmu_r_response_t expected(input int vc, input int seq);
@@ -106,10 +121,13 @@ module tb_nmu_response_depacketize #(
             for (int n = 0; n <= NUM_DAT_VC; n++) begin
                 wr_cnt[n] = 0; rd_cnt[n] = 0;
             end
-            for (int n = 0; n < NUM_DAT_VC; n++) credit[n] = DAT_RX_VC_DEPTH;
+            for (int n = 0; n < NUM_DAT_VC; n++) begin
+                credit[n] = DAT_RX_VC_DEPTH;
+                fifo_rd_cnt[n] = 0;
+            end
             if (credit_return !== '0) $fatal(1, "credit pulse during reset");
         end else if (fault == 0) begin
-            if (r_ready && |dut.i_buffer.r_valid && !r_valid) $fatal(1, "avoidable R output bubble");
+            if (buffered_r_ready && |i_buffer.r_valid && !buffered_r_valid) $fatal(1, "avoidable R output bubble");
             if (held && (!r_valid || r !== held_r)) $fatal(1, "stalled R changed");
             held = r_valid && !r_ready; held_r = r;
             if (!$onehot0(credit_return)) $fatal(1, "multiple DAT pops");
@@ -121,8 +139,12 @@ module tb_nmu_response_depacketize #(
             end
             if (credit_return !== expected_credit) $fatal(1, "registered credit mismatch");
             expected_credit = '0;
-            if (r_valid && r_ready && r.meta.is_data)
-                expected_credit[int'(r.axi.rid)] = 1'b1;
+            if (buffered_r_valid && buffered_r_ready &&
+                    buffered_r.header[AXI_CH_LSB +: AXI_CH_WIDTH] == AXI_CH_WIDTH'(AXI_CH_DataR)) begin
+                vc = int'(buffered_r.header[VC_ID_LSB +: VC_ID_WIDTH]);
+                expected_credit[vc] = 1'b1;
+                fifo_rd_cnt[vc]++;
+            end
             for (int n = 0; n < NUM_DAT_VC; n++) credit[n] += int'(credit_return[n]);
             if (dat_valid) begin
                 vc = int'(dat.header[VC_ID_LSB +: VC_ID_WIDTH]);
@@ -134,7 +156,7 @@ module tb_nmu_response_depacketize #(
             if (rsp_valid && rsp_ready && rsp.header[AXI_CH_LSB +: AXI_CH_WIDTH] == AXI_CH_WIDTH'(AXI_CH_NarrowR))
                 wr_cnt[NUM_DAT_VC]++;
             for (int n = FIRST_VC; n < NUM_DAT_VC; n++)
-                if (credit[n] + wr_cnt[n] - rd_cnt[n] + int'(expected_credit[n]) != DAT_RX_VC_DEPTH)
+                if (credit[n] + wr_cnt[n] - fifo_rd_cnt[n] + int'(expected_credit[n]) != DAT_RX_VC_DEPTH)
                     $fatal(1, "per-VC conservation mismatch");
             if (b_valid && b_ready) begin
                 if (b.axi.bid != 3 || b.axi.bresp != 2 || !b.meta.is_data || !b.meta.ordering_req)
@@ -146,9 +168,9 @@ module tb_nmu_response_depacketize #(
 
     always @(negedge rst_n_i) begin
         #1ps;
-        if (dut.i_buffer.credit_return_reg !== '0 ||
-            dut.i_buffer.b_empty !== 1'b1 || dut.i_buffer.r_empty !== 1'b1 ||
-            dut.i_buffer.dat_empty !== '1)
+        if (i_buffer.credit_return_reg !== '0 ||
+            i_buffer.b_empty !== 1'b1 || i_buffer.r_empty !== 1'b1 ||
+            i_buffer.dat_empty !== '1)
             $fatal(1, "Response FIFO/credit reset waited for a clock edge");
     end
 

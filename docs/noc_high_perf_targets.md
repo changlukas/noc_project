@@ -66,7 +66,7 @@ carries three per-network widths (default REQ 136 b, RSP 126 b, DAT 633 b) over 
 - **Routing method**: XY (dimension-order) routing
 - **Flow control**: per-VC credit on inter-router DAT links and NI-to-Router DAT injection;
   ready/valid on REQ/RSP and Router-to-NI DAT ejection
-- **Virtual channels**: DAT defaults to 2 and supports 1 to 8 (`VC_ID` 3-bit); VC FIFOs exist only in routers
+- **Virtual channels**: DAT defaults to 2 and supports 1 to 8 (`VC_ID` 3-bit); NMU DAT output and input buffers are per active VC; Router VC buffers remain separate
 - **Clocking**: GALS, router clock domain decoupled from IP clock domain, NoC target 1 GHz
 - **AXI conformance**: AXI4 (IHI 0022H), supporting single transfer, burst transfer (INCR / WRAP / FIXED), outstanding transactions, out-of-order completion across IDs (same-ID order preserved), and read data interleaving
 - **Ordering**: per-ID reorder buffer, 32 entries (`ordering_tag` 5-bit), preserves AXI same-ID order, up to 32 outstanding transactions per ID

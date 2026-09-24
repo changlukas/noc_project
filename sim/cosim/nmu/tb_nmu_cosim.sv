@@ -1,7 +1,9 @@
 `timescale 1ns / 1ps
 `include "axi/assign.svh"
 module tb_nmu_cosim #(
-    parameter int unsigned RSP_DELAY_CYCLES = 0
+    parameter int unsigned RSP_DELAY_CYCLES = 0,
+    parameter int unsigned OUTPUT_REG_TYPE = 0,
+    parameter int unsigned IO_FIFO_DEPTH = 32
 );
     import ni_params_pkg::*;
     localparam int NUM_PORTS = 5;
@@ -11,6 +13,18 @@ module tb_nmu_cosim #(
     localparam int ROUTER_Y = 1;
     localparam int MESH_DIM = 4;
     localparam int NMU_ID   = (ROUTER_Y << ni_flit_pkg::X_WIDTH) | ROUTER_X;
+    localparam int NUM_WR_VC = NOC_DAT_VC_MODE == 1 ? NUM_DAT_VC/2 : NUM_DAT_VC;
+    initial begin
+        $display("TX_STORAGE req_bits=%0d dat_bits=%0d context_bits=%0d",
+            IO_FIFO_DEPTH*$bits(ni_flit_pkg::req_flit_t),
+            NUM_WR_VC*IO_FIFO_DEPTH*$bits(ni_flit_pkg::dat_flit_t),
+            $bits(ni_types_pkg::nmu_aw_request_t)+ni_flit_pkg::AXI_LEN_WIDTH+1);
+        $display("TX_STORAGE_OLD equal_depth_bits=%0d prior_depth_bits=%0d",
+            IO_FIFO_DEPTH*(3*$bits(ni_types_pkg::nmu_aw_request_t)+$bits(ni_types_pkg::nmu_ar_request_t)+
+                2*($bits(ni_signals_pkg::axi_w_t)+$bits(ni_types_pkg::nmu_aw_request_t)+ni_flit_pkg::AXI_LEN_WIDTH)),
+            NOC_FIFO_DEPTH*(3*$bits(ni_types_pkg::nmu_aw_request_t)+$bits(ni_types_pkg::nmu_ar_request_t)+
+                2*($bits(ni_signals_pkg::axi_w_t)+$bits(ni_types_pkg::nmu_aw_request_t)+ni_flit_pkg::AXI_LEN_WIDTH)));
+    end
     int reorder_test = 0;
     int dst_wr_cnt[NUM_NSUS] = '{default:0};
     int dst_rd_cnt[NUM_NSUS] = '{default:0};
@@ -103,6 +117,18 @@ module tb_nmu_cosim #(
     assign vip.r_last   = bus.rlast;
     assign vip.r_user   = '0;
     nmu #(
+        .REQ_AW_REG_TYPE (OUTPUT_REG_TYPE),
+        .REQ_W_REG_TYPE (OUTPUT_REG_TYPE),
+        .REQ_AR_REG_TYPE (OUTPUT_REG_TYPE),
+        .DAT_AW_REG_TYPE (OUTPUT_REG_TYPE),
+        .DAT_W_REG_TYPE (OUTPUT_REG_TYPE),
+        .B_REG_TYPE (OUTPUT_REG_TYPE),
+        .R_REG_TYPE (OUTPUT_REG_TYPE),
+        .AXI_FIFO_DEPTH (IO_FIFO_DEPTH),
+        .REQ_FIFO_DEPTH (IO_FIFO_DEPTH),
+        .DAT_TX_FIFO_DEPTH (IO_FIFO_DEPTH),
+        .B_RX_FIFO_DEPTH (IO_FIFO_DEPTH),
+        .R_RX_FIFO_DEPTH (IO_FIFO_DEPTH),
         .SRC_ID (ni_flit_pkg::SRC_ID_WIDTH'(NMU_ID))
     ) dut (
         .ACLK              (clk),
@@ -351,6 +377,25 @@ module tb_nmu_cosim #(
     int init_phase = 0, concurrent_rw = 0, stall_cycles = 0, hold_cycles = 0;
     int capacity_test = 0, data_case = 0;
     int b_stall_cnt = 0, r_stall_cnt = 0, aw_stall_cnt = 0, ar_stall_cnt = 0;
+    int tx_req_peak = 0;
+    int tx_dat_peak[NUM_DAT_VC] = '{default:0};
+    int tx_req_beats = 0, tx_dat_beats = 0;
+    always @(posedge clk) begin
+        if (noc_rst_n) begin
+            if (int'(dut.i_request_path.i_tx_buffer.i_req_fifo.usage_o) > tx_req_peak)
+                tx_req_peak = int'(dut.i_request_path.i_tx_buffer.i_req_fifo.usage_o);
+            if (rx_req_valid[NMU_PORT] && rx_req_ready[NMU_PORT]) tx_req_beats++;
+            if (rx_dat_valid[NMU_PORT]) tx_dat_beats++;
+        end
+    end
+    for (genvar vc = 0; vc < NUM_DAT_VC; vc++) begin : gen_tx_occupancy
+        if (NOC_DAT_VC_MODE == 0 || vc < NUM_DAT_VC/2) begin : gen_write
+            always @(posedge clk) begin
+                if (noc_rst_n && int'(dut.i_request_path.i_tx_buffer.gen_dat_vc[vc].gen_write.i_fifo.usage_o) > tx_dat_peak[vc])
+                    tx_dat_peak[vc] = int'(dut.i_request_path.i_tx_buffer.gen_dat_vc[vc].gen_write.i_fifo.usage_o);
+            end
+        end
+    end
     int b_full_cnt = 0, r_full_cnt = 0, dat_full_cnt = 0;
     int wr_limit_cnt = 0, rd_limit_cnt = 0;
     int overlap_cnt = 0, w_during_read_cnt = 0, r_during_write_cnt = 0;
@@ -622,6 +667,8 @@ module tb_nmu_cosim #(
         if (peak_w < min_outstanding || peak_r < min_outstanding ||
             peak_unique_w < min_unique || peak_unique_r < min_unique)
             $fatal(1, "Outstanding/ID coverage not reached");
+        $display("TX_BUFFER req_peak=%0d req_beats=%0d dat_beats=%0d", tx_req_peak, tx_req_beats, tx_dat_beats);
+        for (int vc = 0; vc < NUM_DAT_VC; vc++) $display("TX_DAT_BUFFER vc=%0d peak=%0d", vc, tx_dat_peak[vc]);
         $display("COVERAGE peak_w=%0d peak_r=%0d unique_w=%0d unique_r=%0d",
             peak_w, peak_r, peak_unique_w, peak_unique_r);
         $display("STALL b=%0d r=%0d aw=%0d ar=%0d", b_stall_cnt, r_stall_cnt, aw_stall_cnt, ar_stall_cnt);
@@ -713,9 +760,9 @@ module tb_nmu_cosim #(
             if (vip.r_valid && !vip.r_ready) r_stall_cnt++;
             if (vip.aw_valid && !vip.aw_ready) aw_stall_cnt++;
             if (vip.ar_valid && !vip.ar_ready) ar_stall_cnt++;
-            if (dut.i_response_path.i_depacketize.i_buffer.b_full) b_full_cnt++;
-            if (dut.i_response_path.i_depacketize.i_buffer.r_full) r_full_cnt++;
-            if (|dut.i_response_path.i_depacketize.i_buffer.dat_full) dat_full_cnt++;
+            if (dut.i_response_path.i_rx_buffer.b_full) b_full_cnt++;
+            if (dut.i_response_path.i_rx_buffer.r_full) r_full_cnt++;
+            if (|dut.i_response_path.i_rx_buffer.dat_full) dat_full_cnt++;
             if (dut.i_request_path.i_id_remap.wr_exists_full) wr_limit_cnt++;
             if (dut.i_request_path.i_id_remap.rd_exists_full) rd_limit_cnt++;
             if (concurrent_active) begin

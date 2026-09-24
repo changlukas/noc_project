@@ -10,10 +10,13 @@
     {
       "name": "ctrl_capacity_recover",
       "mode": "control",
-      "count": 64,
-      "burst_beats": 8,
+      "count": 320,
+      "burst_beats": 4,
       "hold_cycles": 4096,
-      "capacity_test": true
+      "capacity_test": true,
+      "ids": "multiple",
+      "min_outstanding": 64,
+      "min_unique": 8
     },
     {
       "name": "ctrl_partial_write",
@@ -39,10 +42,13 @@
     {
       "name": "data_capacity_recover",
       "mode": "data",
-      "count": 64,
+      "count": 320,
       "burst_beats": 8,
       "hold_cycles": 4096,
-      "capacity_test": true
+      "capacity_test": true,
+      "ids": "multiple",
+      "min_outstanding": 64,
+      "min_unique": 8
     },
     {
       "name": "data_partial_write",

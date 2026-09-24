@@ -6,10 +6,12 @@
 // RSP-network response decode. B and NarrowR have independent class queues.
 // DAT uses receiver-owned per-VC credits and merges at R-beat granularity.
 module nmu_response_buffer #(
-    parameter int unsigned RSP_FIFO_DEPTH  = ni_params_pkg::NMU_DEPKT_Q_DEPTH,
+    parameter int unsigned RSP_FIFO_DEPTH  = 32,
+    parameter int unsigned B_FIFO_DEPTH    = RSP_FIFO_DEPTH,
+    parameter int unsigned R_FIFO_DEPTH    = RSP_FIFO_DEPTH,
     parameter int unsigned NUM_DAT_VC      = ni_params_pkg::NUM_DAT_VC,
     parameter int unsigned DAT_VC_MODE     = ni_params_pkg::NOC_DAT_VC_MODE,
-    parameter int unsigned DAT_RX_VC_DEPTH = ni_params_pkg::NOC_ROUTER_VC_DEPTH
+    parameter int unsigned DAT_RX_VC_DEPTH = 32
 ) (
     input  wire logic                                    clk_i,
     input  wire logic                                    rst_n_i,
@@ -27,8 +29,8 @@ module nmu_response_buffer #(
     input  wire logic                                    m_r_ready_i
 );
     import ni_flit_pkg::*;
-    if (RSP_FIFO_DEPTH < 1 || RSP_FIFO_DEPTH > 1024) begin : gen_invalid_depth
-        initial $fatal(0, "Error: response RSP_FIFO_DEPTH must be in [1, 1024] (instance %m)");
+    if (B_FIFO_DEPTH < 1 || B_FIFO_DEPTH > 1024 || R_FIFO_DEPTH < 1 || R_FIFO_DEPTH > 1024) begin : gen_invalid_depth
+        initial $fatal(0, "Error: response FIFO depths must be in [1, 1024] (instance %m)");
     end
     if (NUM_DAT_VC < 1 || NUM_DAT_VC > (1 << VC_ID_WIDTH)) begin : gen_invalid_vcs
         initial $fatal(0, "NUM_DAT_VC is outside the encoded VC range");
@@ -62,7 +64,7 @@ module nmu_response_buffer #(
     assign m_r_valid_o   = rst_n_i && r_sel_valid;
     assign m_r_o         = m_r_valid_o ? r_sel_data : '0;
     cc_fifo #(
-        .Depth       (RSP_FIFO_DEPTH         ),
+        .Depth       (B_FIFO_DEPTH           ),
         .FallThrough (1'b0                   ),
         .data_t      (ni_flit_pkg::rsp_flit_t)
     ) i_b_fifo (
@@ -79,7 +81,7 @@ module nmu_response_buffer #(
         .pop_i   (m_b_valid_o && m_b_ready_i            )
     );
     cc_fifo #(
-        .Depth       (RSP_FIFO_DEPTH         ),
+        .Depth       (R_FIFO_DEPTH           ),
         .FallThrough (1'b0                   ),
         .data_t      (ni_flit_pkg::rsp_flit_t)
     ) i_r_fifo (
@@ -97,8 +99,8 @@ module nmu_response_buffer #(
     );
     for (genvar vc = 0; vc < NUM_DAT_VC; vc++) begin : gen_dat_vc
         if (vc >= RD_VC_BASE) begin : gen_read
-            assign dat_push[vc]  = rst_n_i && s_dat_valid_i && dat_vc == VC_ID_WIDTH'(vc);
-            assign dat_pop[vc]   = r_valid[vc+1] && r_ready[vc+1];
+            assign dat_push[vc] = rst_n_i && s_dat_valid_i && dat_vc == VC_ID_WIDTH'(vc);
+            assign dat_pop[vc]  = r_valid[vc+1] && r_ready[vc+1];
             assign r_valid[vc+1] = rst_n_i && !dat_empty[vc];
             cc_fifo #(
                 .Depth       (DAT_RX_VC_DEPTH        ),

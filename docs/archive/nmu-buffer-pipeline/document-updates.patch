@@ -1,0 +1,96 @@
+--- a/docs/nmu-spec.md
++++ b/docs/nmu-spec.md
+@@ -154,0 +155,3 @@
++The RTL buffer placement and module defaults are defined in the transport-buffer subsection below. The S1/S2 and metadata-queue descriptions describe the C++ model.
++
++
+@@ -199,2 +202,2 @@
+-The target allocator reads the heads of the DAT Write class FIFO, selects only among VCs with
+-Router credit, stamps `vc_id`, and has no per-VC pending queue. The current C++ model implements
++The target allocator selects among mode-eligible VCs with local output FIFO space and stamps `vc_id`.
++Each write VC has a local output FIFO. A separate link arbiter selects nonempty VCs with Router credit. The current C++ model implements
+@@ -299,3 +302,3 @@
+-| `DAT_RX_VC_DEPTH` | `NOC_ROUTER_VC_DEPTH` (8) | power of two, >= 2 | NMU DataR receive FIFO depth per eligible VC and Router LOCAL sender-credit seed |
+-| AXI_FIFO_DEPTH | 8 | power of two, >= 2 | Common AW/W/AR/B/R dual-clock FIFO depth |
+-| `NOC_FIFO_DEPTH` | 8 | positive power of two | REQ/RSP synchronous class FIFO depth; DAT receive capacity is per VC |
++| `DAT_RX_VC_DEPTH` | 32 | power of two, >= 2 | NMU DataR receive FIFO depth per eligible VC and Router LOCAL sender-credit seed |
++| AXI_FIFO_DEPTH | 32 | power of two, >= 2 | NMU compatibility default for independently configurable AW/W/AR/B/R CDC depths |
++| `NOC_FIFO_DEPTH` [generated legacy default] | 8 | positive power of two | NMU RTL instead uses the independent transport depths below, default 32 |
+@@ -307 +310 @@
+-| NMU_DEPKT_Q_DEPTH | 16 | 1..1024 | Depacketize B/R queues |
++| NMU_DEPKT_Q_DEPTH [model/legacy] | 16 | 1..1024 | NMU RTL instead uses B_RX_FIFO_DEPTH and R_RX_FIFO_DEPTH, default 32 |
+@@ -619,0 +623,23 @@
++
++### NMU RTL transport buffers and output slices (2026-09-24)
++
++The RTL request path is ID remap, AW/W/AR input CDC FIFOs, SAM and ordering admission, write context, packet encoding, channel/VC assignment, then REQ and per-write-VC DAT output FIFOs. Encoding itself contains no transaction FIFO. One AW context is retained until the final W beat enters its output slice. The next AW may replace it on that cycle. External AW outstanding capacity still includes the input FIFO and ID/order tables.
++
++The response path is independent B/control-R and per-read-VC DAT input FIFOs, R beat selection, response decoding, ordering/ROB, B/R output CDC FIFOs, then ID restoration. Input-buffer channel decode only selects storage. Pack/unpack output slices are optional and default to bypass. ROB storage is separate from transport FIFO capacity.
++
++| NMU top parameter | Default | Meaning |
++|---|---|---|
++| `AXI_FIFO_DEPTH` | 32 | Compatibility default for the five AXI channel depths below |
++| `AW_FIFO_DEPTH`, `W_FIFO_DEPTH`, `AR_FIFO_DEPTH` | `AXI_FIFO_DEPTH` | Independently configurable TX input CDC FIFO depths |
++| `B_FIFO_DEPTH`, `R_FIFO_DEPTH` | `AXI_FIFO_DEPTH` | Independently configurable RX output CDC FIFO depths |
++| `REQ_FIFO_DEPTH` | 32 | Encoded REQ output FIFO entries |
++| `DAT_TX_FIFO_DEPTH` | 32 | Encoded DAT output FIFO entries per active write VC |
++| `B_RX_FIFO_DEPTH`, `R_RX_FIFO_DEPTH` | 32 | RSP input B and control-R FIFO entries |
++| `DAT_RX_VC_DEPTH` | 32 | DAT input entries per active read VC, matching upstream advertised credit |
++| `REQ_AW_REG_TYPE`, `REQ_W_REG_TYPE`, `REQ_AR_REG_TYPE` | 0 | Independent REQ encoding output slices |
++| `DAT_AW_REG_TYPE`, `DAT_W_REG_TYPE` | 0 | Independent DAT encoding output slices |
++| `B_REG_TYPE`, `R_REG_TYPE` | 0 | Independent response decoding output slices |
++
++Register types use the existing slice implementation: 0 bypass, 1 simple, 2 spill. CDC depths are powers of two and at least two. `DAT_RX_VC_DEPTH` retains that restriction. Synchronous REQ depth is a positive power of two at NMU top; the remaining synchronous output/class depths must be positive. Existing ROB defaults and generated C++ defaults are unchanged. The module defaults above override the older common NI depth defaults for this RTL integration.
++
++DAT VC assignment uses local output FIFO space. It does not consume downstream credit. The link output arbiter selects a nonempty VC with credit, preserves order within each VC, and consumes credit on the actual transmitted flit. Credit returned in the same cycle can authorize that transfer. Registered receive credit returns one cycle after the receive FIFO pop, independent of a later unpack output register or ROB retirement.
+--- a/docs/nmu-verification-plan.md
++++ b/docs/nmu-verification-plan.md
+@@ -181 +181 @@
+-| N0-VC-08 | source-list and hierarchy review plus storage accounting | the NMU owns class FIFO heads and sender counters only; per-VC pending storage exists only in Router inputs |
++| N0-VC-08 | source-list and hierarchy review plus storage accounting | the NMU has REQ and per-write-VC DAT output FIFOs; local enqueue and downstream credit consumption are checked separately |
+@@ -353 +353 @@
+-| VC ownership and modes | model allocators own transmit-side per-VC pending queues and implement `SHARED` only | expose target transmit class-head acceptance plus receive per-VC FIFO behavior; add split-mode masks and fixed-VC no-spill tests; do not compare internal queue timing |
++| VC ownership and modes | model allocators own transmit-side per-VC pending queues and implement `SHARED` only | check local per-VC transmit enqueue separately from credit-qualified link send and receive FIFO behavior; add split-mode masks and fixed-VC no-spill tests; do not compare internal queue timing |
+@@ -571,0 +572,5 @@
++
++
++### RTL buffer placement acceptance (2026-09-24)
++
++Validate pack/unpack output slices at types 0/1/2, hold under backpressure, reset with occupied buffers, independent VC progress while one VC lacks credit, and exact credit conservation. Reuse focused injection/response tests and the co-simulation memory checker. Default transport depths are 32; directed capacity tests must generate enough outstanding work or explicitly select smaller depths. Do not weaken full/recovery checks when increasing default capacity. See `archive/nmu-buffer-pipeline/architecture.md` for the parameter contract.
+--- a/rtl/README.md
++++ b/rtl/README.md
+@@ -351,2 +351,4 @@
+-| `nmu/request_packetize/nmu_request_packetize` | ordered AXI request records plus Router credits -> TX REQ/TX DAT | Field mapping, global AW-to-W metadata ownership, independent REQ/DAT class FIFOs and packet locks, mode-eligible DAT VC choice, and sender credit counters; the fused leaf avoids a duplicate packetized-flit queue boundary |
+-| `nmu/nmu_depacketize` | RX RSP ready/valid and RX DAT credit -> decoded AXI B/R records for `nmu_rob` | RSP class FIFO, DAT Read per-VC FIFOs and beat-level merge, channel legality/decode, and credit return |
++| `nmu/request_packetize/request_packetize` | ordered AXI request records and W context -> encoded REQ/DAT channels | Combinational field mapping and optional output slices; no transaction FIFO |
++| `nmu/channel_assign/request_buffer` | assigned REQ/DAT flits -> NoC link | REQ and per-write-VC DAT output FIFOs; credit-qualified DAT arbitration |
++| `nmu/response_depacketize/response_buffer` | RX RSP ready/valid and RX DAT credit -> selected B/R flits | Independent B/control-R and per-read-VC DAT input FIFOs, beat arbitration and credit return |
++| `nmu/response_depacketize/response_depacketize` | selected B/R flits -> decoded AXI response records | Combinational reconstruction and optional B/R output slices |
+@@ -435,3 +437,4 @@
+-Packetize owns request queues and AW/W pairing. Channel assignment owns injection
+-selection, packet VC locks and sender credits. Depacketize contains `i_buffer`
+-(raw response queues and beat selection), followed by AXI reconstruction.
++`i_write_context` retains AW/W association. Packetize contains combinational encoding and optional output slices.
++Channel assignment owns packet/VC assignment into `i_tx_buffer`; that buffer owns encoded REQ/per-VC DAT queues and link credit counters.
++`i_rx_buffer` is directly under response_path and owns input response queues and beat selection.
++Depacketize contains combinational reconstruction and optional output slices.
+@@ -447,0 +451,3 @@
++
++
++NMU RTL transport FIFO defaults are 32 entries per channel or active VC, independently configurable. Pack/unpack slices default to bypass. The complete parameter and credit contract is in [buffer placement](../docs/archive/nmu-buffer-pipeline/architecture.md). Generated common NI defaults and C++ model queue defaults are unchanged.
+--- a/docs/noc_high_perf_targets.md
++++ b/docs/noc_high_perf_targets.md
+@@ -69 +69 @@
+-- **Virtual channels**: DAT defaults to 2 and supports 1 to 8 (`VC_ID` 3-bit); VC FIFOs exist only in routers
++- **Virtual channels**: DAT defaults to 2 and supports 1 to 8 (`VC_ID` 3-bit); NMU DAT output and input buffers are per active VC; Router VC buffers remain separate
+--- a/docs/verification-environment.md
++++ b/docs/verification-environment.md
+@@ -308,3 +308,5 @@
+-arbitration differs from held ready/valid behavior. NMU injection selects a VC
+-for a class-head packet rather than arbitrating a bank of per-VC TX queues,
+-so inserting this wrapper there would duplicate assignment/credit logic.
++arbitration differs from held ready/valid behavior. NMU TX now has per-VC output queues. Its link egress reuses the existing
++round-robin arbiter and credit-counter primitives directly because the imported
++wrapper qualifies requests only with registered credit_left, while this NMU
++also permits same-cycle returned credit to authorize transmission. The wrapper
++and FIFO sources remain unchanged.

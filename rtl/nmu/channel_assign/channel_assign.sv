@@ -3,11 +3,10 @@
 `timescale 1ns / 1ps
 `default_nettype none
 
-// Network injection: packet locks, VC ownership and credit qualification.
+// Network injection: packet locks, VC ownership and local FIFO admission.
 module nmu_channel_assign #(
-    parameter int unsigned NUM_DAT_VC      = ni_params_pkg::NUM_DAT_VC,
-    parameter int unsigned DAT_VC_MODE     = ni_params_pkg::NOC_DAT_VC_MODE,
-    parameter int unsigned ROUTER_VC_DEPTH = ni_params_pkg::NOC_ROUTER_VC_DEPTH
+    parameter int unsigned NUM_DAT_VC  = ni_params_pkg::NUM_DAT_VC,
+    parameter int unsigned DAT_VC_MODE = ni_params_pkg::NOC_DAT_VC_MODE
 ) (
     input  wire logic                                                      clk_i,
     input  wire logic                                                      rst_n_i,
@@ -22,7 +21,7 @@ module nmu_channel_assign #(
     input  wire logic                                                      m_req_ready_i,
     output wire ni_flit_pkg::dat_flit_t                                    m_dat_o,
     output wire logic                                                      m_dat_valid_o,
-    input  wire logic                                     [NUM_DAT_VC-1:0] dat_credit_return_i
+    input  wire logic                                     [NUM_DAT_VC-1:0] dat_ready_i
 );
     import ni_types_pkg::*;
 
@@ -39,10 +38,6 @@ module nmu_channel_assign #(
          (NUM_DAT_VC < 2 || NUM_DAT_VC[0]))) begin : gen_invalid_vc_mode
         initial $fatal(0, "Error: split DAT VC mode requires a positive even NUM_DAT_VC (instance %m)");
     end
-    if (ROUTER_VC_DEPTH < 2 || (ROUTER_VC_DEPTH & (ROUTER_VC_DEPTH-1)) != 0) begin : gen_invalid_credit_depth
-        initial $fatal(0, "Error: ROUTER_VC_DEPTH must be a power of two >= 2 (instance %m)");
-    end
-
     logic                    req_write_lock_reg, req_write_lock_next;
     logic                    dat_write_lock_reg, dat_write_lock_next;
     logic                    req_rr_reg, req_rr_next;
@@ -52,7 +47,7 @@ module nmu_channel_assign #(
     logic      [NUM_IDS-1:0] fixed_vc_valid_reg, fixed_vc_valid_next;
     logic [DST_ID_WIDTH-1:0] fixed_vc_dst_reg [NUM_IDS], fixed_vc_dst_next [NUM_IDS];
     logic     [VC_IDX_W-1:0] fixed_vc_id_reg [NUM_IDS], fixed_vc_id_next [NUM_IDS];
-    wire    [NUM_DAT_VC-1:0] dat_credit_left;
+    wire [NUM_DAT_VC-1:0] dat_fifo_ready = dat_ready_i;
     wire [AW_AWID_WIDTH-1:0] aw_id = s_dat_i[NMU_DAT_AW_IDX].payload[AW_AWID_LSB +: AW_AWID_WIDTH];
     wire [DST_ID_WIDTH-1:0] aw_dst = s_dat_i[NMU_DAT_AW_IDX].header[DST_ID_LSB +: DST_ID_WIDTH];
     wire aw_reorder = s_dat_i[NMU_DAT_AW_IDX].header[ORDERING_REQ_LSB];
@@ -64,56 +59,44 @@ module nmu_channel_assign #(
     wire req_transfer = m_req_valid_o && m_req_ready_i;
     wire dat_transfer = m_dat_valid_o;
 
-    for (genvar vc = 0; vc < NUM_DAT_VC; vc++) begin : gen_credit
-        cc_credit_counter #(
-            .NumCredits (ROUTER_VC_DEPTH)
-        ) i_credit (
-            .clk_i         (clk_i                                  ),
-            .rst_ni        (rst_n_i                                ),
-            .clr_i         (1'b0                                   ),
-            .credit_o      (                                       ),
-            .credit_give_i (rst_n_i && dat_credit_return_i[vc]     ),
-            .credit_take_i (dat_transfer && dat_vc == VC_IDX_W'(vc)),
-            .credit_left_o (dat_credit_left[vc]                    ),
-            .credit_crit_o (                                       ),
-            .credit_full_o (                                       )
-        );
-    end
     always_comb begin
         req_sel_aw = 1'b0;
         if (req_hold_reg) req_sel_aw = req_hold_aw_reg;
         else if (!req_write_lock_reg)
-            req_sel_aw = s_req_valid_i[NMU_REQ_AW_IDX] && s_req_valid_i[NMU_REQ_W_IDX] && (!s_req_valid_i[NMU_REQ_AR_IDX] || !req_rr_reg);
+            req_sel_aw = s_req_valid_i[NMU_REQ_AW_IDX] && (!s_req_valid_i[NMU_REQ_AR_IDX] || !req_rr_reg);
         req_sel = req_write_lock_reg ? REQ_SEL_W'(NMU_REQ_W_IDX) : req_sel_aw ? REQ_SEL_W'(NMU_REQ_AW_IDX) : REQ_SEL_W'(NMU_REQ_AR_IDX);
     end
-    assign m_req_valid_o = rst_n_i && s_req_valid_i[req_sel];
-    assign m_req_o       = m_req_valid_o ? s_req_i[req_sel] : '0;
-    assign s_req_ready_o = req_transfer ? (NUM_NMU_REQ_CH'(1) << req_sel) : '0;
+    assign m_req_valid_o                 = rst_n_i && s_req_valid_i[req_sel];
+    assign m_req_o                       = m_req_valid_o ? s_req_i[req_sel] : '0;
+    assign s_req_ready_o[NMU_REQ_AW_IDX] = rst_n_i && !req_write_lock_reg && req_sel_aw && m_req_ready_i;
+    assign s_req_ready_o[NMU_REQ_W_IDX]  = rst_n_i && req_write_lock_reg && m_req_ready_i;
+    assign s_req_ready_o[NMU_REQ_AR_IDX] = rst_n_i && !req_write_lock_reg && !req_sel_aw && m_req_ready_i;
 
     always_comb begin
-        int candidate;
-        candidate        = 0;
+        int vc_idx;
+        vc_idx           = 0;
         dat_sel_vc       = dat_vc_rr_reg;
         dat_vc_available = 1'b0;
         if (!aw_reorder && fixed_vc_valid_reg[aw_id] && fixed_vc_dst_reg[aw_id] == aw_dst) begin
             dat_sel_vc       = fixed_vc_id_reg[aw_id];
-            dat_vc_available = dat_credit_left[dat_sel_vc] || dat_credit_return_i[dat_sel_vc];
+            dat_vc_available = dat_fifo_ready[dat_sel_vc];
         end else begin
             for (int offset = NUM_WR_VC-1; offset >= 0; offset--) begin
-                candidate = (int'(dat_vc_rr_reg) + offset) % NUM_WR_VC;
-                if (dat_credit_left[candidate] || dat_credit_return_i[candidate]) begin
+                vc_idx = (int'(dat_vc_rr_reg) + offset) % NUM_WR_VC;
+                if (dat_fifo_ready[vc_idx]) begin
                     dat_vc_available = 1'b1;
-                    dat_sel_vc       = VC_IDX_W'(candidate);
+                    dat_sel_vc       = VC_IDX_W'(vc_idx);
                 end
             end
         end
     end
     assign m_dat_valid_o = rst_n_i && (dat_write_lock_reg ?
-        (s_dat_valid_i[NMU_DAT_W_IDX] && (dat_credit_left[dat_active_vc_reg] || dat_credit_return_i[dat_active_vc_reg])) :
-        (s_dat_valid_i[NMU_DAT_AW_IDX] && s_dat_valid_i[NMU_DAT_W_IDX] && dat_vc_available));
-    assign s_dat_ready_o = m_dat_valid_o ? (NUM_NMU_DAT_CH'(1) << (dat_write_lock_reg ? NMU_DAT_W_IDX : NMU_DAT_AW_IDX)) : '0;
+        (s_dat_valid_i[NMU_DAT_W_IDX] && (dat_fifo_ready[dat_active_vc_reg])) :
+        (s_dat_valid_i[NMU_DAT_AW_IDX] && dat_vc_available));
+    assign s_dat_ready_o[NMU_DAT_AW_IDX] = rst_n_i && !dat_write_lock_reg && dat_vc_available;
+    assign s_dat_ready_o[NMU_DAT_W_IDX]  = rst_n_i && dat_write_lock_reg && dat_fifo_ready[dat_active_vc_reg];
     always_comb begin
-        dat_flit                                  = s_dat_i[dat_write_lock_reg ? NMU_DAT_W_IDX : NMU_DAT_AW_IDX];
+        dat_flit = s_dat_i[dat_write_lock_reg ? NMU_DAT_W_IDX : NMU_DAT_AW_IDX];
         dat_flit.header[VC_ID_LSB +: VC_ID_WIDTH] = VC_ID_WIDTH'(dat_vc);
     end
     assign m_dat_o = m_dat_valid_o ? dat_flit : '0;

@@ -6,38 +6,41 @@
 
 /* AXI-clock to NoC-clock request-channel FIFO bank. */
 module nmu_request_fifo #(
-    parameter int unsigned AXI_FIFO_DEPTH = 8,
+    parameter int unsigned AXI_FIFO_DEPTH = 32,
+    parameter int unsigned AW_FIFO_DEPTH  = AXI_FIFO_DEPTH,
+    parameter int unsigned W_FIFO_DEPTH   = AXI_FIFO_DEPTH,
+    parameter int unsigned AR_FIFO_DEPTH  = AXI_FIFO_DEPTH,
     // External AXI ID width; request records retain this width across CDC.
-    parameter int unsigned AXI_ID_WIDTH = 3,
-    parameter type         aw_t         = logic [AXI_ID_WIDTH-1:0],
-    parameter type         w_t          = logic,
-    parameter type         ar_t         = logic [AXI_ID_WIDTH-1:0]
+    parameter int unsigned AXI_ID_WIDTH   = 3,
+    parameter type         aw_t           = logic [AXI_ID_WIDTH-1:0],
+    parameter type         w_t            = logic,
+    parameter type         ar_t           = logic [AXI_ID_WIDTH-1:0]
 ) (
-    input  wire logic  axi_clk_i,
-    input  wire logic  axi_rst_n_i,
-    input  wire logic  noc_clk_i,
-    input  wire logic  noc_rst_n_i,
+    input  wire logic axi_clk_i,
+    input  wire logic axi_rst_n_i,
+    input  wire logic noc_clk_i,
+    input  wire logic noc_rst_n_i,
 
-    input  wire logic  s_aw_valid_i,
-    output wire logic  s_aw_ready_o,
-    input  wire aw_t   s_aw_data_i,
-    output wire logic  m_aw_valid_o,
-    input  wire logic  m_aw_ready_i,
-    output wire aw_t   m_aw_data_o,
+    input  wire logic s_aw_valid_i,
+    output wire logic s_aw_ready_o,
+    input  wire aw_t  s_aw_data_i,
+    output wire logic m_aw_valid_o,
+    input  wire logic m_aw_ready_i,
+    output wire aw_t  m_aw_data_o,
 
-    input  wire logic  s_w_valid_i,
-    output wire logic  s_w_ready_o,
-    input  wire w_t    s_w_data_i,
-    output wire logic  m_w_valid_o,
-    input  wire logic  m_w_ready_i,
-    output wire w_t    m_w_data_o,
+    input  wire logic s_w_valid_i,
+    output wire logic s_w_ready_o,
+    input  wire w_t   s_w_data_i,
+    output wire logic m_w_valid_o,
+    input  wire logic m_w_ready_i,
+    output wire w_t   m_w_data_o,
 
-    input  wire logic  s_ar_valid_i,
-    output wire logic  s_ar_ready_o,
-    input  wire ar_t   s_ar_data_i,
-    output wire logic  m_ar_valid_o,
-    input  wire logic  m_ar_ready_i,
-    output wire ar_t   m_ar_data_o
+    input  wire logic s_ar_valid_i,
+    output wire logic s_ar_ready_o,
+    input  wire ar_t  s_ar_data_i,
+    output wire logic m_ar_valid_o,
+    input  wire logic m_ar_ready_i,
+    output wire ar_t  m_ar_data_o
 );
 
     if (AXI_FIFO_DEPTH < 2 || (AXI_FIFO_DEPTH & (AXI_FIFO_DEPTH - 1)) != 0) begin : gen_invalid_depth
@@ -49,8 +52,8 @@ module nmu_request_fifo #(
     end
 
     axi_async_fifo #(
-        .AXI_FIFO_DEPTH (AXI_FIFO_DEPTH),
-        .data_t         (aw_t          )
+        .AXI_FIFO_DEPTH (AW_FIFO_DEPTH),
+        .data_t         (aw_t         )
     ) i_aw_fifo (
         .src_clk_i   (axi_clk_i   ),
         .src_rst_n_i (axi_rst_n_i ),
@@ -65,8 +68,8 @@ module nmu_request_fifo #(
     );
 
     axi_async_fifo #(
-        .AXI_FIFO_DEPTH (AXI_FIFO_DEPTH),
-        .data_t         (w_t           )
+        .AXI_FIFO_DEPTH (W_FIFO_DEPTH),
+        .data_t         (w_t         )
     ) i_w_fifo (
         .src_clk_i   (axi_clk_i  ),
         .src_rst_n_i (axi_rst_n_i),
@@ -81,8 +84,8 @@ module nmu_request_fifo #(
     );
 
     axi_async_fifo #(
-        .AXI_FIFO_DEPTH (AXI_FIFO_DEPTH),
-        .data_t         (ar_t          )
+        .AXI_FIFO_DEPTH (AR_FIFO_DEPTH),
+        .data_t         (ar_t         )
     ) i_ar_fifo (
         .src_clk_i   (axi_clk_i   ),
         .src_rst_n_i (axi_rst_n_i ),

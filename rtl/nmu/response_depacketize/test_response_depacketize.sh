@@ -17,8 +17,12 @@ task_sources=(
     repo/specgen/generated/sv/ni_signals_pkg.sv
     repo/specgen/generated/sv/ni_flit_pkg.sv
     repo/rtl/common/ni_types_pkg.sv
+    repo/rtl/common/stream_register.sv
     deps/common_cells/src/cc_pkg.sv
     deps/common_cells/src/cc_fifo.sv
+    deps/common_cells/src/cc_spill_register_flushable.sv
+    deps/common_cells/src/cc_spill_register.sv
+    deps/common_cells/src/cc_stream_register.sv
     repo/sim/dv/common_cells-1.37.0/src/cf_math_pkg.sv
     repo/sim/dv/common_cells-1.37.0/src/lzc.sv
     repo/sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv

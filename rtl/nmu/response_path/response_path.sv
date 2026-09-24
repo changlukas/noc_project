@@ -8,8 +8,14 @@
 module nmu_response_path #(
     parameter int unsigned NUM_DAT_VC             = ni_params_pkg::NUM_DAT_VC,
     parameter int unsigned NOC_DAT_VC_MODE        = ni_params_pkg::NOC_DAT_VC_MODE,
-    parameter int unsigned DAT_RX_VC_DEPTH        = ni_params_pkg::NOC_ROUTER_VC_DEPTH,
-    parameter int unsigned AXI_FIFO_DEPTH         = ni_params_pkg::AXI_FIFO_DEPTH,
+    parameter int unsigned DAT_RX_VC_DEPTH        = 32,
+    parameter int unsigned AXI_FIFO_DEPTH         = 32,
+    parameter int unsigned B_RX_FIFO_DEPTH        = 32,
+    parameter int unsigned R_RX_FIFO_DEPTH        = 32,
+    parameter int unsigned B_FIFO_DEPTH           = AXI_FIFO_DEPTH,
+    parameter int unsigned R_FIFO_DEPTH           = AXI_FIFO_DEPTH,
+    parameter int unsigned B_REG_TYPE             = 0,
+    parameter int unsigned R_REG_TYPE             = 0,
     parameter int unsigned B_ROB_DEPTH            = ni_params_pkg::NMU_ROB_B_DEPTH,
     parameter int unsigned R_ROB_DEPTH            = ni_params_pkg::NMU_ROB_R_DEPTH,
     parameter bit          R_ROB_EN               = bit'(ni_params_pkg::NMU_R_ROB_EN),
@@ -96,11 +102,16 @@ module nmu_response_path #(
         .m_r_valid_o  (ordered_r_valid     ),
         .m_r_ready_i  (ordered_r_ready     )
     );
-    nmu_response_depacketize #(
+    wire ni_flit_pkg::rsp_flit_t buffered_b;
+    wire ni_flit_pkg::dat_flit_t buffered_r;
+    wire buffered_b_valid, buffered_b_ready, buffered_r_valid, buffered_r_ready;
+    nmu_response_buffer #(
+        .B_FIFO_DEPTH    (B_RX_FIFO_DEPTH),
+        .R_FIFO_DEPTH    (R_RX_FIFO_DEPTH),
         .NUM_DAT_VC      (NUM_DAT_VC     ),
         .DAT_VC_MODE     (NOC_DAT_VC_MODE),
         .DAT_RX_VC_DEPTH (DAT_RX_VC_DEPTH)
-    ) i_depacketize (
+    ) i_rx_buffer (
         .clk_i               (noc_clk_i                              ),
         .rst_n_i             (noc_rst_n_i                            ),
         .s_dat_i             (ni_flit_pkg::dat_flit_t'(rx_dat_flit_i)),
@@ -109,15 +120,36 @@ module nmu_response_path #(
         .s_rsp_i             (ni_flit_pkg::rsp_flit_t'(rx_rsp_flit_i)),
         .s_rsp_valid_i       (rx_rsp_valid_i                         ),
         .s_rsp_ready_o       (rx_rsp_ready_o                         ),
-        .m_b_o               (decoded_b                              ),
-        .m_b_valid_o         (decoded_b_valid                        ),
-        .m_b_ready_i         (decoded_b_ready                        ),
-        .m_r_o               (decoded_r                              ),
-        .m_r_valid_o         (decoded_r_valid                        ),
-        .m_r_ready_i         (decoded_r_ready                        )
+        .m_b_o               (buffered_b                             ),
+        .m_b_valid_o         (buffered_b_valid                       ),
+        .m_b_ready_i         (buffered_b_ready                       ),
+        .m_r_o               (buffered_r                             ),
+        .m_r_valid_o         (buffered_r_valid                       ),
+        .m_r_ready_i         (buffered_r_ready                       )
+    );
+    nmu_response_depacketize #(
+        .B_REG_TYPE (B_REG_TYPE),
+        .R_REG_TYPE (R_REG_TYPE)
+    ) i_depacketize (
+        .clk_i       (noc_clk_i       ),
+        .rst_n_i     (noc_rst_n_i     ),
+        .s_b_i       (buffered_b      ),
+        .s_b_valid_i (buffered_b_valid),
+        .s_b_ready_o (buffered_b_ready),
+        .s_r_i       (buffered_r      ),
+        .s_r_valid_i (buffered_r_valid),
+        .s_r_ready_o (buffered_r_ready),
+        .m_b_o       (decoded_b       ),
+        .m_b_valid_o (decoded_b_valid ),
+        .m_b_ready_i (decoded_b_ready ),
+        .m_r_o       (decoded_r       ),
+        .m_r_valid_o (decoded_r_valid ),
+        .m_r_ready_i (decoded_r_ready )
     );
     nmu_response_fifo #(
         .AXI_FIFO_DEPTH (AXI_FIFO_DEPTH         ),
+        .B_FIFO_DEPTH   (B_FIFO_DEPTH           ),
+        .R_FIFO_DEPTH   (R_FIFO_DEPTH           ),
         .b_t            (ni_signals_pkg::axi_b_t),
         .r_t            (ni_signals_pkg::axi_r_t)
     ) i_response_fifo (

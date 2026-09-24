@@ -103,6 +103,8 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
                     if len(routes[classes[txn]]) < 4:
                         raise ValueError("co-simulation reorder cases need four destinations")
                     dest = txn % 4
+                elif case.get("capacity_test"):
+                    dest = txn % len(routes[classes[txn]])
                 elif case.get("destinations") == "random":
                     dest = rng.randrange(len(routes[classes[txn]]))
             route = routes[classes[txn]][dest]
@@ -115,6 +117,8 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
                 # The existing memory scoreboard supports INCR and single beats.
                 burst = 1
                 offset = txn * (512 if is_data else 64)
+                if case.get("capacity_test"):
+                    offset = (txn // len(routes[classes[txn]])) * (length + 1) * step
             address = route["base"] + offset
             operation = case.get("operation", "both")
             if case.get("random"):
@@ -123,7 +127,8 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
             if profile == "cosim":
                 operation = "both"  # read cases initialize through the real write path
             if operation in ("write", "both"):
-                fields = _ax_fields(axi_id, address, length, size, True, user=txn)
+                # Keep the transaction marker in opaque AWUSER[7:0], below collective control.
+                fields = _ax_fields(axi_id, address, length, size, True, user=txn & 0xff)
                 fields[4] = str(burst)
                 if profile == "cosim" and (case.get("partial_write") or case.get("concurrent_rw")):
                     init_writes.extend(fields)

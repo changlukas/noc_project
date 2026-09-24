@@ -61,6 +61,8 @@ task_sources=(
     "$task_root/rtl/nmu/ordering/reorder_storage.sv"
     "$task_root/rtl/nmu/ordering/ordering.sv"
     "$task_root/rtl/nmu/channel_assign/channel_assign.sv"
+    "$task_root/rtl/nmu/request_path/write_context.sv"
+    "$task_root/rtl/nmu/channel_assign/request_buffer.sv"
     "$task_root/rtl/nmu/request_packetize/request_packetize.sv"
     "$task_root/rtl/nmu/response_depacketize/response_buffer.sv"
     "$task_root/rtl/nmu/response_depacketize/response_depacketize.sv"

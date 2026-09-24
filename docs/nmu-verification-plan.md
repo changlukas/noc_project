@@ -178,7 +178,7 @@ is non-conforming follow-on work and is not accepted as target RTL evidence.
 | N0-VC-05 | ordering-bypassed AW/W stream while its fixed VC has zero credit and another VC is free | the stream stalls on its fixed VC and never spills; W inherits the same VC through WLAST |
 | N0-VC-06 | fallback AW and all ARs | `fixed_vc=0`; AR remains on REQ and does not consume DAT credits |
 | N0-VC-07 | continuously eligible credited DAT Write packets | after fill, the DAT class path accepts one flit per `noc_clk` cycle without an avoidable bubble |
-| N0-VC-08 | source-list and hierarchy review plus storage accounting | the NMU owns class FIFO heads and sender counters only; per-VC pending storage exists only in Router inputs |
+| N0-VC-08 | source-list and hierarchy review plus storage accounting | the NMU has REQ and per-write-VC DAT output FIFOs; local enqueue and downstream credit consumption are checked separately |
 | N0-RSP-01 | B and R become releasable together | both independent AXI channel outputs may assert valid in the same ACLK cycle |
 | N0-RSP-02 | stall BREADY while accepting R, then reverse | each payload holds stable under its own stall; the unrelated channel continues to its own finite-capacity limit |
 | N0-RSP-03 | simultaneous RSP B/NarrowR and DAT DataR arrivals | both class FIFOs can accept/progress in one `noc_clk` cycle; DAT ready follows only DAT Read FIFO capacity |
@@ -350,7 +350,7 @@ They do not emulate RTL CDC implementation details or force the RTL to use model
 | ordering-domain key | C++ Enabled and Disabled paths key admission on `{dst_id, dst_port_id, AXI class}` | retain port-only, class-only, destination-only, sticky, and Disabled-mode RLAST-release tests before RTL differential use |
 | B RoB | slot pool, tags, bypass/fallback, sticky behavior, and per-ID ordering are modeled | retain behavior; add the exact N1 overtaking trace counters/metadata needed for accepted-event comparison |
 | enabled R RoB | per-beat slots, high-water allocation, bypass/fallback, and ordering are modeled, with the same missing port term | add destination port to the key and preserve per-beat fill/release tests before enabling comparison |
-| VC ownership and modes | model allocators own transmit-side per-VC pending queues and implement `SHARED` only | expose target transmit class-head acceptance plus receive per-VC FIFO behavior; add split-mode masks and fixed-VC no-spill tests; do not compare internal queue timing |
+| VC ownership and modes | model allocators own transmit-side per-VC pending queues and implement `SHARED` only | check local per-VC transmit enqueue separately from credit-qualified link send and receive FIFO behavior; add split-mode masks and fixed-VC no-spill tests; do not compare internal queue timing |
 | LOCAL DAT receive | current model consumes DataR through symmetric credit flow control | compare credit-qualified accepted sequence and conservation; target receive FIFO timing remains implementation-specific |
 | disabled R path | model admits one ordering domain per ID with no R slot pool | retain same-key streak, all key-component mismatch, per-ID-bound, and final-RLAST-release tests before RTL differential use |
 | REQ/DAT parallelism | independent paths exist, but no shared-AXI test proves same-cycle egress | add a focused model test that records simultaneous REQ and DAT transfers; use it for functional capability, not exact RTL latency |
@@ -497,3 +497,8 @@ Each implementation package is reviewable only with the following focused eviden
 For every package, the handoff records command, seed, parameter set, simulator, pass/fail counts,
 assertion results, required coverage hits, and remaining approved exclusions. A clean compile without
 the required accepted events is not package evidence.
+
+
+### RTL buffer placement acceptance (2026-09-24)
+
+Validate pack/unpack output slices at types 0/1/2, hold under backpressure, reset with occupied buffers, independent VC progress while one VC lacks credit, and exact credit conservation. Reuse focused injection/response tests and the co-simulation memory checker. Default transport depths are 32; directed capacity tests must generate enough outstanding work or explicitly select smaller depths. Do not weaken full/recovery checks when increasing default capacity. See `archive/nmu-buffer-pipeline/architecture.md` for the parameter contract.
