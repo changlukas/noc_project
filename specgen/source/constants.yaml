@@ -19,9 +19,10 @@ axi:
   NOC_ID_WIDTH:
     type: int
     units: bits
-    description: "Fixed NoC transaction ID width after AXI-ID remapping"
+    description: "Generated NoC transaction ID width after AXI-ID remapping"
     default: 3
-    allowed: [3]
+    min: 1
+    max: 8
     sv_symbol: NOC_ID_WIDTH
     cpp_symbol: NOC_ID_WIDTH
   ADDR_WIDTH:

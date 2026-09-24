@@ -14,9 +14,17 @@ from gen_tb_top import emit_sam_pkg, num_vc
 from gen_standalone_patterns import generate
 
 
-def prepare(rtl_stage, out):
+def prepare(rtl_stage, out, profile_path=None, extra_catalog=None):
     rtl_stage, out = Path(rtl_stage).resolve(), Path(out).resolve()
     out.mkdir(parents=True, exist_ok=True)
+    profile = yaml.safe_load(Path(profile_path or ROOT / "sim/cosim/nmu/profile.yml").read_text())
+    noc_id_width = profile.get("noc_id_width", 3)
+    # Wrapper records use the generated AXI width; NMU external width can be overridden separately.
+    pattern_id_width = profile.get("axi_id_width", noc_id_width)
+    if type(noc_id_width) is not int or not 1 <= noc_id_width <= 8:
+        raise ValueError("noc_id_width must be in [1, 8]")
+    if type(pattern_id_width) is not int or not 1 <= pattern_id_width <= 8:
+        raise ValueError("axi_id_width must be in [1, 8]")
     source_list = []
     def copy(source, relative):
         target = out / relative
@@ -53,6 +61,7 @@ def prepare(rtl_stage, out):
         copy(ROOT / relative, "repo/" + relative)
         source_list.append("repo/" + relative)
     for relative in (
+        "rtl/nmu/ordering/tb_ordering.sv",
         "rtl/nmu/request_packetize/request_inject_tb_dut.sv",
         "rtl/nmu/request_packetize/tb_request_packetize.sv",
         "rtl/nmu/request_packetize/tb_request_packetize_stall.sv",
@@ -63,15 +72,17 @@ def prepare(rtl_stage, out):
     topo = ROOT / "sim/cosim/nmu/topology.yml"
     (out / "topology_pkg.sv").write_text(emit_sam_pkg(yaml.safe_load(topo.read_text())))
     (out / "files.f").write_text("\n".join(source_list) + "\n")
-    patterns = ROOT / "sim/test_patterns/cosim/generated/i3"
-    cases = generate(patterns, topo, id_width=3, profile="cosim")
-    cases += generate(patterns, topo, id_width=3, profile="cosim",
+    patterns = ROOT / f"sim/test_patterns/cosim/generated/i{pattern_id_width}"
+    cases = generate(patterns, topo, id_width=pattern_id_width, profile="cosim")
+    cases += generate(patterns, topo, id_width=pattern_id_width, profile="cosim",
                       catalog=ROOT / "sim/test_patterns/cosim/cases.json")
+    if extra_catalog:
+        cases += generate(patterns, topo, id_width=pattern_id_width, profile="cosim", catalog=extra_catalog)
     (patterns / "cases.list").write_text("\n".join(cases) + "\n")
     (out / "pattern.txt").write_text("\n".join(cases) + "\n")
     for mode in ("control", "data", "rand"):
-        mode_cases = generate(patterns / mode, topo, id_width=3, profile="cosim", mode=mode)
-        mode_cases += generate(patterns / mode, topo, id_width=3, profile="cosim", mode=mode,
+        mode_cases = generate(patterns / mode, topo, id_width=pattern_id_width, profile="cosim", mode=mode)
+        mode_cases += generate(patterns / mode, topo, id_width=pattern_id_width, profile="cosim", mode=mode,
                                catalog=ROOT / "sim/test_patterns/cosim/cases.json")
         (patterns / mode / "cases.list").write_text("\n".join(mode_cases) + "\n")
     for path in patterns.rglob("*"):
@@ -93,21 +104,20 @@ def prepare(rtl_stage, out):
     for path in yaml_source.glob("LICENSE*"):
         copy(path, "deps/yaml-cpp/" + path.name)
     # One profile drives both generated languages and every DAT receiver.
-    sys.path.insert(0, str(ROOT / "specgen/tools"))
-    from elaborate import cpp_params, sv_params
+    sys.path.insert(0, str(ROOT / "specgen"))
     constants = yaml.safe_load((ROOT / "specgen/source/constants.yaml").read_text())
-    profile = yaml.safe_load((ROOT / "sim/cosim/nmu/profile.yml").read_text())
     depth = profile["dat_credit_depth"]
     if not isinstance(depth, int) or depth < 2 or depth & (depth - 1):
         raise ValueError("DAT credit depth must be a power of two and at least 2")
     for key in ("ROUTER_VC_DEPTH", "NI_DAT_RX_VC_DEPTH"):
         constants["noc"][key]["default"] = profile["dat_credit_depth"]
-    constants_path = out / "constants.yml"
-    constants_path.write_text(yaml.safe_dump(constants, sort_keys=False))
-    for emitter, relative in ((cpp_params, "repo/specgen/generated/cpp/ni_params.h"),
-                              (sv_params, "repo/specgen/generated/sv/ni_params_pkg.sv")):
-        (out / relative).write_text("// Generated from co-simulation constants.yml\n" +
-                                   emitter.emit(constants_path, "cosim"))
+    constants["axi"]["AXI_ID_WIDTH"]["default"] = noc_id_width
+    constants["nsu"]["AXI_ID_WIDTH"]["default"] = noc_id_width
+    constants["nsu"]["MAX_ACTIVE_IDS"]["default"] = 1 << noc_id_width
+    from tools.elaborate.profile import emit as emit_profile
+    emit_profile(ROOT, out, constants, noc_id_width)
+    (out / "profile.yml").write_text(yaml.safe_dump(profile, sort_keys=False))
+    (out / "profile.mk").write_text(f"AXI_ID_WIDTH ?= {pattern_id_width}\n")
     copy(ROOT / "sim/cosim/nmu/script/Makefile", "Makefile")
     copy(ROOT / "sim/cosim/nmu/script/run.py", "run.py")
     copy(ROOT / "sim/cosim/nmu/script/test_pipeline.py", "test_pipeline.py")
@@ -124,5 +134,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--rtl-stage", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--profile")
+    parser.add_argument("--extra-catalog")
     args = parser.parse_args()
-    prepare(args.rtl_stage, args.out)
+    prepare(args.rtl_stage, args.out, args.profile, args.extra_catalog)

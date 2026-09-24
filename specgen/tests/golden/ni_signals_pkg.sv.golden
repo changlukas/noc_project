@@ -79,14 +79,36 @@ package ni_signals_pkg;
     logic [ni_params_pkg::AXI_ID_WIDTH-1:0]     awid;
   } axi_aw_t;
   typedef struct packed {
+    logic [ni_params_pkg::AXI_AWUSER_WIDTH-1:0] awuser;
+    logic [3:0]                                 awqos;
+    logic [3:0]                                 awregion;
+    logic [2:0]                                 awprot;
+    logic                                       awlock;
+    logic [3:0]                                 awcache;
+    logic [1:0]                                 awburst;
+    logic [2:0]                                 awsize;
+    logic [7:0]                                 awlen;
+    logic [ni_params_pkg::AXI_ADDR_WIDTH-1:0]   awaddr;
+    logic [ni_params_pkg::NOC_ID_WIDTH-1:0]     awid;
+  } noc_axi_aw_t;
+  typedef struct packed {
     logic [ni_params_pkg::AXI_DATA_WIDTH-1:0]   wdata;
     logic [ni_params_pkg::AXI_DATA_WIDTH/8-1:0] wstrb;
     logic                                       wlast;
   } axi_w_t;
   typedef struct packed {
+    logic [ni_params_pkg::AXI_DATA_WIDTH-1:0]   wdata;
+    logic [ni_params_pkg::AXI_DATA_WIDTH/8-1:0] wstrb;
+    logic                                       wlast;
+  } noc_axi_w_t;
+  typedef struct packed {
     logic [1:0]                             bresp;
     logic [ni_params_pkg::AXI_ID_WIDTH-1:0] bid;
   } axi_b_t;
+  typedef struct packed {
+    logic [1:0]                             bresp;
+    logic [ni_params_pkg::NOC_ID_WIDTH-1:0] bid;
+  } noc_axi_b_t;
   typedef struct packed {
     logic [3:0]                               arqos;
     logic [3:0]                               arregion;
@@ -100,11 +122,29 @@ package ni_signals_pkg;
     logic [ni_params_pkg::AXI_ID_WIDTH-1:0]   arid;
   } axi_ar_t;
   typedef struct packed {
+    logic [3:0]                               arqos;
+    logic [3:0]                               arregion;
+    logic [2:0]                               arprot;
+    logic                                     arlock;
+    logic [3:0]                               arcache;
+    logic [1:0]                               arburst;
+    logic [2:0]                               arsize;
+    logic [7:0]                               arlen;
+    logic [ni_params_pkg::AXI_ADDR_WIDTH-1:0] araddr;
+    logic [ni_params_pkg::NOC_ID_WIDTH-1:0]   arid;
+  } noc_axi_ar_t;
+  typedef struct packed {
     logic [ni_params_pkg::AXI_DATA_WIDTH-1:0] rdata;
     logic [1:0]                               rresp;
     logic [ni_params_pkg::AXI_ID_WIDTH-1:0]   rid;
     logic                                     rlast;
   } axi_r_t;
+  typedef struct packed {
+    logic [ni_params_pkg::AXI_DATA_WIDTH-1:0] rdata;
+    logic [1:0]                               rresp;
+    logic [ni_params_pkg::NOC_ID_WIDTH-1:0]   rid;
+    logic                                     rlast;
+  } noc_axi_r_t;
 
   // AXI wrap-port aggregates (widths fixed-default).
   typedef struct packed {

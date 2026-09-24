@@ -1,0 +1,196 @@
+{
+  "cosim": [
+    {
+      "log": "default/control.log",
+      "pass": true,
+      "capacity": {
+        "active_ids": 8,
+        "per_id": 32,
+        "cycles": 94,
+        "wr_id_stall": 0,
+        "rd_id_stall": 0,
+        "wr_txn_stall": 0,
+        "rd_txn_stall": 0
+      },
+      "coverage": {
+        "peak_w": 16,
+        "peak_r": 16,
+        "unique_w": 1,
+        "unique_r": 1
+      }
+    },
+    {
+      "log": "small/control.log",
+      "pass": true,
+      "capacity": {
+        "active_ids": 3,
+        "per_id": 4,
+        "cycles": 277,
+        "wr_id_stall": 104,
+        "rd_id_stall": 98,
+        "wr_txn_stall": 0,
+        "rd_txn_stall": 0
+      },
+      "coverage": {
+        "peak_w": 3,
+        "peak_r": 3,
+        "unique_w": 3,
+        "unique_r": 3
+      }
+    },
+    {
+      "log": "singleton/control.log",
+      "pass": true,
+      "capacity": {
+        "active_ids": 1,
+        "per_id": 1,
+        "cycles": 628,
+        "wr_id_stall": 0,
+        "rd_id_stall": 0,
+        "wr_txn_stall": 279,
+        "rd_txn_stall": 268
+      },
+      "coverage": {
+        "peak_w": 1,
+        "peak_r": 1,
+        "unique_w": 1,
+        "unique_r": 1
+      }
+    },
+    {
+      "log": "wide/active3.log",
+      "pass": true,
+      "capacity": {
+        "active_ids": 3,
+        "per_id": 4,
+        "cycles": 726,
+        "wr_id_stall": 302,
+        "rd_id_stall": 285,
+        "wr_txn_stall": 0,
+        "rd_txn_stall": 0
+      },
+      "coverage": {
+        "peak_w": 3,
+        "peak_r": 3,
+        "unique_w": 3,
+        "unique_r": 3
+      }
+    },
+    {
+      "log": "wide/active12.log",
+      "pass": true,
+      "capacity": {
+        "active_ids": 12,
+        "per_id": 4,
+        "cycles": 186,
+        "wr_id_stall": 0,
+        "rd_id_stall": 0,
+        "wr_txn_stall": 0,
+        "rd_txn_stall": 0
+      },
+      "coverage": {
+        "peak_w": 35,
+        "peak_r": 21,
+        "unique_w": 12,
+        "unique_r": 12
+      }
+    },
+    {
+      "log": "wide/per1.log",
+      "pass": true,
+      "capacity": {
+        "active_ids": 12,
+        "per_id": 1,
+        "cycles": 2160,
+        "wr_id_stall": 0,
+        "rd_id_stall": 0,
+        "wr_txn_stall": 1034,
+        "rd_txn_stall": 987
+      },
+      "coverage": {
+        "peak_w": 1,
+        "peak_r": 1,
+        "unique_w": 1,
+        "unique_r": 1
+      }
+    },
+    {
+      "log": "wide/per32.log",
+      "pass": true,
+      "capacity": {
+        "active_ids": 12,
+        "per_id": 32,
+        "cycles": 186,
+        "wr_id_stall": 0,
+        "rd_id_stall": 0,
+        "wr_txn_stall": 6,
+        "rd_txn_stall": 0
+      },
+      "coverage": {
+        "peak_w": 32,
+        "peak_r": 21,
+        "unique_w": 1,
+        "unique_r": 1
+      }
+    },
+    {
+      "log": "wide/data.log",
+      "pass": true,
+      "capacity": {
+        "active_ids": 12,
+        "per_id": 32,
+        "cycles": 170,
+        "wr_id_stall": 0,
+        "rd_id_stall": 0,
+        "wr_txn_stall": 0,
+        "rd_txn_stall": 0
+      },
+      "coverage": {
+        "peak_w": 12,
+        "peak_r": 12,
+        "unique_w": 1,
+        "unique_r": 1
+      }
+    },
+    {
+      "log": "final/narrow_axi.log",
+      "pass": true,
+      "capacity": {
+        "active_ids": 2,
+        "per_id": 32,
+        "cycles": 45,
+        "wr_id_stall": 0,
+        "rd_id_stall": 0,
+        "wr_txn_stall": 0,
+        "rd_txn_stall": 0
+      },
+      "coverage": {
+        "peak_w": 1,
+        "peak_r": 1,
+        "unique_w": 1,
+        "unique_r": 1
+      }
+    }
+  ],
+  "focused_ordering": [
+    {
+      "top": "tb_nmu_ordering",
+      "parameters": {
+        "MAX_ACTIVE_IDS": 3
+      },
+      "pass": true,
+      "log": "/home/mingwei/noc_project/nmu-standalone/cosim/build/capacity120/ordering/tb_nmu_ordering_eeeab2ff/sim.log"
+    }
+  ],
+  "wide_dpi_reused": {
+    "path": "/home/mingwei/noc_project/nmu-standalone/cosim/build/dpi_2cf81ee11ecd/libnmu_cmodel.so",
+    "sha256": "3576b448b28dfef14586a6ca4210ec71ee272420c9bfd0e00ef88fd1ae8bfc40",
+    "mtime": 1790244020.0567553
+  },
+  "cache": {
+    "same_profile_rebuild_cpp": false,
+    "same_profile_rebuild_sv": false,
+    "changed_capacity_rebuild_cpp": false,
+    "changed_capacity_rebuild_sv": true
+  }
+}

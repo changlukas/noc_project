@@ -2,8 +2,8 @@
 
 module tb_nmu_response_fifo_guards;
     logic                   clk, rst_n_i;
-    ni_signals_pkg::axi_b_t b;
-    ni_signals_pkg::axi_r_t r;
+    ni_signals_pkg::noc_axi_b_t b;
+    ni_signals_pkg::noc_axi_r_t r;
     logic                   b_valid, b_ready, r_valid, r_ready;
     nmu_response_fifo #(.AXI_FIFO_DEPTH (3)) dut (
         .noc_clk_i   (clk    ),

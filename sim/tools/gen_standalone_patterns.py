@@ -29,7 +29,7 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
     required_destinations = 2 if profile == "standalone" else 1
     if any(len(v) < required_destinations for v in routes.values()):
         raise ValueError("standalone suite needs two control/data destinations")
-    if id_width not in (1, 3, 8) or mode not in ("auto", "control", "data", "rand"):
+    if not 1 <= id_width <= 8 or mode not in ("auto", "control", "data", "rand"):
         raise ValueError("invalid ID width or MODE")
     if not 0 <= seed <= 0xffffffff:
         raise ValueError("SEED must be an unsigned 32-bit integer")
@@ -48,6 +48,9 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
             continue
         if name in names or not name.replace("_", "").isalnum():
             raise ValueError("invalid or duplicate case name")
+        num_ids = case.get("num_ids", min(8, 1 << id_width))
+        if type(num_ids) is not int or not 1 <= num_ids <= (1 << id_width):
+            raise ValueError("num_ids must fit the selected AXI ID space")
         names.append(name)
         selected = case.get("mode", "control" if mode == "auto" else mode)
         if case_name is not None and "mode" in case and mode not in ("auto", selected):
@@ -71,7 +74,7 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
             if capacity:
                 axi_id = ((128 + txn) if txn < 16 else 200 + txn % 2) % (1 << id_width)
             elif case.get("ids") == "multiple":
-                axi_id = (128 + txn % min(8, 1 << id_width)) % (1 << id_width)
+                axi_id = (128 + txn % num_ids) % (1 << id_width)
             else:
                 axi_id = 200 % (1 << id_width)
             size = (txn % (7 if is_data else 4)) if case.get("burst_sweep") or capacity else (6 if is_data else 3)
@@ -209,7 +212,7 @@ if __name__ == "__main__":
     parser.add_argument("--out", required=True)
     parser.add_argument("--topology", default=str(REPO / "sim/configs/mesh_2x2.yml"))
     parser.add_argument("--catalog", default=str(CATALOG))
-    parser.add_argument("--id-width", type=int, choices=(1, 3, 8), default=8)
+    parser.add_argument("--id-width", type=int, choices=range(1, 9), default=8)
     parser.add_argument("--case", dest="case_name")
     parser.add_argument("--mode", choices=("auto", "control", "data", "rand"), default="auto")
     parser.add_argument("--seed", type=int, default=1)

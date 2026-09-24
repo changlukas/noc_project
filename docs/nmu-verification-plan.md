@@ -261,8 +261,9 @@ are observed before time advances; an unrelated compile or simulator failure is 
 
 | Parameter/relationship | Positive cases | Expected-fail cases |
 |---|---|---|
-| `AXI_ID_WIDTH` | 1, default, 8; endpoint remap allocation/reuse and B/R restoration | 0 and 9 |
-| `NOC_ID_WIDTH` | 3; fixed 136/126/633-bit generated records | any value other than 3 |
+| `AXI_ID_WIDTH` | 1, default, 8; NMU-internal remap allocation/reuse and B/R restoration | 0 and 9 |
+| `NOC_ID_WIDTH` | generated profiles 1, 3, 4, 8; packet widths derived consistently | 0, 9, or override inconsistent with the generated profile |
+| `MAX_ACTIVE_IDS` | 1, non-power-of-two 3, default 8, wider-profile 12 | 0 or greater than either AXI/NoC ID space |
 | `NOC_DAT_NUM_VC` | 1, default, 8 | 0 and 9 |
 | `NOC_DAT_VC_MODE` | 0 and 1 with a legal count | other encodings; split with odd count or count 1 |
 | `AXI_FIFO_DEPTH` | 2, default, 32 | 0 and a positive non-power-of-two value |
@@ -356,7 +357,7 @@ They do not emulate RTL CDC implementation details or force the RTL to use model
 | REQ/DAT parallelism | independent paths exist, but no shared-AXI test proves same-cycle egress | add a focused model test that records simultaneous REQ and DAT transfers; use it for functional capability, not exact RTL latency |
 | B/R independence | model drains RSP and DAT response inputs independently but lacks target CDC/class-FIFO timing | compare decoded content and order after independent accepted inputs; exclude internal queue occupancy and exact cycle |
 | CDC/reset | model is single-clock | do not emulate synchronizers or compare crossing latency in C++; verify CDC structure, dual-clock behavior, and reset in RTL N0/N1 |
-| widths | model/DPI types are fixed at the present 3-bit-ID generated instance | compare only the aligned instance until beat types, packet offsets, containers, and wrappers are parameterized together; other legal widths remain RTL-only evidence |
+| widths | generated NoC ID profiles support 1..8 within the model/DPI byte-sized ID carrier | each VCS image and its model library must use the same profile; functional coverage is limited to the configurations recorded in the acceptance report |
 
 Until each row's alignment test passes, its current-model result is diagnostic evidence, not an RTL
 golden. All remaining exclusions stay recorded in `docs/known-limitations.md`.

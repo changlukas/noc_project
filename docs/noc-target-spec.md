@@ -132,9 +132,10 @@ Physically separate networks, not virtual channels on a shared link:
 | `DAT` | 633 b | - | `Aw`: 48 b address. `W`, `R`: 512 b data |
 
 Physical widths are elaboration-time derivatives of the packet layout, not independent tuning
-parameters. `NOC_ID_WIDTH` is fixed at 3, so the 585-bit `DataW` payload and every physical
-network width are fixed at 633, 136, and 126 bits respectively. `AXI_ID_WIDTH` is external to
-the NI and does not change the flit layout.
+parameters. For `NOC_ID_WIDTH` from 1 through 8, REQ is `133 + NOC_ID_WIDTH` bits,
+RSP is `123 + NOC_ID_WIDTH` bits and DAT remains 633 bits, set by the 585-bit `DataW`
+payload. The table shows the default width 3. `AXI_ID_WIDTH` is external to the NI
+and does not change the flit layout. A profile regenerates SV/C++ packets together.
 
 One `DAT` network, not a request and response pair, even though it carries request-direction
 `DataW` and response-direction `DataR`:
@@ -464,8 +465,8 @@ and runtime views for parity.
 |---|---|---|---|
 | Topology | Mesh X and Y dimension | 2, 4, 8, 16 (4) | X and Y are independent for unicast. v1 multicast/collective support requires X = Y. 256 nodes maximum, set by the 8-bit node ID |
 | AXI interface | Endpoint interfaces | 1 | One fixed 512-bit interface carries both classes; the SAM address space selects the internal NoC class |
-| AXI interface | `AXI_ID_WIDTH` | 1-8 (3) | External upstream AXI transaction-ID width. The endpoint remaps live IDs to `NOC_ID_WIDTH` and restores the external ID on B/R. |
-| AXI interface | `NOC_ID_WIDTH` | fixed 3 | NoC-carried ID width and generated REQ/RSP/DAT record width. It is independent of NI identity (`SRC_ID`, `SRC_PORT_ID`). |
+| AXI interface | `AXI_ID_WIDTH` | 1-8 (3) | External upstream AXI transaction-ID width. Production NMU remaps live IDs to `NOC_ID_WIDTH` before request CDC and restores the external ID on B/R after response CDC. The model endpoint retains its external remap. |
+| AXI interface | `NOC_ID_WIDTH` | 1-8 (3), generated profile | NoC-carried ID width and generated REQ/RSP/DAT record width. It is independent of NI identity (`SRC_ID`, `SRC_PORT_ID`). |
 | AXI interface | `NSU_AXI_ID_WIDTH` | 1-8 (`NOC_ID_WIDTH`, default 3) | ID width driven by the NSU downstream AXI interface |
 | AXI interface | `NSU_MAX_ACTIVE_IDS` | 1 to `2**NSU_AXI_ID_WIDTH` (8) | Live source-aware downstream-ID mappings per read/write direction; the default 3-bit interface permits up to 8 |
 | AXI interface | `NSU_MAX_OUTSTANDING` | power of two, 1-256 (32) | Response Queue transaction records per read/write direction; independent of active-ID capacity |
@@ -476,7 +477,8 @@ and runtime views for parity.
 | Router staging | `NOC_ROUTER_OUTPUT_FIFO_DEPTH` | positive power of two (8) | DAT Router output FIFO depth; not credit-counted |
 | CDC | `AXI_FIFO_DEPTH` | power of two, >= 2 (8) | Common entry count of the AW/W/AR/B/R dual-clock FIFOs on each AXI interface |
 | NoC class queues | `NOC_FIFO_DEPTH` | positive power of two (8) | Entry count of the REQ/RSP synchronous class FIFOs; DAT receive capacity is per VC above |
-| Ordering | Outstanding transactions per ID | 1-32 (32) | Applies to both R modes. The NoC-side NI holds at most `32 x 2^NOC_ID_WIDTH` = 256 transactions; an external-width remap may backpressure a new ID when all eight NoC IDs are live. Enabled requests that require reordering additionally reserve an `ordering_tag`, see §6 |
+| Ordering | `MAX_ACTIVE_IDS` | 1 through `2**min(AXI_ID_WIDTH, NOC_ID_WIDTH)` (8) | Live NMU IDs per read/write direction. Shrinks remap and per-ID tracking structures. |
+| Ordering | `MAX_OUTSTANDING_PER_ID` | 1-256 (32) | NMU transactions per active ID, both R modes. The per-direction upper bound is `MAX_ACTIVE_IDS * MAX_OUTSTANDING_PER_ID` (default 256), not a shared transaction pool. Requests requiring reordering also consume ROB storage. |
 | Ordering | `READ_ROB_ENABLED` | enabled, disabled (enabled) | Selects the R path at elaboration with `generate if`. Disabled permits a same-ID streak only within one `{dst_id, dst_port_id, AXI class}` ordering domain. B always uses a per-ID metadata-only RoB. The §3 ordering requirement holds in either setting |
 | Address map | SAM address spaces | config, memory | Config space selects the narrow class, memory space the data class. Uniform across nodes and fixed for one elaborated RTL image |
 | Address map | Space region size | power of two | - |
@@ -602,7 +604,7 @@ complete accepted beat and its decode metadata; while stalled it holds both unch
 
 **Flit payload.**
 
-The field tables below show the sole `NOC_ID_WIDTH = 3` layout. `AXI_ID_WIDTH` selects the
+The field tables below show the default `NOC_ID_WIDTH = 3` layout. `AXI_ID_WIDTH` selects the
 external endpoint interface only; it does not change generated field positions or physical network
 widths. Software must consume generated field positions rather than hard-code offsets.
 

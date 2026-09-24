@@ -1,0 +1,224 @@
+/cadtools/centos/spe21.1/tools.lnx86/cdsgcc/gcc/9.3/bin/g++ -std=c++17 -O1 -fPIC -DYAML_CPP_STATIC_DEFINE -Irepo/ref_model/dpi -Irepo/ref_model/c_model/include -Irepo/ref_model/c_model/tests/common -Irepo/specgen/generated/cpp -Ideps/yaml-cpp/include -Ideps/yaml-cpp/src -I/home/mingwei/.toolsmgr/vcs/include -c repo/ref_model/dpi/cmodel_dpi.cpp -o /home/mingwei/noc_project/nmu-standalone/cosim/build/dpi_2cf81ee11ecd/cmodel_dpi.o
+/cadtools/centos/spe21.1/tools.lnx86/cdsgcc/gcc/9.3/bin/g++ -shared -static-libstdc++ -static-libgcc -Wl,-Bsymbolic -o /home/mingwei/noc_project/nmu-standalone/cosim/build/dpi_2cf81ee11ecd/libnmu_cmodel.so /home/mingwei/noc_project/nmu-standalone/cosim/build/dpi_2cf81ee11ecd/cmodel_dpi.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/emitfromevents.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/tag.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/null.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/scanner.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/ostream_wrapper.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/scantag.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/node_data.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/scantoken.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/emitterstate.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/nodebuilder.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/singledocparser.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/regex_yaml.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/nodeevents.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/emitterutils.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/stream.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/scanscalar.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/emit.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/exp.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/exceptions.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/convert.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/node.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/directives.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/parser.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/emitter.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/binary.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/fptostring.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/memory.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/parse.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/depthguard.o /home/mingwei/noc_project/nmu-standalone/cosim/build/yaml_aad639c4c31b/simplekey.o -pthread
+vcs -full64 -sverilog -assert svaext -override_timescale=1ns/1ps -debug_access+all -f files.f -top tb_nmu_cosim -pvalue+tb_nmu_cosim.RSP_DELAY_CYCLES=2 -pvalue+tb_nmu_cosim.OUTPUT_REG_TYPE=0 -pvalue+tb_nmu_cosim.IO_FIFO_DEPTH=32 -pvalue+tb_nmu_cosim.AXI_ID_WIDTH=8 -pvalue+tb_nmu_cosim.MAX_ACTIVE_IDS=3 -pvalue+tb_nmu_cosim.MAX_OUTSTANDING_PER_ID=4 -Mdir=/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_cf8ccc833a8e/csrc -o /home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_cf8ccc833a8e/simv -LDFLAGS "-L/home/mingwei/noc_project/nmu-standalone/cosim/build/dpi_2cf81ee11ecd -Wl,-rpath,/home/mingwei/noc_project/nmu-standalone/cosim/build/dpi_2cf81ee11ecd -lnmu_cmodel" +define+DUMP_WAVE -P /cadtools/synopsys/verdi/M-2017.03-SP1/share/PLI/VCS/linux64/novas.tab /cadtools/synopsys/verdi/M-2017.03-SP1/share/PLI/VCS/linux64/pli.a -l /home/mingwei/noc_project/nmu-standalone/cosim/build/report_wave1/compile.log
+                         Chronologic VCS (TM)
+       Version M-2017.03-SP1_Full64 -- Thu Sep 24 17:58:29 2026
+               Copyright (c) 1991-2017 by Synopsys Inc.
+                         ALL RIGHTS RESERVED
+
+This program is proprietary and confidential information of Synopsys Inc.
+and may be used and disclosed only as authorized in a license agreement
+controlling such use and disclosure.
+
+Parsing design file 'repo/specgen/generated/sv/ni_params_pkg.sv'
+Parsing design file 'repo/specgen/generated/sv/ni_signals_pkg.sv'
+Parsing design file 'repo/specgen/generated/sv/ni_flit_pkg.sv'
+Parsing design file 'topology_pkg.sv'
+Parsing design file 'repo/rtl/common/ni_types_pkg.sv'
+Parsing design file 'deps/common_cells/src/cc_pkg.sv'
+Parsing design file 'deps/common_cells/src/cc_binary_to_gray.sv'
+Parsing design file 'deps/common_cells/src/cc_gray_to_binary.sv'
+Parsing design file 'deps/common_cells/src/cc_spill_register_flushable.sv'
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_spill_register_flushable.sv'.
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Parsing included file 'deps/common_cells/include/common_cells/deprecated/registers.svh'.
+Back to file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_spill_register_flushable.sv'.
+Parsing design file 'deps/common_cells/src/cc_spill_register.sv'
+Parsing design file 'deps/common_cells/src/cc_stream_register.sv'
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_stream_register.sv'.
+Parsing design file 'deps/tech_cells_generic/src/rtl/tc_sync.sv'
+Parsing design file 'deps/common_cells/src/cc_cdc_fifo_gray.sv'
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_cdc_fifo_gray.sv'.
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_cdc_fifo_gray.sv'.
+Parsing design file 'deps/common_cells/src/cc_addr_decode_dync.sv'
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_addr_decode_dync.sv'.
+Parsing design file 'deps/common_cells/src/cc_addr_decode.sv'
+Parsing design file 'repo/rtl/common/axi_async_fifo.sv'
+Parsing design file 'repo/rtl/common/ni_sam.sv'
+Parsing design file 'repo/rtl/common/stream_register.sv'
+Parsing design file 'repo/rtl/nmu/request_fifo/request_fifo.sv'
+Parsing design file 'repo/rtl/nmu/sam/sam.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/cf_math_pkg.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/lzc.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv'
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_pkg.sv'
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_id_remap.sv'
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_id_remap.sv'.
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_id_remap.sv'.
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/assign.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_id_remap.sv'.
+Parsing design file 'deps/common_cells/src/cc_credit_counter.sv'
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_credit_counter.sv'.
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_credit_counter.sv'.
+Parsing design file 'deps/common_cells/src/cc_fifo.sv'
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_fifo.sv'.
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_fifo.sv'.
+Parsing design file 'repo/rtl/common/axi_if.sv'
+Parsing design file 'repo/rtl/nmu/ordering/reorder_storage.sv'
+Parsing design file 'repo/rtl/nmu/ordering/ordering.sv'
+Parsing design file 'repo/rtl/nmu/channel_assign/channel_assign.sv'
+Parsing design file 'repo/rtl/nmu/request_path/write_context.sv'
+Parsing design file 'repo/rtl/nmu/channel_assign/request_buffer.sv'
+Parsing design file 'repo/rtl/nmu/request_packetize/request_packetize.sv'
+Parsing design file 'repo/rtl/nmu/response_depacketize/response_buffer.sv'
+Parsing design file 'repo/rtl/nmu/channel_assign/rx_channel_assign.sv'
+Parsing design file 'repo/rtl/nmu/response_depacketize/response_depacketize.sv'
+Parsing design file 'repo/rtl/nmu/response_fifo/response_fifo.sv'
+Parsing design file 'repo/rtl/nmu/response_path/response_path.sv'
+Parsing design file 'repo/rtl/nmu/request_path/id_remap.sv'
+Parsing design file 'repo/rtl/nmu/request_path/request_path.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/rtl/nmu/request_path/request_path.sv'.
+Parsing design file 'repo/rtl/nmu/top/nmu.sv'
+Parsing design file 'deps/tech_cells_generic/src/rtl/tc_clk.sv'
+Parsing design file 'deps/common_cells/src/cc_rstgen_bypass.sv'
+Parsing design file 'repo/sim/dv/common_verification-0.2.5/src/rand_id_queue.sv'
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_test.sv'
+Parsing design file 'repo/specgen/generated/sv/noc_types_pkg_vc2.sv'
+Parsing design file 'repo/ref_model/top/router_wrap.sv'
+Parsing design file 'repo/ref_model/top/nsu_wrap.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/delta_counter.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/counter.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/stream_delay.sv'
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_delayer.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_delayer.sv'.
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/assign.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_delayer.sv'.
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv'.
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/assign.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv'.
+Parsing design file 'repo/sim/cosim/nmu/tb_nmu_cosim.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/assign.svh'.
+Back to file 'repo/sim/cosim/nmu/tb_nmu_cosim.sv'.
+Parsing library file 'repo/sim/dv/axi-0.39.7/src/axi_intf.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_intf.sv'.
+Parsing library file 'repo/sim/dv/axi-0.39.7/src/axi_intf.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_intf.sv'.
+Top Level Modules:
+       tb_nmu_cosim
+assign 0 tb_nmu_cosim.OUTPUT_REG_TYPE (Command line)
+assign 4 tb_nmu_cosim.MAX_OUTSTANDING_PER_ID (Command line)
+assign 2 tb_nmu_cosim.RSP_DELAY_CYCLES (Command line)
+assign 32 tb_nmu_cosim.IO_FIFO_DEPTH (Command line)
+assign 8 tb_nmu_cosim.AXI_ID_WIDTH (Command line)
+assign 3 tb_nmu_cosim.MAX_ACTIVE_IDS (Command line)
+TimeScale is 1 ns / 1 ps
+Notice: Ports coerced to inout, use -notice for details
+Starting vcs inline pass...
+36 unique modules to generate
+recompiling package vcs_paramclassrepository
+recompiling package ni_params_pkg
+recompiling package ni_signals_pkg
+recompiling package ni_flit_pkg
+recompiling package topology_pkg
+recompiling package ni_types_pkg
+recompiling package cc_pkg
+recompiling module cc_gray_to_binary
+recompiling module cc_cdc_fifo_gray_src_ptr
+recompiling module cc_cdc_fifo_gray_dst_ptr
+recompiling module ni_sam
+recompiling module nmu_sam
+recompiling package cf_math_pkg
+recompiling module lzc
+recompiling package axi_pkg
+recompiling module axi_id_remap_table
+recompiling module cc_credit_counter
+recompiling module cc_fifo
+recompiling module axi_if
+recompiling module nmu_ordering
+recompiling module nmu_channel_assign
+recompiling module nmu_request_buffer
+recompiling module nmu_request_packetize
+recompiling module nmu_response_depacketize
+recompiling module nmu_request_path
+recompiling module nmu
+recompiling package rand_id_queue_pkg
+recompiling package axi_test
+recompiling package noc_types_pkg
+recompiling module router_wrap
+recompiling module nsu_wrap
+recompiling module axi_delayer_intf
+recompiling module axi_sim_mem_intf
+recompiling module tb_nmu_cosim
+recompiling module AXI_BUS
+recompiling module AXI_BUS_DV
+All of 36 modules done
+make[1]: Entering directory `/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_cf8ccc833a8e/csrc'
+make[1]: Warning: File `filelist.hsopt.llvm2_0.objs' has modification time 111 s in the future
+make[1]: warning:  Clock skew detected.  Your build may be incomplete.
+make[1]: Leaving directory `/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_cf8ccc833a8e/csrc'
+make[1]: Entering directory `/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_cf8ccc833a8e/csrc'
+make[1]: Warning: File `filelist.cu' has modification time 71 s in the future
+make[2]: Warning: File `filelist.cu' has modification time 71 s in the future
+rm -f _csrc*.so pre_vcsobj_*.so share_vcsobj_*.so
+make[2]: warning:  Clock skew detected.  Your build may be incomplete.
+make[2]: Warning: File `filelist.cu' has modification time 71 s in the future
+make[2]: warning:  Clock skew detected.  Your build may be incomplete.
+if [ -x /home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_cf8ccc833a8e/simv ]; then chmod -x /home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_cf8ccc833a8e/simv; fi
+g++  -o /home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_cf8ccc833a8e/simv   -Wl,-rpath-link=./ -Wl,-rpath='$ORIGIN'/simv.daidir/ -Wl,-rpath=./simv.daidir/ -Wl,-rpath='$ORIGIN'/simv.daidir//scsim.db.dir  -L/home/mingwei/noc_project/nmu-standalone/cosim/build/dpi_2cf81ee11ecd -Wl,-rpath,/home/mingwei/noc_project/nmu-standalone/cosim/build/dpi_2cf81ee11ecd -lnmu_cmodel -rdynamic   objs/amcQw_d.o   _12365_archive_1.so  SIM_l.o       rmapats_mop.o rmapats.o rmar.o rmar_nd.o  rmar_llvm_0_1.o rmar_llvm_0_0.o          /home/mingwei/.toolsmgr/vcs/linux64/lib/libzerosoft_rt_stubs.so /home/mingwei/.toolsmgr/vcs/linux64/lib/libvirsim.so /home/mingwei/.toolsmgr/vcs/linux64/lib/liberrorinf.so /home/mingwei/.toolsmgr/vcs/linux64/lib/libsnpsmalloc.so /cadtools/synopsys/verdi/M-2017.03-SP1/share/PLI/VCS/linux64/pli.a    /home/mingwei/.toolsmgr/vcs/linux64/lib/libvcsnew.so /home/mingwei/.toolsmgr/vcs/linux64/lib/libsimprofile.so /home/mingwei/.toolsmgr/vcs/linux64/lib/libuclinative.so /home/mingwei/.toolsmgr/vcs/linux64/lib/vcs_tls.o   -Wl,-whole-archive /home/mingwei/.toolsmgr/vcs/linux64/lib/libvcsucli.so -Wl,-no-whole-archive       ./../simv.daidir/vc_hdrs.o  _vcs_pli_stub_.o   /home/mingwei/.toolsmgr/vcs/linux64/lib/vcs_save_restore_new.o -ldl -lm  -lc -lpthread -ldl 
+/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_cf8ccc833a8e/simv up to date
+make[1]: warning:  Clock skew detected.  Your build may be incomplete.
+make[1]: Leaving directory `/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_cf8ccc833a8e/csrc'
+CPU time: 2.871 seconds to compile + .436 seconds to elab + .460 seconds to link
+python3 run.py --binary "/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_cf8ccc833a8e/simv" --case "capacity_active_ids" --mode "auto" --report "/home/mingwei/noc_project/nmu-standalone/cosim/build/report_wave1" --wave
+
+Note-[RT_BS] Larger stack needed
+  Note: Bumping stack limit from 8192 to 8193 Kbytes.
+
+Chronologic VCS simulator copyright 1991-2017
+Contains Synopsys proprietary information.
+Compiler version M-2017.03-SP1_Full64; Runtime version M-2017.03-SP1_Full64;  Sep 24 17:59 2026
+TX_STORAGE req_bits=4384 dat_bits=40512 context_bits=186
+TX_STORAGE_OLD equal_depth_bits=68992 prior_depth_bits=17248
+RESPONSE_DELAY enabled=0 west_setting=2
+DAT_CREDIT_DEPTH router=32 nmu_rx=32 nsu_rx=32
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2522: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-standalone/cosim/patterns/capacity_active_ids/read.txt opened successfully as -2147483645
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2527: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-standalone/cosim/patterns/capacity_active_ids/write.txt opened successfully as -2147483644
+*Verdi* Loading libsscore_vcs201703.so
+FSDB Dumper for VCS, Release Verdi_M-2017.03-SP1, Linux x86_64/64bit, 05/23/2017
+(C) 1996 - 2017 by Synopsys, Inc.
+*Verdi* : Create FSDB file '/home/mingwei/noc_project/nmu-standalone/cosim/build/report_wave1/capacity_active_ids.fsdb'
+*Verdi* : Begin traversing the scope (tb_nmu_cosim), layer (0).
+*Verdi* : Enable +all dumping.
+*Verdi* : End of traversing.
+TX_BUFFER req_peak=1 req_beats=144 dat_beats=0
+TX_DAT_BUFFER vc=0 peak=0
+TX_DAT_BUFFER vc=1 peak=0
+COVERAGE peak_w=3 peak_r=3 unique_w=3 unique_r=3
+STALL b=0 r=0 aw=302 ar=285
+CAPACITY b_full=0 r_full=0 dat_full=0 wr_limit=0 rd_limit=0
+CONCURRENT live=0 w_during_read=0 r_during_write=0
+REORDER_COVERAGE b_ooo=0 r_ooo=0 b_same_id=0 r_same_id=0 b_buffered=0 r_buffered=0
+DESTINATION port=1 writes=0 reads=0
+DESTINATION port=2 writes=0 reads=0
+DESTINATION port=3 writes=0 reads=0
+DESTINATION port=4 writes=48 reads=48
+NMU_COSIM_COUNTS writes=48 reads=48 r_beats=48 checked_bytes=384
+$finish called from file "repo/sim/cosim/nmu/tb_nmu_cosim.sv", line 712.
+CAPACITY_PERF active_ids=3 per_id=4 cycles=726 wr_id_stall=302 rd_id_stall=285 wr_txn_stall=0 rd_txn_stall=0
+$finish at simulation time              7435000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 7435000 ps
+CPU Time:      0.580 seconds;       Data structure size:   0.8Mb
+Thu Sep 24 18:00:35 2026
+NMU_COSIM_PASS
+

@@ -53,8 +53,11 @@ One 48-bit header layout, three flit widths, one per network (`specgen/generated
 | RSP | 126 | [125:48], 78 b | out: `NarrowB`, `DataB`, `NarrowR` |
 | DAT | 633 | [632:48], 585 b | in: `DataAw`, `DataW`; out: `DataR` |
 
-This is the fixed `NOC_ID_WIDTH = 3` layout: REQ is 136 bits, RSP is 126 bits, and DAT is 633
-bits. `AXI_ID_WIDTH` applies before the endpoint remap and does not change the flit layout.
+This is the default `NOC_ID_WIDTH = 3` layout: REQ is 136 bits, RSP is 126 bits, and DAT is 633
+bits. `AXI_ID_WIDTH` applies before the upstream NMU remap (the endpoint remap in the model environment) and does not change the flit layout.
+
+For other generated NoC ID profiles, REQ is `133 + NOC_ID_WIDTH` bits and RSP is
+`123 + NOC_ID_WIDTH` bits. DAT remains 633 bits for ID widths 1..8.
 
 Header, flit bits [47:0], identical on all three:
 
@@ -361,7 +364,7 @@ second decoder. The complete generated type and array contract is in `rtl/README
 | `AXI_FIFO_DEPTH` | 8 | power of two, >= 2 | common AW/W/AR/B/R dual-clock FIFO depth |
 | `NOC_FIFO_DEPTH` | 8 | positive power of two | REQ/RSP synchronous class FIFO depth; DAT receive capacity is per VC |
 | `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 136 / 126 / 633 | fixed | per-network flit containers and DPI marshalling |
-| `AXI_ID_WIDTH` / `NOC_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 3 / 48 / 512 | external ID 1..8 / fixed 3 / 1..64 / {32,64,128,256,512,1024} | external endpoint ID / NoC-carried ID, beat structs and DPI |
+| `AXI_ID_WIDTH` / `NOC_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 3 / 48 / 512 | external ID 1..8 / generated NoC ID 1..8 / 1..64 / {32,64,128,256,512,1024} | external endpoint ID / NoC-carried ID, beat structs and DPI |
 | create-time `src_id` | 0 | 8 bit | stamped into every response flit `src_id` |
 
 The narrow request ingress stage is a 1-entry register per channel plus the single pending slot, and has no configurable depth. Data-class AW/W ingress is instead one flit queue per DAT VC, `NOC_NI_DAT_RX_VC_DEPTH` = 8 deep, matching the router's LOCAL credit seed so a sender inside its credit can never overflow it. Each VC reassembles its own burst. `pop_aw` scans the VC queues round-robin from `dat_aw_rr_` and admits the first whose front flit is a `DataAw`, recording that VC against the burst. `pop_w` serves the recorded bursts in AW admission order and takes each burst's beats from its own VC queue. A slot is returned when `pop_aw` or `pop_w` consumes the flit, not when the flit arrives. Both may consume a flit of the same VC in one cycle, so up to 2 credits can come due on one VC at once. The wire carries at most 1 pulse per VC per cycle, so the second leaves on the following cycle.

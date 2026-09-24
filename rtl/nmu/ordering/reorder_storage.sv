@@ -42,11 +42,12 @@ module nmu_reorder_storage #(
     data_t             data_reg [DEPTH];
     logic  [DEPTH-1:0] alloc_reg, alloc_next;
     logic  [DEPTH-1:0] complete_reg, complete_next;
-    logic  [TAG_W-1:0] wr_offset_reg [NUM_TAGS], wr_offset_next [NUM_TAGS];
+    logic  [TAG_W-1:0] wr_offset_reg [DEPTH], wr_offset_next [DEPTH];
     logic    [TAG_W:0] free_cnt;
     logic  [TAG_W-1:0] next_base;
-    wire logic [TAG_W:0] wr_addr =
-        {1'b0, wr_base_i} + {1'b0, wr_offset_reg[wr_base_i]};
+    wire logic [TAG_W-1:0] wr_offset = int'(wr_base_i) < DEPTH ?
+        wr_offset_reg[ADDR_W'(wr_base_i)] : '0;
+    wire logic [TAG_W:0] wr_addr = {1'b0, wr_base_i} + {1'b0, wr_offset};
     wire logic wr_accept = wr_valid_i && wr_ready_o;
     wire logic [ADDR_W-1:0] wr_idx = ADDR_W'(wr_addr);
     wire logic [ADDR_W-1:0] rd_idx = ADDR_W'(rd_addr_i);
@@ -76,25 +77,25 @@ module nmu_reorder_storage #(
     always_comb begin
         alloc_next    = alloc_reg;
         complete_next = complete_reg;
-        for (int tag = 0; tag < NUM_TAGS; tag++) begin
+        for (int tag = 0; tag < DEPTH; tag++) begin
             wr_offset_next[tag] = wr_offset_reg[tag];
         end
 
-        if (alloc_valid_i) begin
+        if (alloc_valid_i && int'(alloc_base_i) < DEPTH) begin
             for (int n = 0; n < DEPTH; n++) begin
                 if (n >= int'(alloc_base_i) &&
                         n < int'(alloc_base_i) + int'(alloc_cnt_i)) begin
                     alloc_next[n] = 1'b1;
                 end
             end
-            wr_offset_next[alloc_base_i] = '0;
+            wr_offset_next[ADDR_W'(alloc_base_i)] = '0;
         end
         if (wr_accept) begin
             if (!wr_bypass_i) begin
                 complete_next[wr_idx] = 1'b1;
             end
-            wr_offset_next[wr_base_i] = wr_last_i ? '0 :
-                wr_offset_reg[wr_base_i] + 1'b1;
+            wr_offset_next[ADDR_W'(wr_base_i)] = wr_last_i ? '0 :
+                wr_offset_reg[ADDR_W'(wr_base_i)] + 1'b1;
         end
         if (free_valid_i && int'(free_addr_i) < DEPTH) begin
             alloc_next[free_idx]    = 1'b0;
@@ -106,13 +107,13 @@ module nmu_reorder_storage #(
         if (~rst_n_i) begin
             alloc_reg    <= '0;
             complete_reg <= '0;
-            for (int tag = 0; tag < NUM_TAGS; tag++) begin
+            for (int tag = 0; tag < DEPTH; tag++) begin
                 wr_offset_reg[tag] <= '0;
             end
         end else begin
             alloc_reg    <= alloc_next;
             complete_reg <= complete_next;
-            for (int tag = 0; tag < NUM_TAGS; tag++) begin
+            for (int tag = 0; tag < DEPTH; tag++) begin
                 wr_offset_reg[tag] <= wr_offset_next[tag];
             end
             if (wr_accept && !wr_bypass_i) begin
@@ -123,6 +124,11 @@ module nmu_reorder_storage #(
     // synthesis translate_off
     always @(posedge clk_i) begin
         if (rst_n_i) begin
+            if (alloc_valid_i && (alloc_cnt_i == 0 ||
+                    int'(alloc_base_i) + int'(alloc_cnt_i) > DEPTH))
+                $fatal(1, "ROB allocation exceeds configured storage (%m)");
+            if (wr_valid_i && int'(wr_base_i) >= DEPTH)
+                $fatal(1, "ROB response base exceeds configured storage (%m)");
             if (!wr_valid_i && wr_ready_o !== 1'b0)
                 $fatal(1, "inactive storage fill ready must be zero (%m)");
             if (!rd_en_i && {rd_entry_complete_o, rd_data_o} !== '0)

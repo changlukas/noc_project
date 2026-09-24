@@ -206,14 +206,14 @@ it independently drains REQ and DAT ingress, round-robins simultaneous AW classe
 and burst length in `w_order_`, and blocks W behind the FIFO head. Direct tests for simultaneous
 AW fairness and blocked-head W behavior are still missing.
 
-The NoC carries a fixed 3-bit ID field (`NOC_ID_WIDTH`), so REQ/RSP/DAT links are fixed at
+The default profile carries a 3-bit ID field (`NOC_ID_WIDTH`), so REQ/RSP/DAT links are
 136/126/633 bits. The external `AXI_ID_WIDTH` is independently legal from 1 to 8 and is remapped
 at the endpoint. The remap allocates one of eight NoC IDs to each distinct live external ID,
 backpressures only an unseen ID when all eight are live, and restores the original AXI ID on B/R.
 The generated field positions, flit containers, router ports and NoC class FIFOs therefore remain
-one coherent fixed-width contract; `SRC_ID` and `SRC_PORT_ID` remain NI identity fields.
+one coherent profile-specific contract; `SRC_ID` and `SRC_PORT_ID` remain NI identity fields.
 
-This trades at most eight live external-ID mappings per direction for fixed router wires, buffers,
+The default trades at most eight live external-ID mappings per direction for fixed router wires, buffers,
 crossbars, DPI records, and flit storage. No router or NoC FIFO pays for the maximum 8-bit external
 ID. The endpoint table is supplied by the approved AXI remap primitive, so no project-local mapping
 table or allocator is introduced. The surveyed reference likewise composes flits from parameterized packed header and payload types
@@ -678,3 +678,10 @@ User-approved correction: RSP ingress enters one raw-flit cc_fifo before channel
 Replace two 32-entry RSP class FIFOs with one 32-entry RSP FIFO. This removes one 32-flit storage bank and its pointers and avoids a channel decoder in the external RSP-ready path. The head decode and R arbitration remain combinational after storage. Default empty-to-head latency remains one cycle and the ready, eligible output can accept one flit per cycle. B and control-R can no longer both leave RSP storage in one cycle. Blocking within RSP and reduced combined RSP capacity are intentional. A blocked B head does not block eligible DAT-to-R traffic. A blocked R output still shares arbitration backpressure between control R and DAT. Synthesis area, frequency and power remain unmeasured.
 
 RSP_RX_FIFO_DEPTH defaults to 32 and replaces B_RX_FIFO_DEPTH/R_RX_FIFO_DEPTH. DAT_RX_VC_DEPTH remains 32. DAT credits return one cycle after the actual DAT receive-FIFO pop. ROB, output CDC and optional unpack register capacities remain unchanged.
+
+
+## NMU configurable identity and tracking capacity (issue 120)
+
+Separate wire identity width from active mapping count and per-ID metadata depth. The default remains 3-bit internal identity, eight active mappings per direction and 32 transactions per ID. Internal NoC channel types must use NOC_ID_WIDTH even when external AXI IDs are wider. Packet profile resolution recomputes payload totals and REQ/RSP/DAT widths together. Supported generated identity range is 1..8 bits, matching the existing uint8_t model/DPI carrier. Ordering and remap state scale to MAX_ACTIVE_IDS; explicit modulo/wrap handles non-power-of-two counts. ROB auxiliary offsets scale to actual depth, retaining the wire tag width and malformed-input checks. These changes add no datapath pipeline or payload queue. They reduce declared state for smaller capacities but synthesis area, timing and power remain unmeasured. Existing per-ID limit range1..256 and ROB allocation policy remain unchanged. A shared transaction pool and hole-reusing ROB allocator require separate measured review.
+
+The B storage instance ties its last-beat input high, making its write offsets constant zero. Synthesis can remove that state without a separate B-specific storage implementation. Declared array-bit reductions must not be reported as synthesized area savings.

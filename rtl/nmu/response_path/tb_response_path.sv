@@ -4,15 +4,15 @@
 module tb_nmu_response_path;
     logic noc_clk_i = 0, axi_clk_i = 0;
     logic noc_rst_n_i = 0, axi_rst_n_i = 0;
-    ni_signals_pkg::axi_b_t s_b_i, m_b_o;
-    ni_signals_pkg::axi_r_t s_r_i, m_r_o;
+    ni_signals_pkg::noc_axi_b_t s_b_i, m_b_o;
+    ni_signals_pkg::noc_axi_r_t s_r_i, m_r_o;
     logic                   s_b_valid_i, s_b_ready_o, s_r_valid_i, s_r_ready_o;
     logic                   m_b_valid_o, m_b_ready_i, m_r_valid_o, m_r_ready_i;
 
     nmu_response_fifo #(
         .AXI_FIFO_DEPTH (4                      ),
-        .b_t            (ni_signals_pkg::axi_b_t),
-        .r_t            (ni_signals_pkg::axi_r_t)
+        .b_t            (ni_signals_pkg::noc_axi_b_t),
+        .r_t            (ni_signals_pkg::noc_axi_r_t)
     ) dut (
         .noc_clk_i   (noc_clk_i  ),
         .noc_rst_n_i (noc_rst_n_i),

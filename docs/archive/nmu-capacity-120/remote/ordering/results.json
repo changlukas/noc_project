@@ -1,0 +1,10 @@
+[
+  {
+    "top": "tb_nmu_ordering",
+    "parameters": {
+      "MAX_ACTIVE_IDS": 3
+    },
+    "pass": true,
+    "log": "/home/mingwei/noc_project/nmu-standalone/cosim/build/capacity120/ordering/tb_nmu_ordering_eeeab2ff/sim.log"
+  }
+]

@@ -9,8 +9,8 @@ module nmu_response_fifo #(
     parameter int unsigned AXI_FIFO_DEPTH = 32,
     parameter int unsigned B_FIFO_DEPTH   = AXI_FIFO_DEPTH,
     parameter int unsigned R_FIFO_DEPTH   = AXI_FIFO_DEPTH,
-    parameter type         b_t            = ni_signals_pkg::axi_b_t,
-    parameter type         r_t            = ni_signals_pkg::axi_r_t
+    parameter type         b_t            = ni_signals_pkg::noc_axi_b_t,
+    parameter type         r_t            = ni_signals_pkg::noc_axi_r_t
 ) (
     input  wire logic noc_clk_i,
     input  wire logic noc_rst_n_i,

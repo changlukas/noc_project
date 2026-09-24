@@ -46,17 +46,17 @@ package ni_types_pkg;
     } nmu_response_t;
 
     typedef struct packed {
-        ni_signals_pkg::axi_aw_t axi;
+        ni_signals_pkg::noc_axi_aw_t axi;
         nmu_aw_route_t           route;
     } nmu_sam_aw_result_t;
 
     typedef struct packed {
-        ni_signals_pkg::axi_ar_t axi;
+        ni_signals_pkg::noc_axi_ar_t axi;
         nmu_route_t              route;
     } nmu_sam_ar_result_t;
 
     typedef struct packed {
-        ni_signals_pkg::axi_aw_t                                          axi;
+        ni_signals_pkg::noc_axi_aw_t                                          axi;
         nmu_request_t                                                     meta;
         logic                           [ni_flit_pkg::AXI_USER_WIDTH-1:0] user;
         logic                      [ni_flit_pkg::COLLECTIVE_OP_WIDTH-1:0] collective_op;
@@ -64,17 +64,17 @@ package ni_types_pkg;
     } nmu_aw_request_t;
 
     typedef struct packed {
-        ni_signals_pkg::axi_ar_t axi;
+        ni_signals_pkg::noc_axi_ar_t axi;
         nmu_request_t            meta;
     } nmu_ar_request_t;
 
     typedef struct packed {
-        ni_signals_pkg::axi_b_t axi;
+        ni_signals_pkg::noc_axi_b_t axi;
         nmu_response_t          meta;
     } nmu_b_response_t;
 
     typedef struct packed {
-        ni_signals_pkg::axi_r_t axi;
+        ni_signals_pkg::noc_axi_r_t axi;
         nmu_response_t          meta;
     } nmu_r_response_t;
 
@@ -91,7 +91,7 @@ package ni_types_pkg;
     typedef struct packed {
         logic                   occupied;
         logic                   complete;
-        ni_signals_pkg::axi_b_t beat;
+        ni_signals_pkg::noc_axi_b_t beat;
     } nmu_b_rob_entry_t;
 
     typedef struct packed {
@@ -99,7 +99,7 @@ package ni_types_pkg;
         logic complete;
         logic [$clog2(ni_params_pkg::AXI_DATA_WIDTH /
                       ni_flit_pkg::NOC_NARROW_DATA_WIDTH)-1:0] narrow_lane;
-        ni_signals_pkg::axi_r_t beat;
+        ni_signals_pkg::noc_axi_r_t beat;
     } nmu_r_rob_entry_t;
 
     // Narrow-read address basis shared by enabled bypass and structural
@@ -130,22 +130,22 @@ package ni_types_pkg;
     } response_entry_t;
 
     typedef struct packed {
-        ni_signals_pkg::axi_aw_t axi;
+        ni_signals_pkg::noc_axi_aw_t axi;
         response_entry_t         response;
     } nsu_aw_request_t;
 
     typedef struct packed {
-        ni_signals_pkg::axi_ar_t axi;
+        ni_signals_pkg::noc_axi_ar_t axi;
         response_entry_t         response;
     } nsu_ar_request_t;
 
     typedef struct packed {
-        ni_signals_pkg::axi_b_t axi;
+        ni_signals_pkg::noc_axi_b_t axi;
         response_entry_t        response;
     } nsu_b_response_t;
 
     typedef struct packed {
-        ni_signals_pkg::axi_r_t axi;
+        ni_signals_pkg::noc_axi_r_t axi;
         response_entry_t        response;
     } nsu_r_response_t;
 

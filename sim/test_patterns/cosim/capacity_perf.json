@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "name": "capacity_active_ids",
+      "count": 48,
+      "mode": "control",
+      "ids": "multiple",
+      "num_ids": 12
+    },
+    {
+      "name": "capacity_per_id",
+      "count": 48,
+      "mode": "control",
+      "ids": "same"
+    }
+  ]
+}

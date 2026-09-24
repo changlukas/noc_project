@@ -1,0 +1,10 @@
+Chronologic VCS simulator copyright 1991-2017
+Contains Synopsys proprietary information.
+Compiler version M-2017.03-SP1_Full64; Runtime version M-2017.03-SP1_Full64;  Sep 24 18:09 2026
+ORDERING_CAPACITY_PASS active_ids=3
+$finish called from file "repo/rtl/nmu/ordering/tb_ordering.sv", line 189.
+$finish at simulation time               400000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 400000 ps
+CPU Time:      0.310 seconds;       Data structure size:   0.0Mb
+Thu Sep 24 18:09:45 2026

@@ -23,7 +23,7 @@ module nmu_request_inject_tb_dut #(
     input  wire ni_types_pkg::nmu_aw_request_t                  s_aw_i,
     input  wire logic                                           s_aw_valid_i,
     output wire logic                                           s_aw_ready_o,
-    input  wire ni_signals_pkg::axi_w_t                         s_w_i,
+    input  wire ni_signals_pkg::noc_axi_w_t                     s_w_i,
     input  wire logic                                           s_w_valid_i,
     output wire logic                                           s_w_ready_o,
     input  wire ni_types_pkg::nmu_ar_request_t                  s_ar_i,
@@ -43,7 +43,7 @@ module nmu_request_inject_tb_dut #(
     wire                         [NUM_NMU_REQ_CH-1:0] req_valid, req_ready;
     wire                         [NUM_NMU_DAT_CH-1:0] dat_valid, dat_ready;
     wire ni_types_pkg::nmu_aw_request_t packet_aw, packet_w_aw;
-    wire ni_signals_pkg::axi_w_t packet_w;
+    wire ni_signals_pkg::noc_axi_w_t packet_w;
     wire logic packet_aw_valid, packet_aw_ready, packet_w_valid, packet_w_ready;
     wire logic [ni_flit_pkg::AXI_LEN_WIDTH-1:0] packet_w_beat;
     nmu_write_context i_write_context (

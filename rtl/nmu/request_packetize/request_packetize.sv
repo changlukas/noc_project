@@ -21,7 +21,7 @@ module nmu_request_packetize #(
     output wire logic                                                             s_aw_ready_o,
     input  wire ni_types_pkg::nmu_aw_request_t                                    s_w_aw_i,
     input  wire logic                            [ni_flit_pkg::AXI_LEN_WIDTH-1:0] s_w_beat_i,
-    input  wire ni_signals_pkg::axi_w_t                                           s_w_i,
+    input  wire ni_signals_pkg::noc_axi_w_t                                       s_w_i,
     input  wire logic                                                             s_w_valid_i,
     output wire logic                                                             s_w_ready_o,
     input  wire ni_types_pkg::nmu_ar_request_t                                    s_ar_i,
@@ -39,7 +39,7 @@ module nmu_request_packetize #(
     localparam logic [ni_flit_pkg::AXI_BURST_WIDTH-1:0] AXI_BURST_INCR = 2'b01;
     localparam logic [ni_flit_pkg::AXI_BURST_WIDTH-1:0] AXI_BURST_WRAP = 2'b10;
     typedef struct packed {
-        ni_signals_pkg::axi_w_t                                         axi;
+        ni_signals_pkg::noc_axi_w_t                                         axi;
         ni_types_pkg::nmu_aw_request_t                                  owner;
         logic                          [ni_flit_pkg::AXI_LEN_WIDTH-1:0] beat_index;
     } write_beat_t;

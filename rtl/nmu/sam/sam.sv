@@ -17,20 +17,20 @@ module nmu_sam #(
     parameter type         sam_rule_t,
     parameter sam_rule_t [SAM_NUM_RULES-1:0] SAM
 ) (
-    input  wire logic                              noc_clk_i,
-    input  wire logic                              noc_rst_n_i,
-    input  wire logic                              s_aw_valid_i,
-    output wire logic                              s_aw_ready_o,
-    input  wire ni_signals_pkg::axi_aw_t           s_aw_i,
-    output wire logic                              m_aw_valid_o,
-    input  wire logic                              m_aw_ready_i,
-    output wire ni_types_pkg::nmu_sam_aw_result_t  m_aw_o,
-    input  wire logic                              s_ar_valid_i,
-    output wire logic                              s_ar_ready_o,
-    input  wire ni_signals_pkg::axi_ar_t           s_ar_i,
-    output wire logic                              m_ar_valid_o,
-    input  wire logic                              m_ar_ready_i,
-    output wire ni_types_pkg::nmu_sam_ar_result_t  m_ar_o
+    input  wire logic                             noc_clk_i,
+    input  wire logic                             noc_rst_n_i,
+    input  wire logic                             s_aw_valid_i,
+    output wire logic                             s_aw_ready_o,
+    input  wire ni_signals_pkg::noc_axi_aw_t      s_aw_i,
+    output wire logic                             m_aw_valid_o,
+    input  wire logic                             m_aw_ready_i,
+    output wire ni_types_pkg::nmu_sam_aw_result_t m_aw_o,
+    input  wire logic                             s_ar_valid_i,
+    output wire logic                             s_ar_ready_o,
+    input  wire ni_signals_pkg::noc_axi_ar_t      s_ar_i,
+    output wire logic                             m_ar_valid_o,
+    input  wire logic                             m_ar_ready_i,
+    output wire ni_types_pkg::nmu_sam_ar_result_t m_ar_o
 );
 
     localparam int unsigned AXI_ADDR_W        = ni_params_pkg::AXI_ADDR_WIDTH;

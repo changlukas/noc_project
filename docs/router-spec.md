@@ -50,8 +50,11 @@ per cycle.
 | RSP | 126 | [125:48], 78 b | ready/valid, 1 VC |
 | DAT | 633 | [632:48], 585 b | credit, `NUM_VC` 1..8 |
 
-This is the fixed `NOC_ID_WIDTH = 3` layout: REQ is 136 bits, RSP is 126 bits, and DAT is 633
+This is the default `NOC_ID_WIDTH = 3` layout: REQ is 136 bits, RSP is 126 bits, and DAT is 633
 bits. A router consumes these generated package widths and does not select flit widths independently.
+
+For generated NoC ID widths 1..8, REQ is `133 + NOC_ID_WIDTH` bits, RSP is
+`123 + NOC_ID_WIDTH` bits and DAT remains 633 bits.
 
 **Packet and wormhole switching.** An AXI transaction is packetized by the NI into one
 or more flits sharing the same header `dst_id`. The header bit `flit_tail` marks packet

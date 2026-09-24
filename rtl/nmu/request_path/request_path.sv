@@ -10,6 +10,7 @@
 module nmu_request_path #(
     parameter int unsigned AXI_ID_WIDTH                              = ni_params_pkg::AXI_ID_WIDTH,
     parameter int unsigned NOC_ID_WIDTH                              = ni_params_pkg::NOC_ID_WIDTH,
+    parameter int unsigned MAX_ACTIVE_IDS                            = 1 << (AXI_ID_WIDTH < NOC_ID_WIDTH ? AXI_ID_WIDTH : NOC_ID_WIDTH),
     parameter int unsigned AXI_ADDR_WIDTH                            = ni_params_pkg::AXI_ADDR_WIDTH,
     parameter int unsigned AXI_DATA_WIDTH                            = ni_params_pkg::AXI_DATA_WIDTH,
     parameter int unsigned AXI_AWUSER_WIDTH                          = ni_params_pkg::AXI_AWUSER_WIDTH,
@@ -48,7 +49,7 @@ module nmu_request_path #(
     output wire ni_types_pkg::nmu_sam_aw_result_t                                         m_aw_o,
     output wire logic                                                                     m_aw_valid_o,
     input  wire logic                                                                     m_aw_ready_i,
-    output wire ni_signals_pkg::axi_w_t                                                   m_w_o,
+    output wire ni_signals_pkg::noc_axi_w_t                                               m_w_o,
     output wire logic                                                                     m_w_valid_o,
     input  wire logic                                                                     m_w_ready_i,
     output wire ni_types_pkg::nmu_sam_ar_result_t                                         m_ar_o,
@@ -57,16 +58,16 @@ module nmu_request_path #(
     input  wire ni_types_pkg::nmu_aw_request_t                                            s_ordered_aw_i,
     input  wire logic                                                                     s_ordered_aw_valid_i,
     output wire logic                                                                     s_ordered_aw_ready_o,
-    input  wire ni_signals_pkg::axi_w_t                                                   s_ordered_w_i,
+    input  wire ni_signals_pkg::noc_axi_w_t                                               s_ordered_w_i,
     input  wire logic                                                                     s_ordered_w_valid_i,
     output wire logic                                                                     s_ordered_w_ready_o,
     input  wire ni_types_pkg::nmu_ar_request_t                                            s_ordered_ar_i,
     input  wire logic                                                                     s_ordered_ar_valid_i,
     output wire logic                                                                     s_ordered_ar_ready_o,
-    input  wire ni_signals_pkg::axi_b_t                                                   s_b_i,
+    input  wire ni_signals_pkg::noc_axi_b_t                                               s_b_i,
     input  wire logic                                                                     s_b_valid_i,
     output wire logic                                                                     s_b_ready_o,
-    input  wire ni_signals_pkg::axi_r_t                                                   s_r_i,
+    input  wire ni_signals_pkg::noc_axi_r_t                                               s_r_i,
     input  wire logic                                                                     s_r_valid_i,
     output wire logic                                                                     s_r_ready_o,
     output wire logic                                                                     tx_req_valid_o,
@@ -80,8 +81,6 @@ module nmu_request_path #(
 
     // External ID ownership belongs to NMU. This boundary stays in axi_clk_i;
     // downstream request and response CDC carry only fixed-width NoC IDs.
-    localparam int unsigned MAX_ACTIVE_IDS =
-        1 << (AXI_ID_WIDTH < NOC_ID_WIDTH ? AXI_ID_WIDTH : NOC_ID_WIDTH);
 
     typedef logic [AXI_ID_WIDTH-1:0] external_id_t;
     typedef logic [NOC_ID_WIDTH-1:0] internal_id_t;
@@ -98,17 +97,17 @@ module nmu_request_path #(
     internal_req_t  internal_req;
     internal_resp_t internal_rsp;
 
-    ni_signals_pkg::axi_aw_t axi_aw;
-    ni_signals_pkg::axi_w_t  axi_w;
-    ni_signals_pkg::axi_ar_t axi_ar;
+    ni_signals_pkg::noc_axi_aw_t axi_aw;
+    ni_signals_pkg::noc_axi_w_t  axi_w;
+    ni_signals_pkg::noc_axi_ar_t axi_ar;
     wire                     axi_aw_ready, axi_w_ready, axi_ar_ready;
     ni_flit_pkg::req_flit_t  tx_req;
     ni_flit_pkg::dat_flit_t  tx_dat;
 
-    wire ni_signals_pkg::axi_aw_t fifo_aw;
+    wire ni_signals_pkg::noc_axi_aw_t fifo_aw;
     wire logic                    fifo_aw_valid;
     wire logic                    fifo_aw_ready;
-    wire ni_signals_pkg::axi_ar_t fifo_ar;
+    wire ni_signals_pkg::noc_axi_ar_t fifo_ar;
     wire logic                    fifo_ar_valid;
     wire logic                    fifo_ar_ready;
 
@@ -223,9 +222,9 @@ module nmu_request_path #(
     nmu_request_fifo #(
         .AXI_FIFO_DEPTH (AXI_FIFO_DEPTH          ),
         .AXI_ID_WIDTH   (NOC_ID_WIDTH            ),
-        .aw_t           (ni_signals_pkg::axi_aw_t),
-        .w_t            (ni_signals_pkg::axi_w_t ),
-        .ar_t           (ni_signals_pkg::axi_ar_t),
+        .aw_t           (ni_signals_pkg::noc_axi_aw_t),
+        .w_t            (ni_signals_pkg::noc_axi_w_t ),
+        .ar_t           (ni_signals_pkg::noc_axi_ar_t),
         .AW_FIFO_DEPTH  (AW_FIFO_DEPTH           ),
         .W_FIFO_DEPTH   (W_FIFO_DEPTH            ),
         .AR_FIFO_DEPTH  (AR_FIFO_DEPTH           )
@@ -285,7 +284,7 @@ module nmu_request_path #(
     wire                         [NUM_NMU_REQ_CH-1:0] req_valid, req_ready;
     wire                         [NUM_NMU_DAT_CH-1:0] dat_valid, dat_ready;
     wire ni_types_pkg::nmu_aw_request_t packet_aw, packet_w_aw;
-    wire ni_signals_pkg::axi_w_t packet_w;
+    wire ni_signals_pkg::noc_axi_w_t packet_w;
     wire logic packet_aw_valid, packet_aw_ready, packet_w_valid, packet_w_ready;
     wire logic [ni_flit_pkg::AXI_LEN_WIDTH-1:0] packet_w_beat;
     nmu_write_context i_write_context (

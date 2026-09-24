@@ -1,6 +1,10 @@
 `timescale 1ns / 1ps
 `include "axi/assign.svh"
 module tb_nmu_cosim #(
+    parameter int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_ID_WIDTH,
+    parameter int unsigned MAX_ACTIVE_IDS = 1 << (AXI_ID_WIDTH < ni_params_pkg::NOC_ID_WIDTH ?
+        AXI_ID_WIDTH : ni_params_pkg::NOC_ID_WIDTH),
+    parameter int unsigned MAX_OUTSTANDING_PER_ID = ni_params_pkg::NMU_MAX_OUTSTANDING_PER_ID,
     parameter int unsigned RSP_DELAY_CYCLES = 0,
     parameter int unsigned OUTPUT_REG_TYPE = 0,
     parameter int unsigned IO_FIFO_DEPTH = 32
@@ -124,6 +128,9 @@ module tb_nmu_cosim #(
         .DAT_W_REG_TYPE (OUTPUT_REG_TYPE),
         .B_REG_TYPE (OUTPUT_REG_TYPE),
         .R_REG_TYPE (OUTPUT_REG_TYPE),
+        .AXI_ID_WIDTH (AXI_ID_WIDTH),
+        .MAX_ACTIVE_IDS (MAX_ACTIVE_IDS),
+        .MAX_OUTSTANDING_PER_ID (MAX_OUTSTANDING_PER_ID),
         .AXI_FIFO_DEPTH (IO_FIFO_DEPTH),
         .REQ_FIFO_DEPTH (IO_FIFO_DEPTH),
         .DAT_TX_FIFO_DEPTH (IO_FIFO_DEPTH),
@@ -783,4 +790,28 @@ module tb_nmu_cosim #(
         $fsdbDumpvars(0, tb_nmu_cosim, "+all");
     end
 `endif
+    int perf_cycle = 0, perf_start = -1, perf_end = -1;
+    int wr_id_stall = 0, rd_id_stall = 0, wr_txn_stall = 0, rd_txn_stall = 0;
+    always @(posedge clk) begin
+        if (axi_rst_n) begin
+            perf_cycle++;
+            if (perf_start < 0 && ((vip.aw_valid && vip.aw_ready) || (vip.ar_valid && vip.ar_ready)))
+                perf_start = perf_cycle;
+            if ((vip.b_valid && vip.b_ready) || (vip.r_valid && vip.r_ready && vip.r_last))
+                perf_end = perf_cycle;
+            if (vip.aw_valid && !vip.aw_ready && !dut.i_request_path.i_id_remap.aw_hold_reg) begin
+                if (!dut.i_request_path.i_id_remap.wr_exists && dut.i_request_path.i_id_remap.wr_full) wr_id_stall++;
+                if (dut.i_request_path.i_id_remap.wr_exists_full) wr_txn_stall++;
+            end
+            if (vip.ar_valid && !vip.ar_ready && !dut.i_request_path.i_id_remap.ar_hold_reg) begin
+                if (!dut.i_request_path.i_id_remap.rd_exists && dut.i_request_path.i_id_remap.rd_full) rd_id_stall++;
+                if (dut.i_request_path.i_id_remap.rd_exists_full) rd_txn_stall++;
+            end
+        end
+    end
+    final begin
+        $display("CAPACITY_PERF active_ids=%0d per_id=%0d cycles=%0d wr_id_stall=%0d rd_id_stall=%0d wr_txn_stall=%0d rd_txn_stall=%0d",
+            MAX_ACTIVE_IDS, MAX_OUTSTANDING_PER_ID, perf_end-perf_start+1,
+            wr_id_stall, rd_id_stall, wr_txn_stall, rd_txn_stall);
+    end
 endmodule

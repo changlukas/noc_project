@@ -15,14 +15,14 @@ module tb_nmu_sam;
 
     logic                             [NUM_MODE_PAIRS-1:0] s_aw_valid;
     logic                             [NUM_MODE_PAIRS-1:0] s_aw_ready;
-    ni_signals_pkg::axi_aw_t          [NUM_MODE_PAIRS-1:0] s_aw;
+    ni_signals_pkg::noc_axi_aw_t          [NUM_MODE_PAIRS-1:0] s_aw;
     logic                             [NUM_MODE_PAIRS-1:0] m_aw_valid;
     logic                             [NUM_MODE_PAIRS-1:0] m_aw_ready;
     ni_types_pkg::nmu_sam_aw_result_t [NUM_MODE_PAIRS-1:0] m_aw;
 
     logic                             [NUM_MODE_PAIRS-1:0] s_ar_valid;
     logic                             [NUM_MODE_PAIRS-1:0] s_ar_ready;
-    ni_signals_pkg::axi_ar_t          [NUM_MODE_PAIRS-1:0] s_ar;
+    ni_signals_pkg::noc_axi_ar_t          [NUM_MODE_PAIRS-1:0] s_ar;
     logic                             [NUM_MODE_PAIRS-1:0] m_ar_valid;
     logic                             [NUM_MODE_PAIRS-1:0] m_ar_ready;
     ni_types_pkg::nmu_sam_ar_result_t [NUM_MODE_PAIRS-1:0] m_ar;
@@ -79,8 +79,8 @@ module tb_nmu_sam;
         sampled_m_ar       <= m_ar;
     end
 
-    function automatic ni_signals_pkg::axi_aw_t make_aw(input int unsigned index);
-        ni_signals_pkg::axi_aw_t value;
+    function automatic ni_signals_pkg::noc_axi_aw_t make_aw(input int unsigned index);
+        ni_signals_pkg::noc_axi_aw_t value;
 
         value             = '0;
         value.awid        = index[ni_params_pkg::NOC_ID_WIDTH-1:0];
@@ -96,8 +96,8 @@ module tb_nmu_sam;
         return value;
     endfunction
 
-    function automatic ni_signals_pkg::axi_ar_t make_ar(input int unsigned index);
-        ni_signals_pkg::axi_ar_t value;
+    function automatic ni_signals_pkg::noc_axi_ar_t make_ar(input int unsigned index);
+        ni_signals_pkg::noc_axi_ar_t value;
 
         value         = '0;
         value.arid    = index[ni_params_pkg::NOC_ID_WIDTH-1:0];
@@ -109,7 +109,7 @@ module tb_nmu_sam;
     endfunction
 
     task automatic drive_aw(input int unsigned n, input int unsigned index);
-        ni_signals_pkg::axi_aw_t value;
+        ni_signals_pkg::noc_axi_aw_t value;
 
         value            = make_aw(index);
         s_aw[n].awid     = value.awid;
@@ -126,7 +126,7 @@ module tb_nmu_sam;
     endtask
 
     task automatic drive_ar(input int unsigned n, input int unsigned index);
-        ni_signals_pkg::axi_ar_t value;
+        ni_signals_pkg::noc_axi_ar_t value;
 
         value            = make_ar(index);
         s_ar[n].arid     = value.arid;
@@ -145,7 +145,7 @@ module tb_nmu_sam;
         input int unsigned index
     );
         ni_types_pkg::nmu_sam_aw_result_t value;
-        ni_signals_pkg::axi_aw_t          input_value;
+        ni_signals_pkg::noc_axi_aw_t          input_value;
         int unsigned                      rule_index;
 
         value                                = '0;

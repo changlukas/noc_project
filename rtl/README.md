@@ -18,8 +18,10 @@ parameter source.
 
 | Canonical parameter | Default | Legal values | Contract |
 |---|---:|---|---|
-| `AXI_ID_WIDTH` | 3 | 1..8 | External endpoint AXI ID width. The endpoint remaps live IDs to the fixed NoC ID space and restores B/R IDs. |
-| `NOC_ID_WIDTH` | 3 | fixed 3 | NoC-carried ID field and fixed REQ/RSP/DAT widths: 136/126/633 b. `SRC_ID` and `SRC_PORT_ID` remain NI identity parameters. |
+| `AXI_ID_WIDTH` | 3 | 1..8 | External AXI ID width. Production NMU remaps live IDs before request CDC and restores B/R IDs after response CDC. The model endpoint retains its external remap. |
+| `NOC_ID_WIDTH` | 3 | 1..8, generated profile | NoC-carried ID field. REQ/RSP widths are 133/123 plus ID width; DAT remains 633 b. `SRC_ID` and `SRC_PORT_ID` remain NI identity parameters. |
+| `MAX_ACTIVE_IDS` | `2**min(AXI_ID_WIDTH, NOC_ID_WIDTH)` (8) | 1 through the default expression | NMU live IDs per direction; sizes remap and ordering state. |
+| `MAX_OUTSTANDING_PER_ID` | 32 | 1..256 | NMU transactions per active ID; sizes per-ID order storage and counters. |
 | `NOC_DAT_NUM_VC` | 2 | 1..8 | DAT VC count and credit-vector width; REQ and RSP remain single-VC |
 | `NOC_DAT_VC_MODE` | `NOC_DAT_VC_MODE_SHARED` (0) | `NOC_DAT_VC_MODE_SHARED` (0), `NOC_DAT_VC_MODE_READ_WRITE_SPLIT` (1) | One system-wide elaboration choice for NI allocation and DAT Router VA |
 | `NOC_NI_DAT_RX_VC_DEPTH` | `NOC_ROUTER_VC_DEPTH` (8) | power of two, >= 2 | NI DAT receive FIFO depth per eligible VC and Router LOCAL sender-credit seed |

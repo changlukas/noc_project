@@ -1,0 +1,275 @@
+--- a/docs/nmu-spec.md
++++ b/docs/nmu-spec.md
+@@ -9,7 +9,7 @@
+ 
+ ### 2.1 Packetization
+ 
+-The NoC fabric moves fixed-size flits, not AXI beats. Packetization is a 1-to-1 mapping: every accepted NoC-bound AXI request beat becomes exactly one flit, and every response flit becomes exactly one NoC-bound AXI response beat. The fixed `NOC_ID_WIDTH = 3` layout uses a 48-bit header plus a payload sized per network (REQ 136 b, RSP 126 b, DAT 633 b total). The external `AXI_ID_WIDTH` is 1..8 and is remapped inside `nmu` in the AXI clock domain before request CDC; B/R responses restore it after response CDC. `SRC_ID` and `SRC_PORT_ID` remain NI identity fields. The header carries routing and ordering metadata (source node, destination node, virtual channel, wormhole packet boundary, reorder-buffer tag, collective op and mask). The payload carries the NoC-bound AXI channel fields verbatim.
++The NoC fabric moves fixed-size flits, not AXI beats. Packetization is a 1-to-1 mapping: every accepted NoC-bound AXI request beat becomes exactly one flit, and every response flit becomes exactly one NoC-bound AXI response beat. The default `NOC_ID_WIDTH = 3` layout uses a 48-bit header plus a payload sized per network (REQ 136 b, RSP 126 b, DAT 633 b total). The external `AXI_ID_WIDTH` is 1..8 and is remapped inside `nmu` in the AXI clock domain before request CDC; B/R responses restore it after response CDC. `SRC_ID` and `SRC_PORT_ID` remain NI identity fields. The header carries routing and ordering metadata (source node, destination node, virtual channel, wormhole packet boundary, reorder-buffer tag, collective op and mask). The payload carries the NoC-bound AXI channel fields verbatim.
+ 
+ A write transaction of AWLEN+1 beats therefore becomes 1 AW flit followed by AWLEN+1 W flits. A read request becomes 1 AR flit. The write's flits form one wormhole packet (the AW flit opens it, the W flit with `wlast=1` closes it) so no other request flit from this NMU can interleave between an AW and its W beats on the link. AW+W is the only multi-flit packet the fabric builds, and AXI4 IHI 0022 A5.3.3 is why: W beats of different transactions may not interleave, so the AW and its burst have to travel as one indivisible unit. A read request and every response are single-flit packets, R beats included.
+ 
+@@ -256,9 +256,9 @@
+ 
+ `RobMode` selects the R side only. RTL exposes the elaboration-time bit parameter `R_ROB_EN`, defaulted from `NMU_R_ROB_EN`, and selects the two structural paths with `generate if`; no preprocessor conditional controls this choice. `RobMode::Enabled`: R responses use the slot pool as above. `RobMode::Disabled` (`R_ROB_EN = 0`): the R RoB is off. Each AXI ID keeps an outstanding counter and one latched ordering-domain key `{dst_id, dst_port_id, AXI class}`. An idle ID accepts any AR and latches its key. A non-idle ID accepts another AR only when the key matches and the counter is below `MAX_OUTSTANDING_PER_ID`; otherwise it stalls until the counter returns to zero. Acceptance increments the counter and retirement of an R beat with `rlast` decrements it. Every Disabled-mode AR carries `ordering_req=0` and reserves no R slot. The B-side RoB always runs in both modes as a per-ID metadata-only RoB: it preserves issue order within an ID while permitting responses of different IDs to pass independently. Wherever this document says "RobMode", it governs reads only.
+ 
+-Per-ID transaction gate, both directions and both R modes: at most `MAX_OUTSTANDING_PER_ID` = 32 outstanding transactions per ID. A burst is one transaction regardless of ARLEN. An entry or counter unit is taken when the request is accepted and released when the response is accepted at the AXI side, B on its single beat and R on rlast. A 33rd same-ID request is refused until one completes, which backpressures through the AxiSlavePort queue to awready / arready.
+-
+-There is no aggregate pool above the per-ID gate, so NoC-side in-flight requests cap at `MAX_OUTSTANDING_PER_ID` x 2^`NOC_ID_WIDTH` = 32 x 8 = 256 per direction. An external unseen AXI ID may instead be stalled by the NMU internal remap until a NoC ID is freed. Two limiters coexist on the write side and on Enabled reads, the per-ID order-list depth and the RoB slot pool, and which one binds depends on the traffic: a bypassed transaction takes a list entry and reserves no slot, so a stream that stays in branches 1 and 2 meets only the per-ID gate. Disabled reads have no slot-pool limiter but cannot cross an ordering-domain boundary until that ID becomes idle.
++Per-ID transaction gate, both directions and both R modes: at most `MAX_OUTSTANDING_PER_ID` outstanding transactions per ID (default 32). A burst is one transaction regardless of ARLEN. An entry or counter unit is taken when the request is accepted and released when the response is accepted at the AXI side, B on its single beat and R on rlast. With the default limit, a 33rd same-ID request is refused until one completes, which backpressures through the AxiSlavePort queue to awready / arready.
++
++There is no aggregate pool above the per-ID gate, so NoC-side in-flight requests cap at `MAX_OUTSTANDING_PER_ID` x `MAX_ACTIVE_IDS` (default 32 x 8 = 256) per direction. An external unseen AXI ID may instead be stalled by the NMU internal remap until a NoC ID is freed. Two limiters coexist on the write side and on Enabled reads, the per-ID order-list depth and the RoB slot pool, and which one binds depends on the traffic: a bypassed transaction takes a list entry and reserves no slot, so a stream that stays in branches 1 and 2 meets only the per-ID gate. Disabled reads have no slot-pool limiter but cannot cross an ordering-domain boundary until that ID becomes idle.
+ 
+ ### 2.6 Worked example: 2-beat write burst
+ 
+@@ -289,14 +289,15 @@
+ | Parameter | Default | Legal range | Consumed by |
+ |---|---|---|---|
+ | AXI_ID_WIDTH | 3 | 1..8 | External AXI ID width at the NMU port; remapped inside the NMU |
+-| NOC_ID_WIDTH | 3 | fixed 3 | NoC-carried ID fields and RoB per-ID arrays |
++| NOC_ID_WIDTH | 3 | 1..8, generated profile | NoC-carried ID fields and derived network widths |
++| MAX_ACTIVE_IDS | `2**min(AXI_ID_WIDTH, NOC_ID_WIDTH)` (8) | 1 through the default expression | Live internal IDs per direction; remap, order tables, read context and arbitration |
+ | AXI_ADDR_WIDTH | 48 | 1..64 | Address fields |
+ | AXI_DATA_WIDTH | 512 | {32,64,128,256,512,1024} | wdata / rdata, WSTRB_WIDTH = 64 |
+ | AXI_AWUSER_WIDTH | 58 | 10..64 | AWUSER slave-port field and the DPI unpack mask: 8 b user + 2 b collective_op + 48 b collective address mask (Section 2.8) |
+ | NUM_DAT_VC | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector width; shared with the wrapper parameter `NUM_DAT_VC` |
+ | NOC_DAT_VC_MODE | SHARED (0) | {SHARED (0), READ_WRITE_SPLIT (1)} | Target `VcAllocator` eligible mask; system-wide with DAT router VA; current model implements SHARED only |
+-| NOC_REQ_FLIT_WIDTH | 136 | fixed | REQ egress flit port |
+-| NOC_RSP_FLIT_WIDTH | 126 | fixed | RSP ingress flit port |
++| NOC_REQ_FLIT_WIDTH | 136 | derived: `133 + NOC_ID_WIDTH` | REQ egress flit port |
++| NOC_RSP_FLIT_WIDTH | 126 | derived: `123 + NOC_ID_WIDTH` | RSP ingress flit port |
+ | NOC_DAT_FLIT_WIDTH | 633 | fixed | DAT flit ports, both directions |
+ | NOC_ROUTER_VC_DEPTH | 8 | power of two, >= 2 | Router LOCAL input VC FIFO depth and NMU DAT sender-credit seed |
+ | `DAT_RX_VC_DEPTH` | 32 | power of two, >= 2 | NMU DataR receive FIFO depth per eligible VC and Router LOCAL sender-credit seed |
+@@ -311,6 +312,21 @@
+ | NMU_ARBITER_FIFO_DEPTH [current model] | 4 | 1..64 | Wormhole per-input and VC pending queues; not target NI VC storage |
+ | AW_SAM_REG_TYPE | 0 | {0,1,2} | AW decode-to-RoB slice: bypass, simple register, full skid |
+ | AR_SAM_REG_TYPE | 0 | {0,1,2} | AR decode-to-RoB slice, independently selected |
++
++`MAX_ACTIVE_IDS` and `MAX_OUTSTANDING_PER_ID` are elaboration-time parameters
++forwarded through the NMU paths. Read and write capacities are independent and use
++the same configured limits. Reducing active IDs shrinks the per-ID order tables,
++read context, counters and arbitration state without narrowing the carried ID field.
++ROB payload depth remains independently configured. Its write-offset array has one
++entry per configured ROB slot. The current per-ID limit remains 1..256, including
++the existing ordering-tag-space guard. This is an implementation constraint, not a
++transaction-count field in the packet header.
++
++A NoC ID-width change requires one generated profile for every connected endpoint,
++router and model wrapper. The profile derives payload widths and both SV/C++ field
++offsets together. Changing only the `nmu.NOC_ID_WIDTH` override is rejected when it
++disagrees with the generated package. `SRC_ID`, `SRC_PORT_ID` and `ORDERING_TAG_WIDTH`
++are unchanged. Field tables in this document show the default profile.
+ 
+ C++ model runtime configuration per instance: src_id, port_id, SAM config path, RobMode and RoB depth overrides come through `cmodel_nmu_create_ex` (Section 3.3). The generated testbench sets src_id = {y[3:0], x[3:0]} and port_id from the endpoint attachment per instance, then forwards the plusargs `+sam_config=`, `+b_rob_depth=`, `+r_rob_depth=`, `+max_txns_per_id=`. These plusargs configure the reference model only; the RTL image uses the generated package selected at elaboration.
+ 
+--- a/docs/nmu-verification-plan.md
++++ b/docs/nmu-verification-plan.md
+@@ -262,7 +262,8 @@
+ | Parameter/relationship | Positive cases | Expected-fail cases |
+ |---|---|---|
+ | `AXI_ID_WIDTH` | 1, default, 8; NMU-internal remap allocation/reuse and B/R restoration | 0 and 9 |
+-| `NOC_ID_WIDTH` | 3; fixed 136/126/633-bit generated records | any value other than 3 |
++| `NOC_ID_WIDTH` | generated profiles 1, 3, 4, 8; packet widths derived consistently | 0, 9, or override inconsistent with the generated profile |
++| `MAX_ACTIVE_IDS` | 1, non-power-of-two 3, default 8, wider-profile 12 | 0 or greater than either AXI/NoC ID space |
+ | `NUM_DAT_VC` | 1, default, 8 | 0 and 9 |
+ | `NOC_DAT_VC_MODE` | 0 and 1 with a legal count | other encodings; split with odd count or count 1 |
+ | `AXI_FIFO_DEPTH` | 2, default, 32 | 0 and a positive non-power-of-two value |
+@@ -356,7 +357,7 @@
+ | REQ/DAT parallelism | independent paths exist, but no shared-AXI test proves same-cycle egress | add a focused model test that records simultaneous REQ and DAT transfers; use it for functional capability, not exact RTL latency |
+ | B/R independence | model drains RSP and DAT response inputs independently but lacks target CDC/class-FIFO timing | compare decoded content and order after independent accepted inputs; exclude internal queue occupancy and exact cycle |
+ | CDC/reset | model is single-clock | do not emulate synchronizers or compare crossing latency in C++; verify CDC structure, dual-clock behavior, and reset in RTL N0/N1 |
+-| widths | model/DPI types are fixed at the present 3-bit-ID generated instance | compare only the aligned instance until beat types, packet offsets, containers, and wrappers are parameterized together; other legal widths remain RTL-only evidence |
++| widths | generated NoC ID profiles support 1..8 within the model/DPI byte-sized ID carrier | each VCS image and its model library must use the same profile; functional coverage is limited to the configurations recorded in the acceptance report |
+ 
+ Until each row's alignment test passes, its current-model result is diagnostic evidence, not an RTL
+ golden. All remaining exclusions stay recorded in `docs/known-limitations.md`.
+--- a/docs/noc-target-spec.md
++++ b/docs/noc-target-spec.md
+@@ -132,9 +132,10 @@
+ | `DAT` | 633 b | - | `Aw`: 48 b address. `W`, `R`: 512 b data |
+ 
+ Physical widths are elaboration-time derivatives of the packet layout, not independent tuning
+-parameters. `NOC_ID_WIDTH` is fixed at 3, so the 585-bit `DataW` payload and every physical
+-network width are fixed at 633, 136, and 126 bits respectively. `AXI_ID_WIDTH` is external to
+-the NI and does not change the flit layout.
++parameters. For `NOC_ID_WIDTH` from 1 through 8, REQ is `133 + NOC_ID_WIDTH` bits,
++RSP is `123 + NOC_ID_WIDTH` bits and DAT remains 633 bits, set by the 585-bit `DataW`
++payload. The table shows the default width 3. `AXI_ID_WIDTH` is external to the NI
++and does not change the flit layout. A profile regenerates SV/C++ packets together.
+ 
+ One `DAT` network, not a request and response pair, even though it carries request-direction
+ `DataW` and response-direction `DataR`:
+@@ -467,7 +468,7 @@
+ | Topology | Mesh X and Y dimension | 2, 4, 8, 16 (4) | X and Y are independent for unicast. v1 multicast/collective support requires X = Y. 256 nodes maximum, set by the 8-bit node ID |
+ | AXI interface | Endpoint interfaces | 1 | One fixed 512-bit interface carries both classes; the SAM address space selects the internal NoC class |
+ | AXI interface | `AXI_ID_WIDTH` | 1-8 (3) | External upstream AXI transaction-ID width. Production NMU remaps live IDs to `NOC_ID_WIDTH` before request CDC and restores the external ID on B/R after response CDC. The model endpoint retains its external remap. |
+-| AXI interface | `NOC_ID_WIDTH` | fixed 3 | NoC-carried ID width and generated REQ/RSP/DAT record width. It is independent of NI identity (`SRC_ID`, `SRC_PORT_ID`). |
++| AXI interface | `NOC_ID_WIDTH` | 1-8 (3), generated profile | NoC-carried ID width and generated REQ/RSP/DAT record width. It is independent of NI identity (`SRC_ID`, `SRC_PORT_ID`). |
+ | AXI interface | `NSU_AXI_ID_WIDTH` | 1-8 (`NOC_ID_WIDTH`, default 3) | ID width driven by the NSU downstream AXI interface |
+ | AXI interface | `NSU_MAX_ACTIVE_IDS` | 1 to `2**NSU_AXI_ID_WIDTH` (8) | Live source-aware downstream-ID mappings per read/write direction; the default 3-bit interface permits up to 8 |
+ | AXI interface | `NSU_MAX_OUTSTANDING` | power of two, 1-256 (32) | Response Queue transaction records per read/write direction; independent of active-ID capacity |
+@@ -478,7 +479,8 @@
+ | Router staging | `NOC_ROUTER_OUTPUT_FIFO_DEPTH` | positive power of two (8) | DAT Router output FIFO depth; not credit-counted |
+ | CDC | `AXI_FIFO_DEPTH` | power of two, >= 2 (8) | Common entry count of the AW/W/AR/B/R dual-clock FIFOs on each AXI interface |
+ | NoC class queues | `NOC_FIFO_DEPTH` | positive power of two (8) | Entry count of the REQ/RSP synchronous class FIFOs; DAT receive capacity is per VC above |
+-| Ordering | Outstanding transactions per ID | 1-32 (32) | Applies to both R modes. The NoC-side NI holds at most `32 x 2^NOC_ID_WIDTH` = 256 transactions; an external-width remap may backpressure a new ID when all eight NoC IDs are live. Enabled requests that require reordering additionally reserve an `ordering_tag`, see §6 |
++| Ordering | `MAX_ACTIVE_IDS` | 1 through `2**min(AXI_ID_WIDTH, NOC_ID_WIDTH)` (8) | Live NMU IDs per read/write direction. Shrinks remap and per-ID tracking structures. |
++| Ordering | `MAX_OUTSTANDING_PER_ID` | 1-256 (32) | NMU transactions per active ID, both R modes. The per-direction upper bound is `MAX_ACTIVE_IDS * MAX_OUTSTANDING_PER_ID` (default 256), not a shared transaction pool. Requests requiring reordering also consume ROB storage. |
+ | Ordering | `R_ROB_EN` | enabled, disabled (enabled) | Selects the R path at elaboration with `generate if`. Disabled permits a same-ID streak only within one `{dst_id, dst_port_id, AXI class}` ordering domain. B always uses a per-ID metadata-only RoB. The §3 ordering requirement holds in either setting |
+ | Address map | SAM address spaces | config, memory | Config space selects the narrow class, memory space the data class. Uniform across nodes and fixed for one elaborated RTL image |
+ | Address map | Space region size | power of two | - |
+@@ -604,7 +606,7 @@
+ 
+ **Flit payload.**
+ 
+-The field tables below show the sole `NOC_ID_WIDTH = 3` layout. `AXI_ID_WIDTH` selects the
++The field tables below show the default `NOC_ID_WIDTH = 3` layout. `AXI_ID_WIDTH` selects the
+ external endpoint interface only; it does not change generated field positions or physical network
+ widths. Software must consume generated field positions rather than hard-code offsets.
+ 
+--- a/docs/trade-off.md
++++ b/docs/trade-off.md
+@@ -206,14 +206,14 @@
+ and burst length in `w_order_`, and blocks W behind the FIFO head. Direct tests for simultaneous
+ AW fairness and blocked-head W behavior are still missing.
+ 
+-The NoC carries a fixed 3-bit ID field (`NOC_ID_WIDTH`), so REQ/RSP/DAT links are fixed at
++The default profile carries a 3-bit ID field (`NOC_ID_WIDTH`), so REQ/RSP/DAT links are
+ 136/126/633 bits. The external `AXI_ID_WIDTH` is independently legal from 1 to 8 and is remapped
+ at the model endpoint and, under issue #118, inside the production NMU. The remap allocates one of eight NoC IDs to each distinct live external ID,
+ backpressures only an unseen ID when all eight are live, and restores the original AXI ID on B/R.
+ The generated field positions, flit containers, router ports and NoC class FIFOs therefore remain
+-one coherent fixed-width contract; `SRC_ID` and `SRC_PORT_ID` remain NI identity fields.
+-
+-This trades at most eight live external-ID mappings per direction for fixed router wires, buffers,
++one coherent profile-specific contract; `SRC_ID` and `SRC_PORT_ID` remain NI identity fields.
++
++The default trades at most eight live external-ID mappings per direction for fixed router wires, buffers,
+ crossbars, DPI records, and flit storage. No router or NoC FIFO pays for the maximum 8-bit external
+ ID. The remap table is supplied by the approved AXI remap primitive, so no project-local mapping
+ table or allocator is introduced. The surveyed reference likewise composes flits from parameterized packed header and payload types
+@@ -794,3 +794,10 @@
+ Replace two 32-entry RSP class FIFOs with one 32-entry RSP FIFO. This removes one 32-flit storage bank and its pointers and avoids a channel decoder in the external RSP-ready path. The head decode and R arbitration remain combinational after storage. Default empty-to-head latency remains one cycle and the ready, eligible output can accept one flit per cycle. B and control-R can no longer both leave RSP storage in one cycle. Blocking within RSP and reduced combined RSP capacity are intentional. A blocked B head does not block eligible DAT-to-R traffic. A blocked R output still shares arbitration backpressure between control R and DAT. Synthesis area, frequency and power remain unmeasured.
+ 
+ RSP_RX_FIFO_DEPTH defaults to 32 and replaces B_RX_FIFO_DEPTH/R_RX_FIFO_DEPTH. DAT_RX_VC_DEPTH remains 32. DAT credits return one cycle after the actual DAT receive-FIFO pop. ROB, output CDC and optional unpack register capacities remain unchanged.
++
++
++## NMU configurable identity and tracking capacity (issue 120)
++
++Separate wire identity width from active mapping count and per-ID metadata depth. The default remains 3-bit internal identity, eight active mappings per direction and 32 transactions per ID. Internal NoC channel types must use NOC_ID_WIDTH even when external AXI IDs are wider. Packet profile resolution recomputes payload totals and REQ/RSP/DAT widths together. Supported generated identity range is 1..8 bits, matching the existing uint8_t model/DPI carrier. Ordering and remap state scale to MAX_ACTIVE_IDS; explicit modulo/wrap handles non-power-of-two counts. ROB auxiliary offsets scale to actual depth, retaining the wire tag width and malformed-input checks. These changes add no datapath pipeline or payload queue. They reduce declared state for smaller capacities but synthesis area, timing and power remain unmeasured. Existing per-ID limit range1..256 and ROB allocation policy remain unchanged. A shared transaction pool and hole-reusing ROB allocator require separate measured review.
++
++The B storage instance ties its last-beat input high, making its write offsets constant zero. Synthesis can remove that state without a separate B-specific storage implementation. Declared array-bit reductions must not be reported as synthesized area savings.
+--- a/docs/verification-environment.md
++++ b/docs/verification-environment.md
+@@ -61,7 +61,7 @@
+ tied off; a tied-off direction driving a valid flit is a `$fatal`.
+ 
+ `router_wrap` carries three physical networks, each with its current generated flit width
+-(`ni_params_pkg`, fixed `NOC_ID_WIDTH = 3`: REQ 136 b, RSP 126 b, DAT 633 b):
++(`ni_params_pkg`, default `NOC_ID_WIDTH = 3`: REQ 136 b, RSP 126 b, DAT 633 b):
+ 
+ | network | flow control | carries |
+ |---|---|---|
+@@ -280,7 +280,7 @@
+   (pulp-platform axi v0.39.7), instantiated as `i_noc_id_remap` in
+   `user_node_endpoint.sv`. Its input is the crossbar master-port id space,
+   `AXI_ID_WIDTH` + `$clog2(XBAR_SLV_PORTS)` = 5 b, not
+-  `AXI_ID_WIDTH` itself, so it folds 32 tile ids onto the NI's fixed
++  `AXI_ID_WIDTH` itself, so it folds 32 tile ids onto the NI's default
+   `NOC_ID_WIDTH` = 3, 8 ids.
+ - Traffic patterns and injection process: BookSim2 `src/traffic.cpp`
+   (`NeighborTrafficPattern`, `TransposeTrafficPattern`,
+--- a/rtl/README.md
++++ b/rtl/README.md
+@@ -19,7 +19,9 @@
+ | Canonical parameter | Default | Legal values | Contract |
+ |---|---:|---|---|
+ | `AXI_ID_WIDTH` | 3 | 1..8 | External AXI ID width. Production NMU remaps live IDs before request CDC and restores B/R IDs after response CDC. The model endpoint retains its external remap. |
+-| `NOC_ID_WIDTH` | 3 | fixed 3 | NoC-carried ID field and fixed REQ/RSP/DAT widths: 136/126/633 b. `SRC_ID` and `SRC_PORT_ID` remain NI identity parameters. |
++| `NOC_ID_WIDTH` | 3 | 1..8, generated profile | NoC-carried ID field. REQ/RSP widths are 133/123 plus ID width; DAT remains 633 b. `SRC_ID` and `SRC_PORT_ID` remain NI identity parameters. |
++| `MAX_ACTIVE_IDS` | `2**min(AXI_ID_WIDTH, NOC_ID_WIDTH)` (8) | 1 through the default expression | NMU live IDs per direction; sizes remap and ordering state. |
++| `MAX_OUTSTANDING_PER_ID` | 32 | 1..256 | NMU transactions per active ID; sizes per-ID order storage and counters. |
+ | `NUM_DAT_VC` | 2 | 1..8 | DAT VC count and credit-vector width; REQ and RSP remain single-VC |
+ | `NOC_DAT_VC_MODE` | `NOC_DAT_VC_MODE_SHARED` (0) | `NOC_DAT_VC_MODE_SHARED` (0), `NOC_DAT_VC_MODE_READ_WRITE_SPLIT` (1) | One system-wide elaboration choice for NI allocation and DAT Router VA |
+ | `DAT_RX_VC_DEPTH` | `NOC_ROUTER_VC_DEPTH` (8) | power of two, >= 2 | NI DAT receive FIFO depth per eligible VC and Router LOCAL sender-credit seed |
+--- a/docs/nsu-spec.md
++++ b/docs/nsu-spec.md
+@@ -53,8 +53,11 @@
+ | RSP | 126 | [125:48], 78 b | out: `NarrowB`, `DataB`, `NarrowR` |
+ | DAT | 633 | [632:48], 585 b | in: `DataAw`, `DataW`; out: `DataR` |
+ 
+-This is the fixed `NOC_ID_WIDTH = 3` layout: REQ is 136 bits, RSP is 126 bits, and DAT is 633
++This is the default `NOC_ID_WIDTH = 3` layout: REQ is 136 bits, RSP is 126 bits, and DAT is 633
+ bits. `AXI_ID_WIDTH` applies before the upstream NMU remap (the endpoint remap in the model environment) and does not change the flit layout.
++
++For other generated NoC ID profiles, REQ is `133 + NOC_ID_WIDTH` bits and RSP is
++`123 + NOC_ID_WIDTH` bits. DAT remains 633 bits for ID widths 1..8.
+ 
+ Header, flit bits [47:0], identical on all three:
+ 
+@@ -361,7 +364,7 @@
+ | `AXI_FIFO_DEPTH` | 8 | power of two, >= 2 | common AW/W/AR/B/R dual-clock FIFO depth |
+ | `NOC_FIFO_DEPTH` | 8 | positive power of two | REQ/RSP synchronous class FIFO depth; DAT receive capacity is per VC |
+ | `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 136 / 126 / 633 | fixed | per-network flit containers and DPI marshalling |
+-| `AXI_ID_WIDTH` / `NOC_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 3 / 48 / 512 | external ID 1..8 / fixed 3 / 1..64 / {32,64,128,256,512,1024} | external endpoint ID / NoC-carried ID, beat structs and DPI |
++| `AXI_ID_WIDTH` / `NOC_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 3 / 48 / 512 | external ID 1..8 / generated NoC ID 1..8 / 1..64 / {32,64,128,256,512,1024} | external endpoint ID / NoC-carried ID, beat structs and DPI |
+ | create-time `src_id` | 0 | 8 bit | stamped into every response flit `src_id` |
+ 
+ The narrow request ingress stage is a 1-entry register per channel plus the single pending slot, and has no configurable depth. Data-class AW/W ingress is instead one flit queue per DAT VC, `DAT_RX_VC_DEPTH` = 8 deep, matching the router's LOCAL credit seed so a sender inside its credit can never overflow it. Each VC reassembles its own burst. `pop_aw` scans the VC queues round-robin from `dat_aw_rr_` and admits the first whose front flit is a `DataAw`, recording that VC against the burst. `pop_w` serves the recorded bursts in AW admission order and takes each burst's beats from its own VC queue. A slot is returned when `pop_aw` or `pop_w` consumes the flit, not when the flit arrives. Both may consume a flit of the same VC in one cycle, so up to 2 credits can come due on one VC at once. The wire carries at most 1 pulse per VC per cycle, so the second leaves on the following cycle.
+--- a/docs/router-spec.md
++++ b/docs/router-spec.md
+@@ -50,8 +50,11 @@
+ | RSP | 126 | [125:48], 78 b | ready/valid, 1 VC |
+ | DAT | 633 | [632:48], 585 b | credit, `NUM_VC` 1..8 |
+ 
+-This is the fixed `NOC_ID_WIDTH = 3` layout: REQ is 136 bits, RSP is 126 bits, and DAT is 633
++This is the default `NOC_ID_WIDTH = 3` layout: REQ is 136 bits, RSP is 126 bits, and DAT is 633
+ bits. A router consumes these generated package widths and does not select flit widths independently.
++
++For generated NoC ID widths 1..8, REQ is `133 + NOC_ID_WIDTH` bits, RSP is
++`123 + NOC_ID_WIDTH` bits and DAT remains 633 bits.
+ 
+ **Packet and wormhole switching.** An AXI transaction is packetized by the NI into one
+ or more flits sharing the same header `dst_id`. The header bit `flit_tail` marks packet
+--- a/docs/nsu-verification-plan.md
++++ b/docs/nsu-verification-plan.md
+@@ -31,7 +31,7 @@
+ and is legal from 1 to 8. `NSU_MAX_ACTIVE_IDS` defaults to 8 and is legal from 1 through
+ `2**NSU_AXI_ID_WIDTH`; therefore the default 3-bit interface supports 1 through 8 live mappings.
+ The external initiator may use the independently wider `AXI_ID_WIDTH`; the upstream NMU remapper (the endpoint remapper in the model environment)
+-compresses it to the fixed NoC-carried `NOC_ID_WIDTH` before the request reaches the NI.
++compresses it to the generated NoC-carried `NOC_ID_WIDTH` before the request reaches the NI.
+ `NSU_MAX_OUTSTANDING` defaults to 32 and is a power of two from 1 through 256; it independently
+ sizes the read and write Response Queues and is not an alias for the live-mapping count.
+ 
+--- a/docs/noc-performance-parameters.md
++++ b/docs/noc-performance-parameters.md
+@@ -5,7 +5,7 @@
+ Every parameter below moves a specific part of the latency-throughput curve. Implemented values
+ are single-sourced in `specgen/source/constants.yaml`, which is authoritative. Target-only
+ parameters are marked and enter specgen when their RTL is implemented. The parameters describe two
+-AXI classes over three physical networks. At fixed `NOC_ID_WIDTH = 3`, REQ is 136 b, RSP is
++AXI classes over three physical networks. At default `NOC_ID_WIDTH = 3`, REQ is 136 b, RSP is
+ 126 b and DAT is 633 b, each with its own flow control (REQ and RSP ready/valid, DAT credit).
+ Defaults are quoted inline for convenience. Effects are stated as directions, except in the
+ measured baseline at the end.
+@@ -25,7 +25,8 @@
+ 
+ | Parameter | Affects | Effect | Default (range) |
+ |---|---|---|---|
+-| `AXI_ID_WIDTH` / `NOC_ID_WIDTH` | Endpoint concurrency / NoC area | External AXI IDs are 1..8 bits. A remap keeps at most eight distinct live IDs in the fixed 3-bit NoC space, backpressuring exhaustion; REQ/RSP/DAT remain 136/126/633 b | 3 (1..8) / 3 (fixed) |
++| `AXI_ID_WIDTH` / `NOC_ID_WIDTH` | Endpoint concurrency / NoC area | External and internal IDs are independently 1..8 bits. A generated profile sets REQ to 133+ID bits, RSP to 123+ID bits and DAT to 633 bits. | 3 (1..8) / 3 (1..8) |
++| `MAX_ACTIVE_IDS` [NMU RTL] | Concurrent ID capacity / tracking area | Sizes remap and per-ID state independently of encoded ID width. Read/write capacities are separate. This does not change the existing AI campaign configuration. | 8 (1 through both ID-space limits) |
+ | `AXI_DATA_WIDTH` | Peak bandwidth, area | Sets the data-class payload, hence the DAT flit width (`DAT_FLIT_WIDTH` = 633 b = 48 b header + 585 b payload) and per-router buffer and crossbar area | 512 b (32, 64, 128, 256, 512, 1024) |
+ | `DAT_NUM_VC` | Peak bandwidth, area | Recovers link bandwidth lost to head-of-line blocking, at a buffer cost that is `flit width x depth x NUM_VC`. Only DAT carries VCs and only DAT is swept by the topology set, REQ and RSP being scalar ready/valid | 2 (1 to 8) |
+ | `NOC_DAT_VC_MODE` [target] | Head-of-line blocking, usable capacity | `SHARED` lets every DAT class use every VC. `READ_WRITE_SPLIT` reserves equal lower/upper halves for Write/Read, removing cross-class blocking but potentially stranding capacity under asymmetric traffic | `SHARED` (`SHARED`, `READ_WRITE_SPLIT`); Split requires `DAT_NUM_VC` in {2, 4, 6, 8} |
+@@ -34,7 +35,7 @@
+ | `AXI_FIFO_DEPTH` [target] | Clock-domain elasticity, area | Common entry count of the AW/W/AR/B/R dual-clock FIFOs on each AXI interface. Absorbs clock-ratio and temporary AXI backpressure rather than live transaction state | 8 `[TBD]` (power of two, >= 2) |
+ | `NOC_FIFO_DEPTH` [target] | Burst absorption | Common depth of the synchronous `noc_clk` REQ/RSP/DATW/DATR FIFOs after channel assignment; not replicated per VC | 8 `[TBD]` (positive power of two) |
+ | `ROUTER_OUTPUT_FIFO_DEPTH` | Sustained throughput | Output staging, not credit-counted, absorbs transient output-port contention | 8 `[TBD]` (positive power of two) |
+-| `MAX_TXNS_PER_ID` | Latency hiding | Bounds outstanding transactions per NoC ID. Nothing sits above it, so the NoC-side admission limit is `MAX_TXNS_PER_ID x 2^NOC_ID_WIDTH`. An external unseen ID may be backpressured by the remap before this limit. Measured on `mesh_4x4` at 4 VCs, `all_to_all`: exactly its cap at one id per initiator, 31 of 32 at four ids under continuous checked injection, 21 of 32 on the directed run. | 32 (1 to 256) |
++| `MAX_TXNS_PER_ID` | Latency hiding | Bounds outstanding transactions per NoC ID. Nothing sits above it, so the model NoC-side admission limit is `MAX_TXNS_PER_ID x 2^NOC_ID_WIDTH`; NMU RTL uses `MAX_OUTSTANDING_PER_ID x MAX_ACTIVE_IDS`. An external unseen ID may be backpressured by the remap before this limit. Measured on `mesh_4x4` at 4 VCs, `all_to_all`: exactly its cap at one id per initiator, 31 of 32 at four ids under continuous checked injection, 21 of 32 on the directed run. | 32 (1 to 256) |
+ | `ROB_B_DEPTH`, `ROB_R_DEPTH` | Latency hiding | Reorder buffer pool depths, bound in-flight write and read responses awaiting in-order return. The AI campaign measured Read occupancy up to 128 of 128, but has no matching non-zero admission-stall counter; occupancy alone does not prove that the RoB limits performance | 128, 128 (1 to 256) |
+ | `META_BUFFER_MAX_OUTSTANDING` | Latency hiding | Slave-side outstanding pool per direction, bounds concurrency the slave sustains | 32 (1 to 256) |
+ | `META_BUFFER_MAX_UNIQUE_IDS` | Endpoint concurrency | Distinct AXI IDs the NSU presents downstream. At 1 every transaction reaching a tile carries the same ID, so an endpoint that tracks IDs sees no concurrency to exploit | 8 (1 or 8) |

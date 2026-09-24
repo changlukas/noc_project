@@ -9,13 +9,13 @@ module tb_nmu_ordering_stall;
     logic clk_i = 0, rst_n_i = 0;
     ni_types_pkg::nmu_sam_aw_result_t             s_aw_i;
     ni_types_pkg::nmu_aw_request_t                m_aw_o;
-    ni_signals_pkg::axi_w_t                       s_w_i, m_w_o;
+    ni_signals_pkg::noc_axi_w_t                       s_w_i, m_w_o;
     ni_types_pkg::nmu_sam_ar_result_t             s_ar_i;
     ni_types_pkg::nmu_ar_request_t                m_ar_o;
     ni_types_pkg::nmu_b_response_t                s_b_i;
-    ni_signals_pkg::axi_b_t                       m_b_o;
+    ni_signals_pkg::noc_axi_b_t                       m_b_o;
     ni_types_pkg::nmu_r_response_t                s_r_i;
-    ni_signals_pkg::axi_r_t                       m_r_o;
+    ni_signals_pkg::noc_axi_r_t                       m_r_o;
     logic                                         s_aw_valid_i, s_aw_ready_o, m_aw_valid_o, m_aw_ready_i;
     logic                                         s_w_valid_i, s_w_ready_o, m_w_valid_o, m_w_ready_i;
     logic                                         s_ar_valid_i, s_ar_ready_o, m_ar_valid_o, m_ar_ready_i;
@@ -23,8 +23,8 @@ module tb_nmu_ordering_stall;
     logic                                         s_r_valid_i, s_r_ready_o, m_r_valid_o, m_r_ready_i;
     logic                                         last_aw_ordering_req, last_ar_ordering_req;
     logic                             [TAG_W-1:0] last_aw_ordering_tag, last_ar_ordering_tag;
-    ni_signals_pkg::axi_b_t                       retired_b [128];
-    ni_signals_pkg::axi_r_t                       retired_r [128];
+    ni_signals_pkg::noc_axi_b_t                       retired_b [128];
+    ni_signals_pkg::noc_axi_r_t                       retired_r [128];
     int unsigned                                  retired_b_cycle [128], retired_r_cycle [128];
     int unsigned b_retire_count = 0, r_retire_count = 0, cycle_count = 0;
 
@@ -39,8 +39,8 @@ module tb_nmu_ordering_stall;
 
     ni_types_pkg::nmu_aw_request_t prev_aw;
     ni_types_pkg::nmu_ar_request_t prev_ar;
-    ni_signals_pkg::axi_b_t        prev_b;
-    ni_signals_pkg::axi_r_t        prev_r;
+    ni_signals_pkg::noc_axi_b_t        prev_b;
+    ni_signals_pkg::noc_axi_r_t        prev_r;
     logic aw_stalled = 0, ar_stalled = 0, b_stalled = 0, r_stalled = 0;
     always @(posedge clk_i or negedge rst_n_i) begin
         if (~rst_n_i) begin

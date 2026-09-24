@@ -8,6 +8,7 @@
 module nmu #(
     parameter int unsigned AXI_ID_WIDTH                              = ni_params_pkg::AXI_ID_WIDTH,
     parameter int unsigned NOC_ID_WIDTH                              = ni_params_pkg::NOC_ID_WIDTH,
+    parameter int unsigned MAX_ACTIVE_IDS                            = 1 << (AXI_ID_WIDTH < NOC_ID_WIDTH ? AXI_ID_WIDTH : NOC_ID_WIDTH),
     parameter int unsigned AXI_ADDR_WIDTH                            = ni_params_pkg::AXI_ADDR_WIDTH,
     parameter int unsigned AXI_DATA_WIDTH                            = ni_params_pkg::AXI_DATA_WIDTH,
     parameter int unsigned AXI_AWUSER_WIDTH                          = ni_params_pkg::AXI_AWUSER_WIDTH,
@@ -77,6 +78,11 @@ module nmu #(
 
     if (AXI_ID_WIDTH < 1 || AXI_ID_WIDTH > 8) begin : gen_invalid_axi_id_width
         initial $fatal(0, "Error: AXI_ID_WIDTH must be in [1, 8] (instance %m)");
+    end
+
+    if (MAX_ACTIVE_IDS < 1 || MAX_ACTIVE_IDS > (1 << NOC_ID_WIDTH) ||
+            MAX_ACTIVE_IDS > (1 << AXI_ID_WIDTH)) begin : gen_invalid_active_ids
+        initial $fatal(0, "MAX_ACTIVE_IDS exceeds the AXI or NoC ID space (%m)");
     end
 
     if (NOC_ID_WIDTH != ni_params_pkg::NOC_ID_WIDTH) begin : gen_invalid_noc_id_width
@@ -153,7 +159,7 @@ module nmu #(
     wire ni_types_pkg::nmu_sam_aw_result_t path_aw;
     wire logic                             path_aw_valid;
     wire logic                             path_aw_ready;
-    wire ni_signals_pkg::axi_w_t           path_w;
+    wire ni_signals_pkg::noc_axi_w_t           path_w;
     wire logic                             path_w_valid;
     wire logic                             path_w_ready;
     wire ni_types_pkg::nmu_sam_ar_result_t path_ar;
@@ -162,16 +168,16 @@ module nmu #(
     wire ni_types_pkg::nmu_aw_request_t    ordered_aw;
     wire logic                             ordered_aw_valid;
     wire logic                             ordered_aw_ready;
-    wire ni_signals_pkg::axi_w_t           ordered_w;
+    wire ni_signals_pkg::noc_axi_w_t           ordered_w;
     wire logic                             ordered_w_valid;
     wire logic                             ordered_w_ready;
     wire ni_types_pkg::nmu_ar_request_t    ordered_ar;
     wire logic                             ordered_ar_valid;
     wire logic                             ordered_ar_ready;
-    wire ni_signals_pkg::axi_b_t           axi_b;
+    wire ni_signals_pkg::noc_axi_b_t           axi_b;
     wire logic                             axi_b_valid;
     wire logic                             axi_b_ready;
-    wire ni_signals_pkg::axi_r_t           axi_r;
+    wire ni_signals_pkg::noc_axi_r_t           axi_r;
     wire logic                             axi_r_valid;
     wire logic                             axi_r_ready;
 
@@ -186,6 +192,7 @@ module nmu #(
         .NOC_DAT_VC_MODE        (NOC_DAT_VC_MODE       ),
         .REQ_FIFO_DEPTH         (REQ_FIFO_DEPTH        ),
         .NOC_ROUTER_VC_DEPTH    (NOC_ROUTER_VC_DEPTH   ),
+        .MAX_ACTIVE_IDS         (MAX_ACTIVE_IDS        ),
         .MAX_OUTSTANDING_PER_ID (MAX_OUTSTANDING_PER_ID),
         .AW_SAM_REG_TYPE        (AW_SAM_REG_TYPE       ),
         .AR_SAM_REG_TYPE        (AR_SAM_REG_TYPE       ),
@@ -252,6 +259,7 @@ module nmu #(
         .B_ROB_DEPTH            (B_ROB_DEPTH           ),
         .R_ROB_DEPTH            (R_ROB_DEPTH           ),
         .R_ROB_EN               (R_ROB_EN              ),
+        .MAX_ACTIVE_IDS         (MAX_ACTIVE_IDS        ),
         .MAX_OUTSTANDING_PER_ID (MAX_OUTSTANDING_PER_ID),
         .RSP_RX_FIFO_DEPTH      (RSP_RX_FIFO_DEPTH     ),
         .B_FIFO_DEPTH           (B_FIFO_DEPTH          ),

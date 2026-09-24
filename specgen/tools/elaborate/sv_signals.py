@@ -205,6 +205,11 @@ def _emit_axi_structs(channels: list[str]) -> list[str]:
         out.append("  typedef struct packed {")
         out.extend(_fields_to_sv(list(reversed(fields))))
         out.append(f"  }} axi_{ch.lower()}_t;")
+        noc_fields = [(name, width.replace("ni_params_pkg::AXI_ID_WIDTH", "ni_params_pkg::NOC_ID_WIDTH"))
+                      for name, width in fields]
+        out.append("  typedef struct packed {")
+        out.extend(_fields_to_sv(list(reversed(noc_fields))))
+        out.append(f"  }} noc_axi_{ch.lower()}_t;")
 
     out.extend([
         "",

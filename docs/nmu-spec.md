@@ -9,7 +9,7 @@ boundaries are frozen in `rtl/README.md`; this document remains authoritative fo
 
 ### 2.1 Packetization
 
-The NoC fabric moves fixed-size flits, not AXI beats. Packetization is a 1-to-1 mapping: every accepted NoC-bound AXI request beat becomes exactly one flit, and every response flit becomes exactly one NoC-bound AXI response beat. The fixed `NOC_ID_WIDTH = 3` layout uses a 48-bit header plus a payload sized per network (REQ 136 b, RSP 126 b, DAT 633 b total). The external `AXI_ID_WIDTH` is 1..8 and is remapped at the endpoint before packetization; B/R responses restore it after depacketization. `SRC_ID` and `SRC_PORT_ID` remain NI identity fields. The header carries routing and ordering metadata (source node, destination node, virtual channel, wormhole packet boundary, reorder-buffer tag, collective op and mask). The payload carries the NoC-bound AXI channel fields verbatim.
+The NoC fabric moves fixed-size flits, not AXI beats. Packetization is a 1-to-1 mapping: every accepted NoC-bound AXI request beat becomes exactly one flit, and every response flit becomes exactly one NoC-bound AXI response beat. The default `NOC_ID_WIDTH = 3` layout uses a 48-bit header plus a payload sized per network (REQ 136 b, RSP 126 b, DAT 633 b total). The external `AXI_ID_WIDTH` is 1..8 and is remapped inside `nmu` in the AXI clock domain before request CDC; B/R responses restore it after response CDC. `SRC_ID` and `SRC_PORT_ID` remain NI identity fields. The header carries routing and ordering metadata (source node, destination node, virtual channel, wormhole packet boundary, reorder-buffer tag, collective op and mask). The payload carries the NoC-bound AXI channel fields verbatim.
 
 A write transaction of AWLEN+1 beats therefore becomes 1 AW flit followed by AWLEN+1 W flits. A read request becomes 1 AR flit. The write's flits form one wormhole packet (the AW flit opens it, the W flit with `wlast=1` closes it) so no other request flit from this NMU can interleave between an AW and its W beats on the link. AW+W is the only multi-flit packet the fabric builds, and AXI4 IHI 0022 A5.3.3 is why: W beats of different transactions may not interleave, so the AW and its burst have to travel as one indivisible unit. A read request and every response are single-flit packets, R beats included.
 
@@ -250,11 +250,11 @@ Example, ID = 3'h3, write direction: AW#1 dst 8'h02 (list empty, branch 1, bypas
 
 Slot pools, per direction: B pool depth `NMU_ROB_B_DEPTH` = 128, R pool depth `NMU_ROB_R_DEPTH` = 128. An AW reserves 1 slot (B is one beat). An AR reserves ARLEN+1 consecutive slots (one per R beat), refused when free space is short. The allocator is a high-water stack: one allocation bit marks each reserved range's top slot, free space is the slot count above the highest set bit (leading-zero-count in RTL), the next base is depth minus free space, and space returns only from the top (Appendix 7.1 walks it with numbers). ordering_tag stamps the base slot. On the response side, B fills its slot, the i-th R beat of a burst fills base+i, and beats release to the master only while the ID's oldest outstanding transaction is being served (per-ID issue order, one order list per ID per direction).
 
-`RobMode` selects the R side only. RTL exposes the elaboration-time bit parameter `READ_ROB_ENABLED`, defaulted from `NMU_READ_ROB_ENABLED_DFLT`, and selects the two structural paths with `generate if`; no preprocessor conditional controls this choice. `RobMode::Enabled`: R responses use the slot pool as above. `RobMode::Disabled` (`READ_ROB_ENABLED = 0`): the R RoB is off. Each AXI ID keeps an outstanding counter and one latched ordering-domain key `{dst_id, dst_port_id, AXI class}`. An idle ID accepts any AR and latches its key. A non-idle ID accepts another AR only when the key matches and the counter is below `NMU_MAX_TXNS_PER_ID`; otherwise it stalls until the counter returns to zero. Acceptance increments the counter and retirement of an R beat with `rlast` decrements it. Every Disabled-mode AR carries `ordering_req=0` and reserves no R slot. The B-side RoB always runs in both modes as a per-ID metadata-only RoB: it preserves issue order within an ID while permitting responses of different IDs to pass independently. Wherever this document says "RobMode", it governs reads only.
+`RobMode` selects the R side only. RTL exposes the elaboration-time bit parameter `READ_ROB_ENABLED`, defaulted from `NMU_READ_ROB_ENABLED_DFLT`, and selects the two structural paths with `generate if`; no preprocessor conditional controls this choice. `RobMode::Enabled`: R responses use the slot pool as above. `RobMode::Disabled` (`READ_ROB_ENABLED = 0`): the R RoB is off. Each AXI ID keeps an outstanding counter and one latched ordering-domain key `{dst_id, dst_port_id, AXI class}`. An idle ID accepts any AR and latches its key. A non-idle ID accepts another AR only when the key matches and the counter is below `MAX_OUTSTANDING_PER_ID`; otherwise it stalls until the counter returns to zero. Acceptance increments the counter and retirement of an R beat with `rlast` decrements it. Every Disabled-mode AR carries `ordering_req=0` and reserves no R slot. The B-side RoB always runs in both modes as a per-ID metadata-only RoB: it preserves issue order within an ID while permitting responses of different IDs to pass independently. Wherever this document says "RobMode", it governs reads only.
 
-Per-ID transaction gate, both directions and both R modes: at most `NMU_MAX_TXNS_PER_ID` = 32 outstanding transactions per ID. A burst is one transaction regardless of ARLEN. An entry or counter unit is taken when the request is accepted and released when the response is accepted at the AXI side, B on its single beat and R on rlast. A 33rd same-ID request is refused until one completes, which backpressures through the AxiSlavePort queue to awready / arready.
+Per-ID transaction gate, both directions and both R modes: at most `MAX_OUTSTANDING_PER_ID` outstanding transactions per ID (default 32). A burst is one transaction regardless of ARLEN. An entry or counter unit is taken when the request is accepted and released when the response is accepted at the AXI side, B on its single beat and R on rlast. With the default limit, a 33rd same-ID request is refused until one completes, which backpressures through the AxiSlavePort queue to awready / arready.
 
-There is no aggregate pool above the per-ID gate, so NoC-side in-flight requests cap at `NMU_MAX_TXNS_PER_ID` x 2^`NOC_ID_WIDTH` = 32 x 8 = 256 per direction. An external unseen AXI ID may instead be stalled by the endpoint remap until a NoC ID is freed. Two limiters coexist on the write side and on Enabled reads, the per-ID order-list depth and the RoB slot pool, and which one binds depends on the traffic: a bypassed transaction takes a list entry and reserves no slot, so a stream that stays in branches 1 and 2 meets only the per-ID gate. Disabled reads have no slot-pool limiter but cannot cross an ordering-domain boundary until that ID becomes idle.
+There is no aggregate pool above the per-ID gate, so NoC-side in-flight requests cap at `MAX_OUTSTANDING_PER_ID` x `MAX_ACTIVE_IDS` (default 32 x 8 = 256) per direction. An external unseen AXI ID may instead be stalled by the NMU internal remap until a NoC ID is freed. Two limiters coexist on the write side and on Enabled reads, the per-ID order-list depth and the RoB slot pool, and which one binds depends on the traffic: a bypassed transaction takes a list entry and reserves no slot, so a stream that stays in branches 1 and 2 meets only the per-ID gate. Disabled reads have no slot-pool limiter but cannot cross an ordering-domain boundary until that ID becomes idle.
 
 ### 2.6 Worked example: 2-beat write burst
 
@@ -284,15 +284,16 @@ behavior. Defaults below are the shipped values.
 
 | Parameter | Default | Legal range | Consumed by |
 |---|---|---|---|
-| AXI_ID_WIDTH | 3 | 1..8 | External endpoint AXI ID width; remapped before the NMU |
-| NOC_ID_WIDTH | 3 | fixed 3 | NoC-carried ID fields and RoB per-ID arrays |
+| AXI_ID_WIDTH | 3 | 1..8 | External AXI ID width at the NMU port; remapped inside the NMU |
+| NOC_ID_WIDTH | 3 | 1..8, generated profile | NoC-carried ID fields and derived network widths |
+| MAX_ACTIVE_IDS | `2**min(AXI_ID_WIDTH, NOC_ID_WIDTH)` (8) | 1 through the default expression | Live internal IDs per direction; remap, order tables, read context and arbitration |
 | AXI_ADDR_WIDTH | 48 | 1..64 | Address fields |
 | AXI_DATA_WIDTH | 512 | {32,64,128,256,512,1024} | wdata / rdata, WSTRB_WIDTH = 64 |
 | AXI_AWUSER_WIDTH | 58 | 10..64 | AWUSER slave-port field and the DPI unpack mask: 8 b user + 2 b collective_op + 48 b collective address mask (Section 2.8) |
 | NOC_DAT_NUM_VC | 2 | 1 to 8; Split requires {2,4,6,8} | DAT VC count and credit vector width; wrapper-local `DAT_NUM_VC` is an alias |
 | NOC_DAT_VC_MODE | SHARED (0) | {SHARED (0), READ_WRITE_SPLIT (1)} | Target `VcAllocator` eligible mask; system-wide with DAT router VA; current model implements SHARED only |
-| NOC_REQ_FLIT_WIDTH | 136 | fixed | REQ egress flit port |
-| NOC_RSP_FLIT_WIDTH | 126 | fixed | RSP ingress flit port |
+| NOC_REQ_FLIT_WIDTH | 136 | derived: `133 + NOC_ID_WIDTH` | REQ egress flit port |
+| NOC_RSP_FLIT_WIDTH | 126 | derived: `123 + NOC_ID_WIDTH` | RSP ingress flit port |
 | NOC_DAT_FLIT_WIDTH | 633 | fixed | DAT flit ports, both directions |
 | NOC_ROUTER_VC_DEPTH | 8 | power of two, >= 2 | Router LOCAL input VC FIFO depth and NMU DAT sender-credit seed |
 | `DAT_RX_VC_DEPTH` | 32 | power of two, >= 2 | NMU DataR receive FIFO depth per eligible VC and Router LOCAL sender-credit seed |
@@ -301,12 +302,27 @@ behavior. Defaults below are the shipped values.
 | NMU_ROB_B_DEPTH | 128 | 1..256 | B slot pool |
 | NMU_ROB_R_DEPTH | 128 | 1..256 | R slot pool |
 | READ_ROB_ENABLED | 1 | {0,1} | RTL `generate if`: Normal R RoB or RoB-less per-ID ordering-domain counters |
-| NMU_MAX_TXNS_PER_ID | 32 | 1..256 | Per-ID order-list depth |
+| MAX_OUTSTANDING_PER_ID | 32 | 1..256 | Per-ID order-list depth |
 | NMU_QUEUE_DEPTH [current model] | 16 | 1..1024 | Single-clock AxiSlavePort AW/W/AR/B/R queues |
 | NMU_DEPKT_Q_DEPTH [model/legacy] | 16 | 1..1024 | NMU RTL instead uses RSP_RX_FIFO_DEPTH, default 32 |
 | NMU_ARBITER_FIFO_DEPTH [current model] | 4 | 1..64 | Wormhole per-input and VC pending queues; not target NI VC storage |
 | AW_SAM_REG_TYPE | 0 | {0,1,2} | AW decode-to-RoB slice: bypass, simple register, full skid |
 | AR_SAM_REG_TYPE | 0 | {0,1,2} | AR decode-to-RoB slice, independently selected |
+
+`MAX_ACTIVE_IDS` and `MAX_OUTSTANDING_PER_ID` are elaboration-time parameters
+forwarded through the NMU paths. Read and write capacities are independent and use
+the same configured limits. Reducing active IDs shrinks the per-ID order tables,
+read context, counters and arbitration state without narrowing the carried ID field.
+ROB payload depth remains independently configured. Its write-offset array has one
+entry per configured ROB slot. The current per-ID limit remains 1..256, including
+the existing ordering-tag-space guard. This is an implementation constraint, not a
+transaction-count field in the packet header.
+
+A NoC ID-width change requires one generated profile for every connected endpoint,
+router and model wrapper. The profile derives payload widths and both SV/C++ field
+offsets together. Changing only the `nmu.NOC_ID_WIDTH` override is rejected when it
+disagrees with the generated package. `SRC_ID`, `SRC_PORT_ID` and `ORDERING_TAG_WIDTH`
+are unchanged. Field tables in this document show the default profile.
 
 C++ model runtime configuration per instance: src_id, port_id, SAM config path, RobMode and RoB depth overrides come through `cmodel_nmu_create_ex` (Section 3.3). The generated testbench sets src_id = {y[3:0], x[3:0]} and port_id from the endpoint attachment per instance, then forwards the plusargs `+sam_config=`, `+b_rob_depth=`, `+r_rob_depth=`, `+max_txns_per_id=`. These plusargs configure the reference model only; the RTL image uses the generated package selected at elaboration.
 
@@ -509,7 +525,7 @@ or `false`/absent collective authorship producing nonzero coordinate selectors.
 18. Slot reservation: AW takes 1 slot, AR takes arlen+1 consecutive slots, base = pool depth - free space, refused when free space is short, and refusal mutates no state. Free space is the count above the highest allocated range top (high-water stack, Appendix 7.1). Verified: `TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst)`, `Enabled_LzcAllocator_IsAStack`, `Enabled_PushAw_PoolFull_ReturnFalseAtomic`, `Enabled_PushAr_DownstreamBackpressure_AtomicRollback`. Failure: wrong base, overlapping ranges, or state change on refusal.
 19. No free slot, no request: an ordering_req = 1 flit never enters the network without its slots already reserved, so a returning tagged response always finds its slot. Verified: `TEST(NmuRobDeath, Enabled_PopBWithUnallocatedOrderingTag_Abort)` (the model aborts on a tag with no slot). Failure: model abort on response arrival.
 20. IMPORTANT per-ID release: responses release to the master only from the head of the ID's order list. A ready RoB'd entry behind an incomplete older entry waits, and a bypassed (ordering_req = 0) head is popped by its own response (B, or R with rlast) before anything behind it releases. Example: ID 3 issues bypassed AW#1 then RoB'd AW#2, B#2 arrives first and is held in slot, B#1 arrives and releases, then B#2 releases, master sees B#1 then B#2. Verified: `TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady)`, `Enabled_PerBeatRelease_HeadBurstStreams`, `Enabled_BypassedBeat_ReleasesNoSlot`. Failure: release past a blocked head.
-21. RobMode scope: `RobMode::Disabled` disables the R-side slot pool only. A same-ID AR with the same `{dst_id, dst_port_id, AXI class}` key is accepted until `NMU_MAX_TXNS_PER_ID`; a different key is refused until the ID becomes idle. The B-side RoB runs unconditionally in both modes. Verification is `[TBD]`: cover same-key acceptance, each key-field mismatch stalling, counter-full stalling, and release on `rlast`. Failure: a cross-domain AR enters early, a legal same-domain AR stalls below the limit, or B ordering changes with the R mode.
+21. RobMode scope: `RobMode::Disabled` disables the R-side slot pool only. A same-ID AR with the same `{dst_id, dst_port_id, AXI class}` key is accepted until `MAX_OUTSTANDING_PER_ID`; a different key is refused until the ID becomes idle. The B-side RoB runs unconditionally in both modes. Verification is `[TBD]`: cover same-key acceptance, each key-field mismatch stalling, counter-full stalling, and release on `rlast`. Failure: a cross-domain AR enters early, a legal same-domain AR stalls below the limit, or B ordering changes with the R mode.
 22. Per-ID transaction gate: at most max_txns_per_id (default 32 = 0x20) outstanding transactions per ID per direction, enforced before slot availability, refusal is stateless. Example: 32 outstanding ID-7 writes refuse the 33rd AW even with 31 free B slots. Verified: `TEST(NmuRob, Enabled_MaxTxnsPerIdGate_RefusesWithFreeSlotsAvailable)`, `Enabled_MaxTxnsPerIdDefaultIsThirtyTwo`. Failure: 33rd same-ID acceptance.
 Items 23-25 verify the current `SHARED` C++ model. Target `READ_WRITE_SPLIT` coverage is
 `[TBD]` until the model and RTL implement the Section 2.4 overlay.

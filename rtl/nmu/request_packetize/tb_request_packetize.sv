@@ -10,7 +10,7 @@ module tb_nmu_request_packetize;
     logic rst_n_i = 1'b0;
     ni_types_pkg::nmu_aw_request_t                  s_aw;
     logic                                           s_aw_valid, s_aw_ready;
-    ni_signals_pkg::axi_w_t                         s_w;
+    ni_signals_pkg::noc_axi_w_t                         s_w;
     logic                                           s_w_valid, s_w_ready;
     ni_types_pkg::nmu_ar_request_t                  s_ar;
     logic                                           s_ar_valid, s_ar_ready;

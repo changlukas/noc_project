@@ -5,9 +5,9 @@ module tb_nmu_request_path;
 
     logic axi_clk_i = 0, noc_clk_i = 0;
     logic axi_rst_n_i = 0, noc_rst_n_i = 0;
-    ni_signals_pkg::axi_aw_t          s_aw_i;
-    ni_signals_pkg::axi_w_t           s_w_i, m_w_o;
-    ni_signals_pkg::axi_ar_t          s_ar_i;
+    ni_signals_pkg::noc_axi_aw_t          s_aw_i;
+    ni_signals_pkg::noc_axi_w_t           s_w_i, m_w_o;
+    ni_signals_pkg::noc_axi_ar_t          s_ar_i;
     ni_types_pkg::nmu_sam_aw_result_t m_aw_o;
     ni_types_pkg::nmu_sam_ar_result_t m_ar_o;
     logic                             s_aw_valid_i, s_aw_ready_o, s_w_valid_i, s_w_ready_o;

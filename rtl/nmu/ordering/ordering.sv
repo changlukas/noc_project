@@ -6,50 +6,52 @@
 
 /* Shared NMU request-ordering and response-reordering subsystem. */
 module nmu_ordering #(
+    parameter int unsigned MAX_ACTIVE_IDS         = 1 << ni_params_pkg::NOC_ID_WIDTH,
     parameter int unsigned B_ROB_DEPTH            = ni_params_pkg::NMU_ROB_B_DEPTH,
     parameter int unsigned R_ROB_DEPTH            = ni_params_pkg::NMU_ROB_R_DEPTH,
     parameter int unsigned MAX_OUTSTANDING_PER_ID = ni_params_pkg::NMU_MAX_OUTSTANDING_PER_ID,
     parameter bit          R_ROB_EN               = bit'(ni_params_pkg::NMU_R_ROB_EN)
 ) (
-    input  wire logic                              clk_i,
-    input  wire logic                              rst_n_i,
-    input  wire ni_types_pkg::nmu_sam_aw_result_t  s_aw_i,
-    input  wire logic                              s_aw_valid_i,
-    output wire logic                              s_aw_ready_o,
-    output wire ni_types_pkg::nmu_aw_request_t     m_aw_o,
-    output wire logic                              m_aw_valid_o,
-    input  wire logic                              m_aw_ready_i,
-    input  wire ni_signals_pkg::axi_w_t            s_w_i,
-    input  wire logic                              s_w_valid_i,
-    output wire logic                              s_w_ready_o,
-    output wire ni_signals_pkg::axi_w_t            m_w_o,
-    output wire logic                              m_w_valid_o,
-    input  wire logic                              m_w_ready_i,
-    input  wire ni_types_pkg::nmu_sam_ar_result_t  s_ar_i,
-    input  wire logic                              s_ar_valid_i,
-    output wire logic                              s_ar_ready_o,
-    output wire ni_types_pkg::nmu_ar_request_t     m_ar_o,
-    output wire logic                              m_ar_valid_o,
-    input  wire logic                              m_ar_ready_i,
-    input  wire ni_types_pkg::nmu_b_response_t     s_b_i,
-    input  wire logic                              s_b_valid_i,
-    output wire logic                              s_b_ready_o,
-    output wire ni_signals_pkg::axi_b_t            m_b_o,
-    output wire logic                              m_b_valid_o,
-    input  wire logic                              m_b_ready_i,
-    input  wire ni_types_pkg::nmu_r_response_t     s_r_i,
-    input  wire logic                              s_r_valid_i,
-    output wire logic                              s_r_ready_o,
-    output wire ni_signals_pkg::axi_r_t            m_r_o,
-    output wire logic                              m_r_valid_o,
-    input  wire logic                              m_r_ready_i
+    input  wire logic                             clk_i,
+    input  wire logic                             rst_n_i,
+    input  wire ni_types_pkg::nmu_sam_aw_result_t s_aw_i,
+    input  wire logic                             s_aw_valid_i,
+    output wire logic                             s_aw_ready_o,
+    output wire ni_types_pkg::nmu_aw_request_t    m_aw_o,
+    output wire logic                             m_aw_valid_o,
+    input  wire logic                             m_aw_ready_i,
+    input  wire ni_signals_pkg::noc_axi_w_t       s_w_i,
+    input  wire logic                             s_w_valid_i,
+    output wire logic                             s_w_ready_o,
+    output wire ni_signals_pkg::noc_axi_w_t       m_w_o,
+    output wire logic                             m_w_valid_o,
+    input  wire logic                             m_w_ready_i,
+    input  wire ni_types_pkg::nmu_sam_ar_result_t s_ar_i,
+    input  wire logic                             s_ar_valid_i,
+    output wire logic                             s_ar_ready_o,
+    output wire ni_types_pkg::nmu_ar_request_t    m_ar_o,
+    output wire logic                             m_ar_valid_o,
+    input  wire logic                             m_ar_ready_i,
+    input  wire ni_types_pkg::nmu_b_response_t    s_b_i,
+    input  wire logic                             s_b_valid_i,
+    output wire logic                             s_b_ready_o,
+    output wire ni_signals_pkg::noc_axi_b_t       m_b_o,
+    output wire logic                             m_b_valid_o,
+    input  wire logic                             m_b_ready_i,
+    input  wire ni_types_pkg::nmu_r_response_t    s_r_i,
+    input  wire logic                             s_r_valid_i,
+    output wire logic                             s_r_ready_o,
+    output wire ni_signals_pkg::noc_axi_r_t       m_r_o,
+    output wire logic                             m_r_valid_o,
+    input  wire logic                             m_r_ready_i
 );
 
-    ni_signals_pkg::axi_r_t retire_response;
+    ni_signals_pkg::noc_axi_r_t retire_response;
     assign m_r_o = retire_response;
 
     localparam int unsigned ID_W              = $bits(s_aw_i.axi.awid);
-    localparam int unsigned NUM_IDS           = 1 << ID_W;
+    localparam int unsigned NUM_IDS           = MAX_ACTIVE_IDS;
+    localparam int unsigned ID_IDX_W          = NUM_IDS > 1 ? $clog2(NUM_IDS) : 1;
     localparam int unsigned TAG_W             = ni_flit_pkg::ORDERING_TAG_WIDTH;
     localparam int unsigned NUM_TAGS          = 1 << TAG_W;
     localparam int unsigned BEAT_COUNT_W      = ni_flit_pkg::AXI_LEN_WIDTH + 1;
@@ -58,6 +60,9 @@ module nmu_ordering #(
     localparam int unsigned B_ROB_ADDR_W      = B_ROB_DEPTH > 1 ? $clog2(B_ROB_DEPTH) : 1;
     localparam int unsigned R_ROB_ADDR_W      = R_ROB_DEPTH > 1 ? $clog2(R_ROB_DEPTH) : 1;
 
+    if (MAX_ACTIVE_IDS < 1 || MAX_ACTIVE_IDS > (1 << ID_W)) begin : gen_invalid_active_ids
+        initial $fatal(0, "MAX_ACTIVE_IDS exceeds the NoC ID space (%m)");
+    end
     if (B_ROB_DEPTH < 1 || B_ROB_DEPTH > NUM_TAGS) begin : gen_invalid_b_depth
         initial $fatal(0, "Error: B_ROB_DEPTH must be in [1, NUM_TAGS] (instance %m)");
     end
@@ -85,7 +90,7 @@ module nmu_ordering #(
     } read_lane_context_t;
     read_lane_context_t rd_lane_context_reg [NUM_IDS][MAX_OUTSTANDING_PER_ID];
     read_lane_context_t     retire_context;
-    ni_signals_pkg::axi_r_t retire_r;
+    ni_signals_pkg::noc_axi_r_t retire_r;
     int unsigned            retire_byte_addr, retire_step, retire_span, retire_lane;
 
     order_entry_t wr_order_reg [NUM_IDS][MAX_OUTSTANDING_PER_ID];
@@ -102,8 +107,8 @@ module nmu_ordering #(
     logic              [NUM_IDS-1:0] wr_reorder_active_reg, wr_reorder_active_next;
     logic              [NUM_IDS-1:0] rd_reorder_active_reg, rd_reorder_active_next;
     logic              [NUM_IDS-1:0] wr_collective_active_reg, wr_collective_active_next;
-    logic                 [ID_W-1:0] b_rr_reg, b_rr_next;
-    logic                 [ID_W-1:0] r_rr_reg, r_rr_next;
+    logic                 [ID_IDX_W-1:0] b_rr_reg, b_rr_next;
+    logic                 [ID_IDX_W-1:0] r_rr_reg, r_rr_next;
     logic                            aw_hold_reg, aw_hold_next;
     logic                            ar_hold_reg, ar_hold_next;
     logic                            aw_hold_reorder_reg, aw_hold_reorder_next;
@@ -130,8 +135,8 @@ module nmu_ordering #(
     logic                   [B_ROB_DEPTH-1:0] b_complete;
     logic                   [R_ROB_DEPTH-1:0] r_complete;
     logic                         [TAG_W-1:0] b_storage_rd_addr, r_storage_rd_addr, b_storage_free_addr, r_storage_free_addr;
-    ni_signals_pkg::axi_b_t                   b_storage_rd_data;
-    ni_signals_pkg::axi_r_t                   r_storage_rd_data;
+    ni_signals_pkg::noc_axi_b_t                   b_storage_rd_data;
+    ni_signals_pkg::noc_axi_r_t                   r_storage_rd_data;
     logic                                     b_storage_wr_ready, r_storage_wr_ready;
     wire logic [BEAT_COUNT_W-1:0] ar_beat_cnt =
         BEAT_COUNT_W'(s_ar_i.axi.arlen) + BEAT_COUNT_W'(1);
@@ -203,7 +208,7 @@ module nmu_ordering #(
         for (int offset = NUM_IDS-1; offset >= 0; offset--) begin
             if (b_buffer_ready[(int'(b_rr_reg) + offset) % NUM_IDS]) begin
                 b_sel_valid = 1'b1;
-                b_sel_id    = ID_W'(int'(b_rr_reg) + offset);
+                b_sel_id    = ID_W'((int'(b_rr_reg) + offset) % NUM_IDS);
             end
         end
         b_direct = !b_sel_valid && s_b_valid_i &&
@@ -232,7 +237,7 @@ module nmu_ordering #(
         for (int offset = NUM_IDS-1; offset >= 0; offset--) begin
             if (r_buffer_ready[(int'(r_rr_reg) + offset) % NUM_IDS]) begin
                 r_sel_valid = 1'b1;
-                r_sel_id    = ID_W'(int'(r_rr_reg) + offset);
+                r_sel_id    = ID_W'((int'(r_rr_reg) + offset) % NUM_IDS);
             end
         end
         r_direct = !r_sel_valid && s_r_valid_i && rd_outstanding_cnt_reg[s_r_i.axi.rid] != 0 &&
@@ -347,7 +352,7 @@ module nmu_ordering #(
             if (wr_order_head[b_retire_id].collective) begin
                 wr_collective_active_next[b_retire_id] = 1'b0;
             end
-            b_rr_next = b_retire_id + 1'b1;
+            b_rr_next = b_retire_id == ID_W'(NUM_IDS-1) ? '0 : b_retire_id + 1'b1;
         end
         if (r_retire) begin
             if (r_retire_last) begin
@@ -358,7 +363,7 @@ module nmu_ordering #(
             end else begin
                 r_retire_offset_next[r_retire_id] = r_retire_offset_reg[r_retire_id] + 1'b1;
             end
-            r_rr_next = r_retire_id + 1'b1;
+            r_rr_next = r_retire_id == ID_W'(NUM_IDS-1) ? '0 : r_retire_id + 1'b1;
         end
 
         for (int id = 0; id < NUM_IDS; id++) begin
@@ -481,7 +486,7 @@ module nmu_ordering #(
 
     nmu_reorder_storage #(
         .DEPTH  (B_ROB_DEPTH            ),
-        .data_t (ni_signals_pkg::axi_b_t)
+        .data_t (ni_signals_pkg::noc_axi_b_t)
     ) i_b_storage (
         .clk_i         (clk_i                                                                          ),
         .rst_n_i       (rst_n_i                                                                        ),
@@ -509,7 +514,7 @@ module nmu_ordering #(
     if (R_ROB_EN) begin : gen_read_reorder_storage
         nmu_reorder_storage #(
             .DEPTH  (R_ROB_DEPTH            ),
-            .data_t (ni_signals_pkg::axi_r_t)
+            .data_t (ni_signals_pkg::noc_axi_r_t)
         ) i_r_storage (
             .clk_i         (clk_i                                                                          ),
             .rst_n_i       (rst_n_i                                                                        ),
@@ -540,6 +545,17 @@ module nmu_ordering #(
         assign r_storage_rd_data  = '0;
         assign r_complete         = '0;
     end
+    // synthesis translate_off
+    always @(posedge clk_i) begin
+        if (rst_n_i) begin
+            if ((s_aw_valid_i && int'(s_aw_i.axi.awid) >= NUM_IDS) ||
+                (s_ar_valid_i && int'(s_ar_i.axi.arid) >= NUM_IDS) ||
+                (s_b_valid_i && int'(s_b_i.axi.bid) >= NUM_IDS) ||
+                (s_r_valid_i && int'(s_r_i.axi.rid) >= NUM_IDS))
+                $fatal(1, "NoC ID exceeds configured active-ID capacity (%m)");
+        end
+    end
+    // synthesis translate_on
 endmodule
 
 `resetall

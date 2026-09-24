@@ -10,6 +10,7 @@ import subprocess
 parser = argparse.ArgumentParser()
 parser.add_argument("--mixed-only", action="store_true")
 parser.add_argument("--rx-only", action="store_true")
+parser.add_argument("--ordering-only", action="store_true")
 parser.add_argument("--report", default="build/buffer-pipeline/focused")
 options = parser.parse_args()
 os.environ.setdefault("VCS_ARCH_OVERRIDE", "linux")
@@ -33,13 +34,16 @@ cases = [
     ("tb_nmu_response_depacketize", {"NUM_DAT_VC": 2, "DAT_RX_VC_DEPTH": 2}),
     ("tb_nmu_response_depacketize", {"NUM_DAT_VC": 6, "DAT_VC_MODE": 1, "DAT_RX_VC_DEPTH": 8}),
 ]
+if options.ordering_only:
+    cases = [("tb_nmu_ordering", {"MAX_ACTIVE_IDS": 3})]
 results = []
 for top, params in cases:
     if options.rx_only and (top != "tb_nmu_response_depacketize" or params["NUM_DAT_VC"] != 2):
         continue
     if options.mixed_only and "AW_REG_TYPE" not in params:
         continue
-    group = "response_depacketize" if "response_depacketize" in top else "request_packetize"
+    group = ("ordering" if top == "tb_nmu_ordering" else
+             "response_depacketize" if "response_depacketize" in top else "request_packetize")
     tb = "repo/rtl/nmu/{}/{}.sv".format(group, top.replace("tb_nmu_", "tb_"))
     key = hashlib.sha256((top + repr(params)).encode() + (root / tb).read_bytes()).hexdigest()[:8]
     work = out / (top + "_" + key)

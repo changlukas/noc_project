@@ -264,3 +264,23 @@ def test_cosim_reorder_destinations_and_delay_selection(tmp_path, mode):
         else:
             assert "+reorder_test=0" in schedule
     assert "reset_inflight" not in names
+
+
+def test_capacity_profile_inputs(tmp_path):
+    catalog = REPO / "sim/test_patterns/cosim/capacity_perf.json"
+    names = generate(tmp_path, REPO / "sim/cosim/nmu/topology.yml", 8,
+                     catalog=catalog, profile="cosim")
+    for name in names:
+        writes = _parse_write(tmp_path / name / "write.txt")
+        reads = _parse_read(tmp_path / name / "read.txt")
+        assert len(writes) == len(reads) == 48
+        assert len({t["id"] for t in writes}) == (12 if name.endswith("active_ids") else 1)
+        assert all(t["id"] >= 128 for t in writes)
+        assert len({t["addr"] >> 32 for t in writes}) == 1
+        assert all(t["len"] == 0 for t in writes)
+        assert [(t["id"], t["addr"]) for t in writes] == [(t["id"], t["addr"]) for t in reads]
+        schedule = (tmp_path / name / "schedule.txt").read_text()
+        assert "+backpressure=0" in schedule and "+reorder_test=0" in schedule
+    with pytest.raises(ValueError, match="num_ids"):
+        generate(tmp_path / "invalid", REPO / "sim/cosim/nmu/topology.yml", 3,
+                 catalog=catalog, profile="cosim")

@@ -17,7 +17,7 @@ module tb_nmu_request_packetize_stress #(
     localparam int unsigned WRITE_VCS = DAT_VC_MODE == 1 ? NUM_DAT_VC/2 : NUM_DAT_VC;
     logic clk_i = 0, rst_n_i = 0;
     ni_types_pkg::nmu_aw_request_t                  s_aw_i;
-    ni_signals_pkg::axi_w_t                         s_w_i;
+    ni_signals_pkg::noc_axi_w_t                         s_w_i;
     ni_types_pkg::nmu_ar_request_t                  s_ar_i;
     ni_flit_pkg::req_flit_t                         m_req_o, previous_req;
     ni_flit_pkg::dat_flit_t                         m_dat_o;

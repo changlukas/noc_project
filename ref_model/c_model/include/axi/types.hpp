@@ -19,20 +19,17 @@ constexpr uint64_t kFullStrbMask = (DATA_BYTES >= 64) ? ~0ull : ((1ull << DATA_B
 constexpr int NOC_DATA_WIDTH_BITS = DATA_BYTES * 8;
 
 // The external AXI port and packet field are intentionally independent.
-// C++/DPI records at the NoC boundary are keyed by the fixed NoC ID; the
+// C++/DPI records at the NoC boundary are keyed by the generated NoC ID; the
 // endpoint's RTL remap restores the external AXI ID before returning a response.
 static_assert(::ni::NOC_ID_WIDTH == ::ni::width::NOC_ID_WIDTH,
               "constants.yaml axi.NOC_ID_WIDTH and ni_packet.json flit.field_widths.NOC_ID_WIDTH "
               "must agree; regenerate both after changing either");
-static_assert(::ni::NOC_ID_WIDTH == 3,
-              "the c_model/DPI boundary is the approved fixed 3-bit NoC ID instance");
+static_assert(::ni::NOC_ID_WIDTH >= 1 && ::ni::NOC_ID_WIDTH <= 8,
+              "NoC IDs must fit the uint8_t model/DPI carrier");
 
 // NOC_ID_SPACE sizes per-NoC-ID containers in the NMU RoB and NSU MetaBuffer.
 // It must never be derived from AXI_ID_WIDTH, which is the external port width.
 constexpr std::size_t NOC_ID_SPACE = 1u << ::ni::width::NOC_ID_WIDTH;
-static_assert(NOC_ID_SPACE == 8,
-              "NOC_ID_SPACE locked to 8 (NOC_ID_WIDTH=3); update per-NoC-ID "
-              "container sizes if NOC_ID_WIDTH changes");
 
 static_assert(DATA_BYTES * 8 == ::ni::width::NOC_DATA_WIDTH,
               "DATA_BYTES (= WSTRB_WIDTH) * 8 must equal NOC_DATA_WIDTH "

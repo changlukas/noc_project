@@ -1,0 +1,36 @@
+[
+  {
+    "noc_id_width": 3,
+    "networks": {
+      "REQ": 136,
+      "RSP": 126,
+      "DAT": 633
+    },
+    "payloads": {
+      "AW": 88,
+      "AR": 88,
+      "NARROW_W": 81,
+      "DATA_W": 585,
+      "B": 13,
+      "NARROW_R": 78,
+      "DATA_R": 526
+    }
+  },
+  {
+    "noc_id_width": 4,
+    "networks": {
+      "REQ": 137,
+      "RSP": 127,
+      "DAT": 633
+    },
+    "payloads": {
+      "AW": 89,
+      "AR": 89,
+      "NARROW_W": 81,
+      "DATA_W": 585,
+      "B": 14,
+      "NARROW_R": 79,
+      "DATA_R": 527
+    }
+  }
+]

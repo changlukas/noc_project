@@ -15,13 +15,13 @@ module tb_nmu_sam_guards #(
     logic rst_n_i = 1'b0;
     logic s_aw_valid = 1'b0;
     logic s_aw_ready;
-    ni_signals_pkg::axi_aw_t s_aw = '0;
+    ni_signals_pkg::noc_axi_aw_t s_aw = '0;
     logic m_aw_valid;
     logic m_aw_ready = 1'b0;
     ni_types_pkg::nmu_sam_aw_result_t m_aw;
     logic s_ar_valid = 1'b0;
     logic s_ar_ready;
-    ni_signals_pkg::axi_ar_t s_ar = '0;
+    ni_signals_pkg::noc_axi_ar_t s_ar = '0;
     logic m_ar_valid;
     logic m_ar_ready = 1'b0;
     ni_types_pkg::nmu_sam_ar_result_t m_ar;

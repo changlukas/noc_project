@@ -179,9 +179,15 @@ class TestSvSignalsEmit:
 
     def test_axi_ids_use_external_width(self):
         sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
-        axi_types = sv[sv.index("typedef struct packed {"):sv.index("} axi_rsp_t;")]
-        assert "AXI_ID_WIDTH-1:0" in axi_types
-        assert "NOC_ID_WIDTH-1:0" not in axi_types
+        import re
+        structs = {name: body for body, name in re.findall(r"typedef struct packed \{([^}]+)\} (\w+);", sv)}
+        for channel in ("aw", "ar", "b", "r"):
+            external = structs["axi_" + channel + "_t"]
+            internal = structs["noc_axi_" + channel + "_t"]
+            assert "AXI_ID_WIDTH-1:0" in external
+            assert "NOC_ID_WIDTH-1:0" not in external
+            assert "NOC_ID_WIDTH-1:0" in internal
+            assert "AXI_ID_WIDTH-1:0" not in internal
 
     def test_struct_typedefs_in_package(self):
         sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")

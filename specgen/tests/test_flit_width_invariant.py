@@ -35,11 +35,11 @@ def test_default_config_no_errors(packet_spec, constants):
 
 
 def test_axi_and_noc_id_width_contracts_are_independent(constants):
-    """External AXI width varies; the NoC packet ID width is fixed at three."""
+    """External AXI width varies; NoC width is configured independently."""
     axi_id = constants["axi"]["AXI_ID_WIDTH"]
     noc_id = constants["axi"]["NOC_ID_WIDTH"]
     assert (axi_id["min"], axi_id["max"]) == (1, 8)
-    assert noc_id["allowed"] == [3]
+    assert (noc_id["min"], noc_id["max"]) == (1, 8)
 
 
 @pytest.mark.parametrize("network", ["REQ", "RSP", "DAT"])
