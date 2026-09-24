@@ -30,7 +30,7 @@ DPI := $(BUILD)/dpi_$(shell python3 build_key.py cpp "$(CPPFLAGS) $(CXX)")
 YAML_BUILD := $(BUILD)/yaml_$(shell python3 build_key.py yaml "$(CPPFLAGS) $(CXX)")
 SIM := $(BUILD)/vcs_wave$(WAVE)_$(shell python3 build_key.py sv "$(VCS_FLAGS) $(WAVE_FLAGS) $(DPI)")
 YAML_OBJ := $(patsubst deps/yaml-cpp/src/%.cpp,$(YAML_BUILD)/%.o,$(YAML_SRC))
-.PHONY: help compile run sim regress run_wave corrupt nWave
+.PHONY: help compile run sim regress run_wave run_wave_view corrupt nWave
 help:
 	@echo 'make run CASE=ctrl_write_single | make regress | make run_wave CASE=data_write_burst'
 $(YAML_BUILD)/%.o: deps/yaml-cpp/src/%.cpp $(YAML_HEADERS)
@@ -53,6 +53,8 @@ regress: compile
 	@set -e; while read name; do $(MAKE) --no-print-directory sim CASE=$$name; done < patterns/cases.list
 corrupt: compile
 	python3 run.py --binary "$(SIM)/simv" --case data_write_single --report "$(REPORT)" --corrupt
+run_wave_view: nWave
+
 nWave: run_wave
 	@sed 's|@FSDB@|$(BUILD)/report_wave1/$(if $(filter-out auto,$(MODE)),$(MODE)/,)$(CASE).fsdb|g' "$(WAVE_RC)" > "$(BUILD)/report_wave1/$(if $(filter-out auto,$(MODE)),$(MODE)/,)$(CASE).rc"
 	$(VERDI_HOME)/bin/nWave -ssf "$(BUILD)/report_wave1/$(if $(filter-out auto,$(MODE)),$(MODE)/,)$(CASE).fsdb" -sswr "$(BUILD)/report_wave1/$(if $(filter-out auto,$(MODE)),$(MODE)/,)$(CASE).rc"

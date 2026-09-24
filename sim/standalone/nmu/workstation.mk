@@ -1,8 +1,8 @@
 .DEFAULT_GOAL := help
 TESTBENCH ?= standalone
 ifeq ($(TESTBENCH),cosim)
-.PHONY: help compile run sim regress run_wave nWave corrupt list
-help compile run sim regress run_wave nWave corrupt:
+.PHONY: help compile run sim regress run_wave run_wave_view nWave corrupt list
+help compile run sim regress run_wave run_wave_view nWave corrupt:
 	$(MAKE) --no-print-directory -C cosim $@
 list:
 	@cat cosim/pattern.txt
