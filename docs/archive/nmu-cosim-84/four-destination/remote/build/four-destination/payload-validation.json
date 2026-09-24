@@ -1,0 +1,26 @@
+[
+  {
+    "case": "cross_id_out_of_order",
+    "mode": "auto",
+    "rc": 0,
+    "coverage": "REORDER_COVERAGE b_ooo=1 r_ooo=12 b_same_id=0 r_same_id=0 b_buffered=0 r_buffered=0"
+  },
+  {
+    "case": "same_id_cross_dst_reorder",
+    "mode": "auto",
+    "rc": 0,
+    "coverage": "REORDER_COVERAGE b_ooo=1 r_ooo=12 b_same_id=1 r_same_id=12 b_buffered=2 r_buffered=12"
+  },
+  {
+    "case": "cross_id_out_of_order",
+    "mode": "data",
+    "rc": 0,
+    "coverage": "REORDER_COVERAGE b_ooo=1 r_ooo=12 b_same_id=0 r_same_id=0 b_buffered=0 r_buffered=0"
+  },
+  {
+    "case": "same_id_cross_dst_reorder",
+    "mode": "data",
+    "rc": 0,
+    "coverage": "REORDER_COVERAGE b_ooo=1 r_ooo=12 b_same_id=1 r_same_id=12 b_buffered=2 r_buffered=12"
+  }
+]

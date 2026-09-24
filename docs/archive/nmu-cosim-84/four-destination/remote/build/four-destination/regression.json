@@ -1,0 +1,266 @@
+[
+  {
+    "case": "ctrl_write_single",
+    "rc": 0,
+    "counts": [
+      1,
+      1,
+      1,
+      8
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "ctrl_read_single",
+    "rc": 0,
+    "counts": [
+      1,
+      1,
+      1,
+      8
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "ctrl_write_burst",
+    "rc": 0,
+    "counts": [
+      12,
+      12,
+      56,
+      210
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "ctrl_read_burst",
+    "rc": 0,
+    "counts": [
+      12,
+      12,
+      56,
+      210
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "same_id_in_order",
+    "rc": 0,
+    "counts": [
+      8,
+      8,
+      8,
+      64
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "same_id_outstanding",
+    "rc": 0,
+    "counts": [
+      16,
+      16,
+      16,
+      128
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "multi_id_outstanding",
+    "rc": 0,
+    "counts": [
+      16,
+      16,
+      16,
+      128
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "cross_id_out_of_order",
+    "rc": 0,
+    "counts": [
+      16,
+      16,
+      16,
+      128
+    ],
+    "delay": "RESPONSE_DELAY enabled=1 west_setting=2"
+  },
+  {
+    "case": "same_id_cross_dst_reorder",
+    "rc": 0,
+    "counts": [
+      16,
+      16,
+      16,
+      128
+    ],
+    "delay": "RESPONSE_DELAY enabled=1 west_setting=2"
+  },
+  {
+    "case": "data_write_single",
+    "rc": 0,
+    "counts": [
+      1,
+      1,
+      1,
+      64
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "data_write_burst",
+    "rc": 0,
+    "counts": [
+      12,
+      12,
+      56,
+      694
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "data_read_single",
+    "rc": 0,
+    "counts": [
+      1,
+      1,
+      1,
+      64
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "data_read_burst",
+    "rc": 0,
+    "counts": [
+      12,
+      12,
+      56,
+      694
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "ctrl_rand",
+    "rc": 0,
+    "counts": [
+      64,
+      64,
+      240,
+      991
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "data_rand",
+    "rc": 0,
+    "counts": [
+      64,
+      64,
+      240,
+      5730
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "request_rand",
+    "rc": 0,
+    "counts": [
+      64,
+      64,
+      240,
+      2828
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "ctrl_backpressure",
+    "rc": 0,
+    "counts": [
+      16,
+      16,
+      128,
+      1024
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "ctrl_capacity_recover",
+    "rc": 0,
+    "counts": [
+      64,
+      64,
+      512,
+      4096
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "ctrl_partial_write",
+    "rc": 0,
+    "counts": [
+      24,
+      12,
+      56,
+      210
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "ctrl_read_write",
+    "rc": 0,
+    "counts": [
+      32,
+      32,
+      256,
+      2048
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "data_backpressure",
+    "rc": 0,
+    "counts": [
+      16,
+      16,
+      128,
+      8192
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "data_capacity_recover",
+    "rc": 0,
+    "counts": [
+      64,
+      64,
+      512,
+      32768
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "data_partial_write",
+    "rc": 0,
+    "counts": [
+      24,
+      12,
+      56,
+      694
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  },
+  {
+    "case": "data_read_write",
+    "rc": 0,
+    "counts": [
+      32,
+      32,
+      256,
+      16384
+    ],
+    "delay": "RESPONSE_DELAY enabled=0 west_setting=2"
+  }
+]

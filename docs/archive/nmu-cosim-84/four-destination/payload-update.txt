@@ -1,0 +1,7 @@
+Only these pattern files changed; other cases and rand-mode ordering inputs are byte-identical:
+patterns/cross_id_out_of_order/write.txt
+patterns/same_id_cross_dst_reorder/write.txt
+patterns/control/cross_id_out_of_order/write.txt
+patterns/control/same_id_cross_dst_reorder/write.txt
+patterns/data/cross_id_out_of_order/write.txt
+patterns/data/same_id_cross_dst_reorder/write.txt

@@ -1,0 +1,82 @@
+[
+  {
+    "case": "cross_id_out_of_order",
+    "mode": "control",
+    "setting": 0,
+    "rc": 2,
+    "coverage": "REORDER_COVERAGE b_ooo=0 r_ooo=0 b_same_id=0 r_same_id=0 b_buffered=0 r_buffered=0",
+    "delay_cycles": [
+      0
+    ]
+  },
+  {
+    "case": "same_id_cross_dst_reorder",
+    "mode": "control",
+    "setting": 0,
+    "rc": 2,
+    "coverage": "REORDER_COVERAGE b_ooo=0 r_ooo=0 b_same_id=0 r_same_id=0 b_buffered=0 r_buffered=0",
+    "delay_cycles": [
+      0
+    ]
+  },
+  {
+    "case": "cross_id_out_of_order",
+    "mode": "data",
+    "setting": 0,
+    "rc": 2,
+    "coverage": "REORDER_COVERAGE b_ooo=0 r_ooo=0 b_same_id=0 r_same_id=0 b_buffered=0 r_buffered=0",
+    "delay_cycles": [
+      0
+    ]
+  },
+  {
+    "case": "same_id_cross_dst_reorder",
+    "mode": "data",
+    "setting": 0,
+    "rc": 2,
+    "coverage": "REORDER_COVERAGE b_ooo=0 r_ooo=0 b_same_id=0 r_same_id=0 b_buffered=0 r_buffered=0",
+    "delay_cycles": [
+      0
+    ]
+  },
+  {
+    "case": "cross_id_out_of_order",
+    "mode": "rand",
+    "setting": 0,
+    "rc": 0,
+    "coverage": "REORDER_COVERAGE b_ooo=1 r_ooo=9 b_same_id=0 r_same_id=0 b_buffered=0 r_buffered=4",
+    "delay_cycles": [
+      0
+    ]
+  },
+  {
+    "case": "same_id_cross_dst_reorder",
+    "mode": "rand",
+    "setting": 0,
+    "rc": 0,
+    "coverage": "REORDER_COVERAGE b_ooo=1 r_ooo=9 b_same_id=1 r_same_id=9 b_buffered=1 r_buffered=46",
+    "delay_cycles": [
+      0
+    ]
+  },
+  {
+    "case": "cross_id_out_of_order",
+    "mode": "control",
+    "setting": 1,
+    "rc": 2,
+    "coverage": "REORDER_COVERAGE b_ooo=0 r_ooo=0 b_same_id=0 r_same_id=0 b_buffered=0 r_buffered=0",
+    "delay_cycles": [
+      1
+    ]
+  },
+  {
+    "case": "same_id_cross_dst_reorder",
+    "mode": "control",
+    "setting": 1,
+    "rc": 2,
+    "coverage": "REORDER_COVERAGE b_ooo=0 r_ooo=0 b_same_id=0 r_same_id=0 b_buffered=0 r_buffered=0",
+    "delay_cycles": [
+      1
+    ]
+  }
+]

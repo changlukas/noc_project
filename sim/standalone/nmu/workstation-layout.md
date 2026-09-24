@@ -3,7 +3,7 @@
 All NMU workstation environments are under /home/mingwei/noc_project/nmu-standalone/.
 
 - Root: the existing deterministic standalone loopback environment, including script/, build/ and user waveform RC files.
-- cosim/: RTL NMU with one C++ Router/NSU and AXI memory, plus its independent build cache, reports and 22-case pattern.txt.
+- cosim/: RTL NMU with one C++ Router and four NSU/memory endpoints, plus its independent build cache, reports and 24-case pattern.txt.
 - archive/nmu-vcs-validation-20260922/: retained September 22 standalone validation snapshot. Its sources use older names and its logs describe that earlier version. It is historical evidence, not the current source tree.
 
 From nmu-standalone/:

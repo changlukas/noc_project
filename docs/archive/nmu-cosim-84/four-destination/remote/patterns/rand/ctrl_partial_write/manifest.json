@@ -1,0 +1,13 @@
+{
+  "case": "ctrl_partial_write",
+  "mode": "control",
+  "seed": 1,
+  "id_width": 3,
+  "coverage": {
+    "control_write": 12,
+    "control_read": 12,
+    "data_write": 0,
+    "data_read": 0
+  },
+  "profile": "cosim"
+}

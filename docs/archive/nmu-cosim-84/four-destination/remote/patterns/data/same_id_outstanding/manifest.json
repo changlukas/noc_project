@@ -1,0 +1,13 @@
+{
+  "case": "same_id_outstanding",
+  "mode": "data",
+  "seed": 1,
+  "id_width": 3,
+  "coverage": {
+    "control_write": 0,
+    "control_read": 0,
+    "data_write": 16,
+    "data_read": 16
+  },
+  "profile": "cosim"
+}

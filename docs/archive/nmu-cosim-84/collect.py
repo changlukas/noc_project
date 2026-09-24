@@ -10,14 +10,16 @@ REMOTE = r"""import base64,glob,hashlib,json,os
 root='/home/mingwei/noc_project/nmu-standalone/cosim'
 os.chdir(root)
 names=['SHA256SUMS','constants.yml','profile.yml','patterns/cases.list','pattern.txt','acceptance-final.log']
-names+=glob.glob('build/report_wave*/*.log')+glob.glob('build/report_wave*/source-SHA256SUMS')
-names+=glob.glob('patterns/*/*.txt')+glob.glob('patterns/*/manifest.json')
+names+=glob.glob('build/report_wave*/**/*.log',recursive=True)+glob.glob('build/report_wave*/**/source-SHA256SUMS',recursive=True)
+names+=glob.glob('build/four-destination/*.log')+glob.glob('build/four-destination/*.json')+glob.glob('build/four-destination/*.csv')
+names+=glob.glob('patterns/**/*.txt',recursive=True)+glob.glob('patterns/**/manifest.json',recursive=True)
+names+=['topology.yml','signals.rc']
 files=[]
 for name in names:
     with open(name,'rb') as f:data=f.read()
     files.append(dict(path=name,sha256=hashlib.sha256(data).hexdigest(),data=base64.b64encode(data).decode()))
 artifacts=[]
-for name in glob.glob('build/dpi*/libnmu_cmodel.so')+glob.glob('build/vcs_wave*/simv')+glob.glob('build/report_wave*/*.fsdb'):
+for name in glob.glob('build/dpi*/libnmu_cmodel.so')+glob.glob('build/vcs_wave*/simv')+glob.glob('build/report_wave*/**/*.fsdb',recursive=True):
     with open(name,'rb') as f:digest=hashlib.sha256(f.read()).hexdigest()
     artifacts.append(dict(path=name,sha256=digest,size=os.stat(name).st_size,mtime=os.stat(name).st_mtime))
 print('REPORTS_JSON='+json.dumps(dict(files=files,artifacts=artifacts)))

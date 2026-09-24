@@ -1,0 +1,182 @@
+Command: vcs -full64 -sverilog -assert svaext -override_timescale=1ns/1ps -debug_access+all \
+-f files.f -top tb_nmu_cosim -pvalue+tb_nmu_cosim.RSP_DELAY_CYCLES=2 -Mdir=/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave0_a5db963b69d8/csrc \
+-o /home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave0_a5db963b69d8/simv \
+-LDFLAGS -L/home/mingwei/noc_project/nmu-standalone/cosim/build/dpi_3d223268b2ff \
+-Wl,-rpath,/home/mingwei/noc_project/nmu-standalone/cosim/build/dpi_3d223268b2ff \
+-lnmu_cmodel -l /home/mingwei/noc_project/nmu-standalone/cosim/build/report_wave0/compile.log \
+
+                         Chronologic VCS (TM)
+       Version M-2017.03-SP1_Full64 -- Thu Sep 24 10:38:09 2026
+               Copyright (c) 1991-2017 by Synopsys Inc.
+                         ALL RIGHTS RESERVED
+
+This program is proprietary and confidential information of Synopsys Inc.
+and may be used and disclosed only as authorized in a license agreement
+controlling such use and disclosure.
+
+Parsing design file 'repo/specgen/generated/sv/ni_params_pkg.sv'
+Parsing design file 'repo/specgen/generated/sv/ni_signals_pkg.sv'
+Parsing design file 'repo/specgen/generated/sv/ni_flit_pkg.sv'
+Parsing design file 'topology_pkg.sv'
+Parsing design file 'repo/rtl/common/ni_types_pkg.sv'
+Parsing design file 'deps/common_cells/src/cc_pkg.sv'
+Parsing design file 'deps/common_cells/src/cc_binary_to_gray.sv'
+Parsing design file 'deps/common_cells/src/cc_gray_to_binary.sv'
+Parsing design file 'deps/common_cells/src/cc_spill_register_flushable.sv'
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_spill_register_flushable.sv'.
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Parsing included file 'deps/common_cells/include/common_cells/deprecated/registers.svh'.
+Back to file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_spill_register_flushable.sv'.
+Parsing design file 'deps/common_cells/src/cc_spill_register.sv'
+Parsing design file 'deps/common_cells/src/cc_stream_register.sv'
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_stream_register.sv'.
+Parsing design file 'deps/tech_cells_generic/src/rtl/tc_sync.sv'
+Parsing design file 'deps/common_cells/src/cc_cdc_fifo_gray.sv'
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_cdc_fifo_gray.sv'.
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_cdc_fifo_gray.sv'.
+Parsing design file 'deps/common_cells/src/cc_addr_decode_dync.sv'
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_addr_decode_dync.sv'.
+Parsing design file 'deps/common_cells/src/cc_addr_decode.sv'
+Parsing design file 'repo/rtl/common/axi_async_fifo.sv'
+Parsing design file 'repo/rtl/common/ni_sam.sv'
+Parsing design file 'repo/rtl/common/stream_register.sv'
+Parsing design file 'repo/rtl/nmu/request_fifo/request_fifo.sv'
+Parsing design file 'repo/rtl/nmu/sam/sam.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/cf_math_pkg.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/lzc.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/rr_arb_tree.sv'
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_pkg.sv'
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_id_remap.sv'
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_id_remap.sv'.
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_id_remap.sv'.
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/assign.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_id_remap.sv'.
+Parsing design file 'deps/common_cells/src/cc_credit_counter.sv'
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_credit_counter.sv'.
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_credit_counter.sv'.
+Parsing design file 'deps/common_cells/src/cc_fifo.sv'
+Parsing included file 'deps/common_cells/include/common_cells/assertions.svh'.
+Back to file 'deps/common_cells/src/cc_fifo.sv'.
+Parsing included file 'deps/common_cells/include/common_cells/registers.svh'.
+Back to file 'deps/common_cells/src/cc_fifo.sv'.
+Parsing design file 'repo/rtl/common/axi_if.sv'
+Parsing design file 'repo/rtl/nmu/ordering/reorder_storage.sv'
+Parsing design file 'repo/rtl/nmu/ordering/ordering.sv'
+Parsing design file 'repo/rtl/nmu/channel_assign/channel_assign.sv'
+Parsing design file 'repo/rtl/nmu/request_packetize/request_packetize.sv'
+Parsing design file 'repo/rtl/nmu/response_depacketize/response_buffer.sv'
+Parsing design file 'repo/rtl/nmu/response_depacketize/response_depacketize.sv'
+Parsing design file 'repo/rtl/nmu/response_fifo/response_fifo.sv'
+Parsing design file 'repo/rtl/nmu/response_path/response_path.sv'
+Parsing design file 'repo/rtl/nmu/request_path/id_remap.sv'
+Parsing design file 'repo/rtl/nmu/request_path/request_path.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/rtl/nmu/request_path/request_path.sv'.
+Parsing design file 'repo/rtl/nmu/top/nmu.sv'
+Parsing design file 'deps/tech_cells_generic/src/rtl/tc_clk.sv'
+Parsing design file 'deps/common_cells/src/cc_rstgen_bypass.sv'
+Parsing design file 'repo/sim/dv/common_verification-0.2.5/src/rand_id_queue.sv'
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_test.sv'
+Parsing design file 'repo/specgen/generated/sv/noc_types_pkg_vc2.sv'
+Parsing design file 'repo/ref_model/top/router_wrap.sv'
+Parsing design file 'repo/ref_model/top/nsu_wrap.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/delta_counter.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/counter.sv'
+Parsing design file 'repo/sim/dv/common_cells-1.37.0/src/stream_delay.sv'
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_delayer.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_delayer.sv'.
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/assign.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_delayer.sv'.
+Parsing design file 'repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv'.
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/assign.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_sim_mem.sv'.
+Parsing design file 'repo/sim/cosim/nmu/tb_nmu_cosim.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/assign.svh'.
+Back to file 'repo/sim/cosim/nmu/tb_nmu_cosim.sv'.
+Parsing library file 'repo/sim/dv/axi-0.39.7/src/axi_intf.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_intf.sv'.
+Parsing library file 'repo/sim/dv/axi-0.39.7/src/axi_intf.sv'
+Parsing included file 'repo/sim/dv/axi-0.39.7/include/axi/typedef.svh'.
+Back to file 'repo/sim/dv/axi-0.39.7/src/axi_intf.sv'.
+Top Level Modules:
+       tb_nmu_cosim
+assign 2 tb_nmu_cosim.RSP_DELAY_CYCLES (Command line)
+TimeScale is 1 ns / 1 ps
+Notice: Ports coerced to inout, use -notice for details
+Starting vcs inline pass...
+32 unique modules to generate
+recompiling package vcs_paramclassrepository
+recompiling package ni_params_pkg
+recompiling package ni_signals_pkg
+recompiling package ni_flit_pkg
+recompiling package topology_pkg
+recompiling package ni_types_pkg
+recompiling package cc_pkg
+recompiling module ni_sam
+recompiling module nmu_sam
+recompiling package cf_math_pkg
+recompiling module lzc
+recompiling package axi_pkg
+recompiling module axi_id_remap_table
+recompiling module cc_credit_counter
+recompiling module cc_fifo
+recompiling module axi_if
+recompiling module nmu_ordering
+recompiling module nmu_channel_assign
+recompiling module nmu_request_packetize
+recompiling module nmu_id_remap
+recompiling module nmu_request_path
+recompiling module nmu
+recompiling package rand_id_queue_pkg
+recompiling package axi_test
+recompiling package noc_types_pkg
+recompiling module router_wrap
+recompiling module nsu_wrap
+recompiling module axi_delayer_intf
+recompiling module axi_sim_mem_intf
+recompiling module tb_nmu_cosim
+recompiling module AXI_BUS
+recompiling module AXI_BUS_DV
+All of 32 modules done
+make[1]: Entering directory `/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave0_a5db963b69d8/csrc' \
+
+make[1]: Warning: File `filelist.cu' has modification time 70 s in the future
+make[2]: Warning: File `filelist.cu' has modification time 70 s in the future
+rm -f _csrc*.so pre_vcsobj_*.so share_vcsobj_*.so
+make[2]: warning:  Clock skew detected.  Your build may be incomplete.
+make[2]: Warning: File `filelist.cu' has modification time 70 s in the future
+make[2]: warning:  Clock skew detected.  Your build may be incomplete.
+if [ -x /home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave0_a5db963b69d8/simv \
+]; then chmod -x /home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave0_a5db963b69d8/simv; \
+fi
+g++  -o /home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave0_a5db963b69d8/simv \
+-Wl,-rpath-link=./ -Wl,-rpath='$ORIGIN'/simv.daidir/ -Wl,-rpath=./simv.daidir/ -Wl,-rpath='$ORIGIN'/simv.daidir//scsim.db.dir \
+-L/home/mingwei/noc_project/nmu-standalone/cosim/build/dpi_3d223268b2ff -Wl,-rpath,/home/mingwei/noc_project/nmu-standalone/cosim/build/dpi_3d223268b2ff \
+-lnmu_cmodel -rdynamic   objs/amcQw_d.o   _14082_archive_1.so  SIM_l.o       rmapats_mop.o \
+rmapats.o rmar.o rmar_nd.o  rmar_llvm_0_1.o rmar_llvm_0_0.o          /home/mingwei/.toolsmgr/vcs/linux64/lib/libzerosoft_rt_stubs.so \
+/home/mingwei/.toolsmgr/vcs/linux64/lib/libvirsim.so /home/mingwei/.toolsmgr/vcs/linux64/lib/liberrorinf.so \
+/home/mingwei/.toolsmgr/vcs/linux64/lib/libsnpsmalloc.so    /home/mingwei/.toolsmgr/vcs/linux64/lib/libvcsnew.so \
+/home/mingwei/.toolsmgr/vcs/linux64/lib/libsimprofile.so /home/mingwei/.toolsmgr/vcs/linux64/lib/libuclinative.so \
+/home/mingwei/.toolsmgr/vcs/linux64/lib/vcs_tls.o   -Wl,-whole-archive /home/mingwei/.toolsmgr/vcs/linux64/lib/libvcsucli.so \
+-Wl,-no-whole-archive       ./../simv.daidir/vc_hdrs.o    /home/mingwei/.toolsmgr/vcs/linux64/lib/vcs_save_restore_new.o \
+-ldl  -lc -lm -lpthread -ldl 
+/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave0_a5db963b69d8/simv \
+up to date
+make[1]: warning:  Clock skew detected.  Your build may be incomplete.
+make[1]: Leaving directory `/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave0_a5db963b69d8/csrc' \
+
+CPU time: 2.930 seconds to compile + .459 seconds to elab + .413 seconds to link

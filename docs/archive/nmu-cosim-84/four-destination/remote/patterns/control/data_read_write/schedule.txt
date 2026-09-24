@@ -1,0 +1,12 @@
++case_name=data_read_write
++seed=1
++min_outstanding=1
++min_unique=1
++backpressure=0
++init_phase=1
++concurrent_rw=1
++stall_cycles=0
++hold_cycles=0
++capacity_test=0
++data_case=1
++reorder_test=0

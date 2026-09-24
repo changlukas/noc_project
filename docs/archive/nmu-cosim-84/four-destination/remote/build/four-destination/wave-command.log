@@ -1,0 +1,5 @@
+make --no-print-directory -C cosim nWave
+make run WAVE=1 CASE=same_id_cross_dst_reorder
+python3 run.py --binary "/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_640a6e05e09d/simv" --case "same_id_cross_dst_reorder" --mode "data" --report "/home/mingwei/noc_project/nmu-standalone/cosim/build/report_wave1/data" --wave
+sed 's|@FSDB@|/home/mingwei/noc_project/nmu-standalone/cosim/build/report_wave1/data/same_id_cross_dst_reorder.fsdb|g' "/home/mingwei/noc_project/nmu-standalone/cosim/signals.rc" > "/home/mingwei/noc_project/nmu-standalone/cosim/build/report_wave1/data/same_id_cross_dst_reorder.rc"
+/cadtools/synopsys/verdi/M-2017.03-SP1/bin/nWave -ssf "/home/mingwei/noc_project/nmu-standalone/cosim/build/report_wave1/data/same_id_cross_dst_reorder.fsdb" -sswr "/home/mingwei/noc_project/nmu-standalone/cosim/build/report_wave1/data/same_id_cross_dst_reorder.rc"

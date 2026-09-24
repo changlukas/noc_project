@@ -1,0 +1,13 @@
+{
+  "case": "cross_id_out_of_order",
+  "mode": "rand",
+  "seed": 1,
+  "id_width": 3,
+  "coverage": {
+    "control_write": 8,
+    "control_read": 8,
+    "data_write": 8,
+    "data_read": 8
+  },
+  "profile": "cosim"
+}

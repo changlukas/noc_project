@@ -44,6 +44,10 @@ def prepare(rtl_stage, out):
         source_list.append(flag + relative)
     for relative in (f"specgen/generated/sv/noc_types_pkg_vc{num_vc()}.sv",
                      "ref_model/top/router_wrap.sv", "ref_model/top/nsu_wrap.sv",
+                     "sim/dv/common_cells-1.37.0/src/delta_counter.sv",
+                     "sim/dv/common_cells-1.37.0/src/counter.sv",
+                     "sim/dv/common_cells-1.37.0/src/stream_delay.sv",
+                     "sim/dv/axi-0.39.7/src/axi_delayer.sv",
                      "sim/dv/axi-0.39.7/src/axi_sim_mem.sv",
                      "sim/cosim/nmu/tb_nmu_cosim.sv"):
         copy(ROOT / relative, "repo/" + relative)
@@ -57,6 +61,11 @@ def prepare(rtl_stage, out):
                       catalog=ROOT / "sim/test_patterns/cosim/cases.json")
     (patterns / "cases.list").write_text("\n".join(cases) + "\n")
     (out / "pattern.txt").write_text("\n".join(cases) + "\n")
+    for mode in ("control", "data", "rand"):
+        mode_cases = generate(patterns / mode, topo, id_width=3, profile="cosim", mode=mode)
+        mode_cases += generate(patterns / mode, topo, id_width=3, profile="cosim", mode=mode,
+                               catalog=ROOT / "sim/test_patterns/cosim/cases.json")
+        (patterns / mode / "cases.list").write_text("\n".join(mode_cases) + "\n")
     for path in patterns.rglob("*"):
         if path.is_file():
             copy(path, str(Path("patterns") / path.relative_to(patterns)))

@@ -41,8 +41,7 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
             raise ValueError("unknown CASE: " + case_name)
     for case in cases:
         name = case["name"]
-        if profile == "cosim" and (case.get("destinations") == "alternate" or
-                                    case.get("require_ooo") or case.get("legacy_mixed") or
+        if profile == "cosim" and (case.get("reset_warmup") or case.get("legacy_mixed") or
                                     case.get("require_stall")):
             if case_name is not None:
                 raise ValueError(name + " requires focused standalone response scheduling")
@@ -99,7 +98,14 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
             dest = (txn % len(routes[classes[txn]]) if capacity else
                     txn % 2 if case.get("destinations") == "alternate" else
                     rng.randrange(2) if case.get("destinations") == "random" else 0)
-            route = routes[classes[txn]][0 if profile == "cosim" else dest]
+            if profile == "cosim":
+                if case.get("require_ooo") or case.get("require_buffered"):
+                    if len(routes[classes[txn]]) < 4:
+                        raise ValueError("co-simulation reorder cases need four destinations")
+                    dest = txn % 4
+                elif case.get("destinations") == "random":
+                    dest = rng.randrange(len(routes[classes[txn]]))
+            route = routes[classes[txn]][dest]
             step = 1 << size
             offset = 256 + (txn % 8)*max(8, step)
             if random_fields:
@@ -138,6 +144,9 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
                     if random_fields:
                         data = hex(rng.getrandbits(512))
                         strobe = hex(int(strobe, 16) & rng.getrandbits(64))
+                    elif profile == "cosim" and (case.get("require_ooo") or case.get("require_buffered")):
+                        # Repeated address bytes cannot distinguish reordered read responses.
+                        data = hex(rng.getrandbits(512))
                     elif (case.get("burst_sweep") and txn % 3 == 0) or (capacity and txn % 5 == 0):
                         strobe = hex(int(strobe, 16) & 0x5555555555555555)
                     if profile == "cosim":
@@ -180,7 +189,8 @@ def generate(out, topology, id_width=8, catalog=CATALOG, mode="auto", seed=1, ca
                     f"+stall_cycles={case.get('stall_cycles', 0)}",
                     f"+hold_cycles={case.get('hold_cycles', 0)}",
                     f"+capacity_test={int(bool(case.get('capacity_test')))}",
-                    f"+data_case={int(selected == 'data')}"]
+                    f"+data_case={int(selected == 'data')}",
+                    f"+reorder_test={2 if case.get('require_buffered') else int(bool(case.get('require_ooo')))}"]
         (target / "schedule.txt").write_text("\n".join(args) + "\n")
         (target / "manifest.json").write_text(json.dumps(dict(case=name, mode=selected, seed=seed,
                                                               id_width=id_width, coverage=coverage,

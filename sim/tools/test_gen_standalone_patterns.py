@@ -151,8 +151,8 @@ def test_cosim_memory_dependencies(tmp_path, mode):
     topology = REPO / "sim/cosim/nmu/topology.yml"
     names = generate(tmp_path, topology, 3, mode=mode, profile="cosim")
     assert "request_rand" in names
-    assert "same_id_cross_dst_reorder" not in names
-    assert "cross_id_out_of_order" not in names
+    assert "same_id_cross_dst_reorder" in names
+    assert "cross_id_out_of_order" in names
     for name in names:
         writes = _parse_write(tmp_path / name / "write.txt")
         reads = _parse_read(tmp_path / name / "read.txt")
@@ -170,8 +170,8 @@ def test_cosim_memory_dependencies(tmp_path, mode):
                 initialized.update(byte_addresses)
                 strobe = int(line.split()[1], 16)
                 assert strobe == ((1 << step) - 1) << (address % 64)
-            assert write["addr"] + (write["len"] + 1) * step <= (
-                0x2001000 if write["addr"] >= 0x2000000 else 0x2000000)
+            assert write["addr"] % (1 << 32) + (write["len"] + 1) * step <= (
+                0x2001000 if write["addr"] % (1 << 32) >= 0x2000000 else 0x2000000)
         schedule = (tmp_path / name / "schedule.txt").read_text()
         assert "response_delay" not in schedule
         assert f"+backpressure={int(name == 'backpressure')}" in schedule
@@ -223,3 +223,29 @@ def test_cosim_additional_memory_phases(tmp_path):
         if name.endswith("capacity_recover"):
             assert len(writes) == len(reads) == 64
             assert sum(t["len"]+1 for t in reads) == 512
+
+
+@pytest.mark.parametrize("mode", ["control", "data", "rand"])
+def test_cosim_reorder_destinations_and_delay_selection(tmp_path, mode):
+    import yaml
+    from address_map import pack_config
+    topo = REPO / "sim/cosim/nmu/topology.yml"
+    _, entries = pack_config(yaml.safe_load(topo.read_text()))
+    assert {(e["dst_id"], e["port"]) for e in entries} == {(0x10, 0), (0x21, 0), (0x12, 0), (0x01, 0)}
+    names = generate(tmp_path, topo, 3, mode=mode, profile="cosim")
+    for name in names:
+        schedule = (tmp_path / name / "schedule.txt").read_text()
+        if name in ("cross_id_out_of_order", "same_id_cross_dst_reorder"):
+            writes = _parse_write(tmp_path / name / "write.txt")
+            assert {t["addr"] >> 32 for t in writes} == {0, 1, 2, 3}
+            assert len({t["id"] for t in writes}) == (8 if name == "cross_id_out_of_order" else 1)
+            signatures = []
+            for txn in writes:
+                lane = txn["addr"] % 64
+                mask = (1 << (8 * (1 << txn["size"]))) - 1
+                signatures.append((int(txn["beats"][0].split()[0], 16) >> (lane * 8)) & mask)
+            assert len(set(signatures)) == len(signatures)
+            assert "+reorder_test=" + ("1" if name == "cross_id_out_of_order" else "2") in schedule
+        else:
+            assert "+reorder_test=0" in schedule
+    assert "reset_inflight" not in names

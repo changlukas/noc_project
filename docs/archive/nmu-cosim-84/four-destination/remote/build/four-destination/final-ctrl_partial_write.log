@@ -1,0 +1,39 @@
+python3 run.py --binary "/home/mingwei/noc_project/nmu-standalone/cosim/build/vcs_wave1_640a6e05e09d/simv" --case "ctrl_partial_write" --mode "auto" --report "/home/mingwei/noc_project/nmu-standalone/cosim/build/report_wave1" --wave
+
+Note-[RT_BS] Larger stack needed
+  Note: Bumping stack limit from 8192 to 8193 Kbytes.
+
+Chronologic VCS simulator copyright 1991-2017
+Contains Synopsys proprietary information.
+Compiler version M-2017.03-SP1_Full64; Runtime version M-2017.03-SP1_Full64;  Sep 24 10:59 2026
+RESPONSE_DELAY enabled=0 west_setting=2
+DAT_CREDIT_DEPTH router=32 nmu_rx=32 nsu_rx=32
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2522: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-standalone/cosim/patterns/ctrl_partial_write/read.txt opened successfully as -2147483645
+Info: "repo/sim/dv/axi-0.39.7/src/axi_test.sv", 2527: axi_test: at time 0 ps
+File /home/mingwei/noc_project/nmu-standalone/cosim/patterns/ctrl_partial_write/write.txt opened successfully as -2147483644
+*Verdi* Loading libsscore_vcs201703.so
+FSDB Dumper for VCS, Release Verdi_M-2017.03-SP1, Linux x86_64/64bit, 05/23/2017
+(C) 1996 - 2017 by Synopsys, Inc.
+*Verdi* : Create FSDB file '/home/mingwei/noc_project/nmu-standalone/cosim/build/report_wave1/ctrl_partial_write.fsdb'
+*Verdi* : Begin traversing the scope (tb_nmu_cosim), layer (0).
+*Verdi* : Enable +all dumping.
+*Verdi* : End of traversing.
+COVERAGE peak_w=12 peak_r=12 unique_w=1 unique_r=1
+STALL b=0 r=0 aw=0 ar=0
+CAPACITY b_full=0 r_full=0 dat_full=0 wr_limit=0 rd_limit=0
+CONCURRENT live=0 w_during_read=0 r_during_write=0
+REORDER_COVERAGE b_ooo=0 r_ooo=0 b_same_id=0 r_same_id=0 b_buffered=0 r_buffered=0
+DESTINATION port=1 writes=0 reads=0
+DESTINATION port=2 writes=0 reads=0
+DESTINATION port=3 writes=0 reads=0
+DESTINATION port=4 writes=24 reads=12
+NMU_COSIM_COUNTS writes=24 reads=12 r_beats=56 checked_bytes=210
+$finish called from file "repo/sim/cosim/nmu/tb_nmu_cosim.sv", line 660.
+$finish at simulation time              2745000
+           V C S   S i m u l a t i o n   R e p o r t 
+Time: 2745000 ps
+CPU Time:      0.540 seconds;       Data structure size:   0.8Mb
+Thu Sep 24 10:59:50 2026
+NMU_COSIM_PASS
+

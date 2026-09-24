@@ -1,9 +1,28 @@
 `timescale 1ns / 1ps
-module tb_nmu_cosim;
+`include "axi/assign.svh"
+module tb_nmu_cosim #(
+    parameter int unsigned RSP_DELAY_CYCLES = 0
+);
     import ni_params_pkg::*;
     localparam int NUM_PORTS = 5;
     localparam int NMU_PORT = 0;
-    localparam int NSU_PORT = 4;
+    localparam int NUM_NSUS = NUM_PORTS - 1;
+    localparam int ROUTER_X = 1;
+    localparam int ROUTER_Y = 1;
+    localparam int MESH_DIM = 4;
+    localparam int NMU_ID   = (ROUTER_Y << ni_flit_pkg::X_WIDTH) | ROUTER_X;
+    int reorder_test = 0;
+    int dst_wr_cnt[NUM_NSUS] = '{default:0};
+    int dst_rd_cnt[NUM_NSUS] = '{default:0};
+    function automatic int nsu_id(input int port);
+        case (port)
+            1: return ((ROUTER_Y + 1) << ni_flit_pkg::X_WIDTH) | ROUTER_X;
+            2: return (ROUTER_Y << ni_flit_pkg::X_WIDTH) | (ROUTER_X + 1);
+            3: return ((ROUTER_Y - 1) << ni_flit_pkg::X_WIDTH) | ROUTER_X;
+            4: return (ROUTER_Y << ni_flit_pkg::X_WIDTH) | (ROUTER_X - 1);
+            default: return NMU_ID;
+        endcase
+    endfunction
     bit corrupt_rsp = 0;
     logic clk = 0, rst_n = 0;
     wire axi_rst_n, noc_rst_n;
@@ -30,12 +49,7 @@ module tb_nmu_cosim;
     axi_if #(.ADDR_W(AXI_ADDR_WIDTH), .DATA_W(AXI_DATA_WIDTH),
         .ID_W     (AXI_ID_WIDTH),
         .AWUSER_W (AXI_AWUSER_WIDTH)) bus();
-    AXI_BUS #(.AXI_ADDR_WIDTH(AXI_ADDR_WIDTH), .AXI_DATA_WIDTH(AXI_DATA_WIDTH),
-        .AXI_ID_WIDTH   (NSU_AXI_ID_WIDTH),
-        .AXI_USER_WIDTH (AXI_AWUSER_WIDTH)) mem_bus();
-    ni_signals_pkg::axi_req_t mem_req;
-    ni_signals_pkg::axi_rsp_t mem_rsp;
-    longint unsigned router_ctx, nsu_ctx;
+    longint unsigned router_ctx, nsu_ctx[NUM_NSUS];
     wire [NUM_PORTS-1:0] tx_req_valid, rx_req_valid;
     wire [NOC_REQ_FLIT_WIDTH-1:0] tx_req_flit [NUM_PORTS], rx_req_flit [NUM_PORTS];
     wire [NUM_PORTS-1:0] tx_rsp_valid, rx_rsp_valid;
@@ -88,7 +102,9 @@ module tb_nmu_cosim;
     assign vip.r_resp   = bus.rresp;
     assign vip.r_last   = bus.rlast;
     assign vip.r_user   = '0;
-    nmu dut (
+    nmu #(
+        .SRC_ID (ni_flit_pkg::SRC_ID_WIDTH'(NMU_ID))
+    ) dut (
         .ACLK              (clk),
         .ARESETn           (axi_rst_n),
         .noc_clk           (clk),
@@ -131,119 +147,176 @@ module tb_nmu_cosim;
         .rx_dat_flit     (rx_dat_flit),
         .rx_dat_crdvalid (rx_dat_credit)
     );
-    nsu_wrap i_nsu (
-        .clk_i             (clk),
-        .rst_n_i           (noc_rst_n),
-        .ctx_i             (nsu_ctx),
-        .rx_req_valid_i    (tx_req_valid[NSU_PORT]),
-        .rx_req_flit_i     (tx_req_flit[NSU_PORT]),
-        .rx_req_ready_o    (tx_req_ready[NSU_PORT]),
-        .tx_rsp_valid_o    (rx_rsp_valid[NSU_PORT]),
-        .tx_rsp_flit_o     (rx_rsp_flit[NSU_PORT]),
-        .tx_rsp_ready_i    (rx_rsp_ready[NSU_PORT]),
-        .tx_dat_valid_o    (rx_dat_valid[NSU_PORT]),
-        .tx_dat_flit_o     (rx_dat_flit[NSU_PORT]),
-        .tx_dat_crdvalid_i (rx_dat_credit[NSU_PORT]),
-        .rx_dat_valid_i    (tx_dat_valid[NSU_PORT]),
-        .rx_dat_flit_i     (tx_dat_flit[NSU_PORT]),
-        .rx_dat_crdvalid_o (tx_dat_credit[NSU_PORT]),
-        .axi_req_o         (mem_req),
-        .axi_rsp_i         (mem_rsp)
-    );
-    for (genvar port = 0; port < NUM_PORTS; port++) begin : gen_tieoff
-        if (port != NMU_PORT) begin
-            assign rx_req_valid[port] = 1'b0;
-            assign rx_req_flit[port] = '0;
-            assign tx_rsp_ready[port] = 1'b0;
-        end
-        if (port != NSU_PORT) begin
-            assign rx_rsp_valid[port] = 1'b0;
-            assign rx_rsp_flit[port] = '0;
-            assign tx_req_ready[port] = 1'b0;
-        end
-        if (port != NMU_PORT && port != NSU_PORT) begin
-            assign rx_dat_valid[port] = 1'b0;
-            assign rx_dat_flit[port] = '0;
-            assign tx_dat_credit[port] = '0;
-        end
+    for (genvar n = 0; n < NUM_NSUS; n++) begin : gen_nsu
+        localparam int PORT = n + 1;
+        AXI_BUS #(.AXI_ADDR_WIDTH(AXI_ADDR_WIDTH), .AXI_DATA_WIDTH(AXI_DATA_WIDTH),
+            .AXI_ID_WIDTH   (NSU_AXI_ID_WIDTH),
+            .AXI_USER_WIDTH (AXI_AWUSER_WIDTH)) mem_bus();
+        ni_signals_pkg::axi_req_t mem_req;
+        ni_signals_pkg::axi_rsp_t mem_rsp;
+        AXI_BUS #(.AXI_ADDR_WIDTH(AXI_ADDR_WIDTH), .AXI_DATA_WIDTH(AXI_DATA_WIDTH),
+            .AXI_ID_WIDTH   (NSU_AXI_ID_WIDTH),
+            .AXI_USER_WIDTH (AXI_AWUSER_WIDTH)) delayed_bus();
+        int b_wait_start = -1, r_wait_start = -1;
+        int sample_cycle = 0;
         always @(posedge clk) begin
-            if (noc_rst_n && ((port != NSU_PORT && tx_req_valid[port]) ||
-                (port != NMU_PORT && tx_rsp_valid[port]) ||
-                (port != NMU_PORT && port != NSU_PORT && tx_dat_valid[port])))
-                $fatal(1, "Unexpected Router egress port %0d", port);
+            if (noc_rst_n) begin
+                sample_cycle++;
+                if (mem_bus.aw_valid && mem_bus.aw_ready) dst_wr_cnt[n]++;
+                if (mem_bus.ar_valid && mem_bus.ar_ready) dst_rd_cnt[n]++;
+                if (reorder_test != 0 && PORT == 4) begin
+                    if (delayed_bus.b_valid && b_wait_start < 0) b_wait_start = sample_cycle;
+                    if (mem_bus.b_valid && mem_bus.b_ready && b_wait_start >= 0) begin
+                        $display("DELAY_SAMPLE channel=B cycles=%0d", sample_cycle - b_wait_start);
+                        b_wait_start = -1;
+                    end
+                    if (delayed_bus.r_valid && r_wait_start < 0) r_wait_start = sample_cycle;
+                    if (mem_bus.r_valid && mem_bus.r_ready && r_wait_start >= 0) begin
+                        $display("DELAY_SAMPLE channel=R cycles=%0d", sample_cycle - r_wait_start);
+                        r_wait_start = -1;
+                    end
+                end
+            end
+        end
+        nsu_wrap i_nsu (
+            .clk_i             (clk),
+            .rst_n_i           (noc_rst_n),
+            .ctx_i             (nsu_ctx[n]),
+            .rx_req_valid_i    (tx_req_valid[PORT]),
+            .rx_req_flit_i     (tx_req_flit[PORT]),
+            .rx_req_ready_o    (tx_req_ready[PORT]),
+            .tx_rsp_valid_o    (rx_rsp_valid[PORT]),
+            .tx_rsp_flit_o     (rx_rsp_flit[PORT]),
+            .tx_rsp_ready_i    (rx_rsp_ready[PORT]),
+            .tx_dat_valid_o    (rx_dat_valid[PORT]),
+            .tx_dat_flit_o     (rx_dat_flit[PORT]),
+            .tx_dat_crdvalid_i (rx_dat_credit[PORT]),
+            .rx_dat_valid_i    (tx_dat_valid[PORT]),
+            .rx_dat_flit_i     (tx_dat_flit[PORT]),
+            .rx_dat_crdvalid_o (tx_dat_credit[PORT]),
+            .axi_req_o         (mem_req),
+            .axi_rsp_i         (mem_rsp)
+        );
+        wire delay_en = reorder_test != 0 && PORT == 4;
+        if (RSP_DELAY_CYCLES == 0) begin : gen_no_delay
+            `AXI_ASSIGN(delayed_bus, mem_bus)
+        end else begin : gen_rsp_delay
+            AXI_BUS #(
+                .AXI_ADDR_WIDTH (AXI_ADDR_WIDTH),
+                .AXI_DATA_WIDTH (AXI_DATA_WIDTH),
+                .AXI_ID_WIDTH   (NSU_AXI_ID_WIDTH),
+                .AXI_USER_WIDTH (AXI_AWUSER_WIDTH)
+            ) delay_bus[RSP_DELAY_CYCLES+1]();
+            `AXI_ASSIGN(delay_bus[0], mem_bus)
+            `AXI_ASSIGN(delayed_bus, delay_bus[RSP_DELAY_CYCLES])
+            // One-cycle upstream cells make the sweep include every integer delay.
+            for (genvar stage = 0; stage < RSP_DELAY_CYCLES; stage++) begin : gen_stage
+                axi_delayer_intf #(
+                    .AXI_ID_WIDTH        (NSU_AXI_ID_WIDTH),
+                    .AXI_ADDR_WIDTH      (AXI_ADDR_WIDTH),
+                    .AXI_DATA_WIDTH      (AXI_DATA_WIDTH),
+                    .AXI_USER_WIDTH      (AXI_AWUSER_WIDTH),
+                    .STALL_RANDOM_INPUT  (1'b0),
+                    .STALL_RANDOM_OUTPUT (1'b0),
+                    .FIXED_DELAY_INPUT   (0),
+                    .FIXED_DELAY_OUTPUT  (1)
+                ) i_rsp_delay (
+                    .clk_i    (clk),
+                    .rst_ni   (axi_rst_n),
+                    .bypass_i (!delay_en),
+                    .slv      (delay_bus[stage]),
+                    .mst      (delay_bus[stage+1])
+                );
+            end
+        end
+        assign mem_bus.aw_id = mem_req.awid;
+        assign mem_bus.aw_addr = mem_req.awaddr;
+        assign mem_bus.aw_len = mem_req.awlen;
+        assign mem_bus.aw_size = mem_req.awsize;
+        assign mem_bus.aw_burst = mem_req.awburst;
+        assign mem_bus.aw_lock = mem_req.awlock;
+        assign mem_bus.aw_cache = mem_req.awcache;
+        assign mem_bus.aw_prot = mem_req.awprot;
+        assign mem_bus.aw_qos = mem_req.awqos;
+        assign mem_bus.aw_region = mem_req.awregion;
+        assign mem_bus.aw_valid = mem_req.awvalid;
+        assign mem_bus.w_data = mem_req.wdata;
+        assign mem_bus.w_strb = mem_req.wstrb;
+        assign mem_bus.w_last = mem_req.wlast;
+        assign mem_bus.w_valid = mem_req.wvalid;
+        assign mem_bus.ar_id = mem_req.arid;
+        assign mem_bus.ar_addr = mem_req.araddr;
+        assign mem_bus.ar_len = mem_req.arlen;
+        assign mem_bus.ar_size = mem_req.arsize;
+        assign mem_bus.ar_burst = mem_req.arburst;
+        assign mem_bus.ar_lock = mem_req.arlock;
+        assign mem_bus.ar_cache = mem_req.arcache;
+        assign mem_bus.ar_prot = mem_req.arprot;
+        assign mem_bus.ar_qos = mem_req.arqos;
+        assign mem_bus.ar_region = mem_req.arregion;
+        assign mem_bus.ar_valid = mem_req.arvalid;
+        assign mem_bus.aw_user = '0;
+        assign mem_bus.aw_atop = '0;
+        assign mem_bus.w_user = '0;
+        assign mem_bus.ar_user = '0;
+        assign mem_bus.b_ready = mem_req.bready;
+        assign mem_bus.r_ready = mem_req.rready;
+        assign mem_rsp.awready = mem_bus.aw_ready;
+        assign mem_rsp.wready = mem_bus.w_ready;
+        assign mem_rsp.arready = mem_bus.ar_ready;
+        assign mem_rsp.bid = mem_bus.b_id;
+        assign mem_rsp.bresp = mem_bus.b_resp;
+        assign mem_rsp.bvalid = mem_bus.b_valid;
+        assign mem_rsp.rid = mem_bus.r_id;
+        assign mem_rsp.rdata = mem_bus.r_data;
+        assign mem_rsp.rresp = mem_bus.r_resp;
+        assign mem_rsp.rlast = mem_bus.r_last;
+        assign mem_rsp.rvalid = mem_bus.r_valid;
+        axi_sim_mem_intf #(
+            .AXI_ADDR_WIDTH     (AXI_ADDR_WIDTH),
+            .AXI_DATA_WIDTH     (AXI_DATA_WIDTH),
+            .AXI_ID_WIDTH       (NSU_AXI_ID_WIDTH),
+            .AXI_USER_WIDTH     (AXI_AWUSER_WIDTH),
+            .WARN_UNINITIALIZED (1'b1),
+            .UNINITIALIZED_DATA ("undefined"),
+            .APPL_DELAY         (1ns),
+            .ACQ_DELAY          (2ns)
+        ) i_memory (
+            .clk_i              (clk),
+            .rst_ni             (axi_rst_n),
+            .axi_slv            (delayed_bus),
+            .mon_w_valid_o      (),
+            .mon_w_addr_o       (),
+            .mon_w_data_o       (),
+            .mon_w_id_o         (),
+            .mon_w_user_o       (),
+            .mon_w_beat_count_o (),
+            .mon_w_last_o       (),
+            .mon_r_valid_o      (),
+            .mon_r_addr_o       (),
+            .mon_r_data_o       (),
+            .mon_r_id_o         (),
+            .mon_r_user_o       (),
+            .mon_r_beat_count_o (),
+            .mon_r_last_o       ()
+        );
+    end
+    assign rx_rsp_valid[NMU_PORT] = 1'b0;
+    assign rx_rsp_flit[NMU_PORT]  = '0;
+    assign tx_req_ready[NMU_PORT] = 1'b0;
+    for (genvar port = 1; port < NUM_PORTS; port++) begin : gen_tieoff
+        assign rx_req_valid[port] = 1'b0;
+        assign rx_req_flit[port]  = '0;
+        assign tx_rsp_ready[port] = 1'b0;
+        always @(posedge clk) begin
+            if (noc_rst_n && tx_rsp_valid[port])
+                $fatal(1, "Response routed away from LOCAL");
         end
     end
-    assign mem_bus.aw_id = mem_req.awid;
-    assign mem_bus.aw_addr = mem_req.awaddr;
-    assign mem_bus.aw_len = mem_req.awlen;
-    assign mem_bus.aw_size = mem_req.awsize;
-    assign mem_bus.aw_burst = mem_req.awburst;
-    assign mem_bus.aw_lock = mem_req.awlock;
-    assign mem_bus.aw_cache = mem_req.awcache;
-    assign mem_bus.aw_prot = mem_req.awprot;
-    assign mem_bus.aw_qos = mem_req.awqos;
-    assign mem_bus.aw_region = mem_req.awregion;
-    assign mem_bus.aw_valid = mem_req.awvalid;
-    assign mem_bus.w_data = mem_req.wdata;
-    assign mem_bus.w_strb = mem_req.wstrb;
-    assign mem_bus.w_last = mem_req.wlast;
-    assign mem_bus.w_valid = mem_req.wvalid;
-    assign mem_bus.ar_id = mem_req.arid;
-    assign mem_bus.ar_addr = mem_req.araddr;
-    assign mem_bus.ar_len = mem_req.arlen;
-    assign mem_bus.ar_size = mem_req.arsize;
-    assign mem_bus.ar_burst = mem_req.arburst;
-    assign mem_bus.ar_lock = mem_req.arlock;
-    assign mem_bus.ar_cache = mem_req.arcache;
-    assign mem_bus.ar_prot = mem_req.arprot;
-    assign mem_bus.ar_qos = mem_req.arqos;
-    assign mem_bus.ar_region = mem_req.arregion;
-    assign mem_bus.ar_valid = mem_req.arvalid;
-    assign mem_bus.aw_user = '0;
-    assign mem_bus.aw_atop = '0;
-    assign mem_bus.w_user = '0;
-    assign mem_bus.ar_user = '0;
-    assign mem_bus.b_ready = mem_req.bready;
-    assign mem_bus.r_ready = mem_req.rready;
-    assign mem_rsp.awready = mem_bus.aw_ready;
-    assign mem_rsp.wready = mem_bus.w_ready;
-    assign mem_rsp.arready = mem_bus.ar_ready;
-    assign mem_rsp.bid = mem_bus.b_id;
-    assign mem_rsp.bresp = mem_bus.b_resp;
-    assign mem_rsp.bvalid = mem_bus.b_valid;
-    assign mem_rsp.rid = mem_bus.r_id;
-    assign mem_rsp.rdata = mem_bus.r_data;
-    assign mem_rsp.rresp = mem_bus.r_resp;
-    assign mem_rsp.rlast = mem_bus.r_last;
-    assign mem_rsp.rvalid = mem_bus.r_valid;
-    axi_sim_mem_intf #(
-        .AXI_ADDR_WIDTH     (AXI_ADDR_WIDTH),
-        .AXI_DATA_WIDTH     (AXI_DATA_WIDTH),
-        .AXI_ID_WIDTH       (NSU_AXI_ID_WIDTH),
-        .AXI_USER_WIDTH     (AXI_AWUSER_WIDTH),
-        .WARN_UNINITIALIZED (1'b1),
-        .UNINITIALIZED_DATA ("undefined"),
-        .APPL_DELAY         (1ns),
-        .ACQ_DELAY          (2ns)
-    ) i_memory (
-        .clk_i              (clk),
-        .rst_ni             (axi_rst_n),
-        .axi_slv            (mem_bus),
-        .mon_w_valid_o      (),
-        .mon_w_addr_o       (),
-        .mon_w_data_o       (),
-        .mon_w_id_o         (),
-        .mon_w_user_o       (),
-        .mon_w_beat_count_o (),
-        .mon_w_last_o       (),
-        .mon_r_valid_o      (),
-        .mon_r_addr_o       (),
-        .mon_r_data_o       (),
-        .mon_r_id_o         (),
-        .mon_r_user_o       (),
-        .mon_r_beat_count_o (),
-        .mon_r_last_o       ()
-    );
+    always @(posedge clk) begin
+        if (noc_rst_n && tx_req_valid[NMU_PORT])
+            $fatal(1, "Request routed back to LOCAL");
+    end
     typedef axi_test::axi_file_master #(
         .AW (AXI_ADDR_WIDTH),
         .DW (AXI_DATA_WIDTH),
@@ -282,6 +355,133 @@ module tb_nmu_cosim;
     int wr_limit_cnt = 0, rd_limit_cnt = 0;
     int overlap_cnt = 0, w_during_read_cnt = 0, r_during_write_cnt = 0;
     bit concurrent_active = 0;
+
+    typedef struct packed {
+        int id;
+        int tag;
+        int dst;
+        int seq;
+        bit reorder;
+    } order_txn_t;
+    order_txn_t pending_b[$], pending_r[$];
+    order_txn_t expected_b[2**NOC_ID_WIDTH][$];
+    bit b_arrived[int];
+    int issue_b_cnt = 0, issue_r_cnt = 0;
+    int ingress_b_ooo = 0, ingress_r_ooo = 0;
+    int ingress_b_same_id_ooo = 0, ingress_r_same_id_ooo = 0;
+    int buffered_b_cnt = 0, buffered_r_cnt = 0;
+    ni_types_pkg::nmu_aw_request_t issued_aw;
+    ni_types_pkg::nmu_ar_request_t issued_ar;
+    ni_flit_pkg::rsp_flit_t ingress_rsp;
+    ni_flit_pkg::dat_flit_t ingress_dat;
+    assign issued_aw = dut.i_response_path.i_ordering.m_aw_o;
+    assign issued_ar = dut.i_response_path.i_ordering.m_ar_o;
+    assign ingress_rsp = tx_rsp_flit[NMU_PORT];
+    assign ingress_dat = tx_dat_flit[NMU_PORT];
+
+    task automatic check_arrival(input bit is_read, input int id, tag, dst,
+                                 input bit reorder, last);
+        order_txn_t txn;
+        int found;
+        found = -1;
+        if (is_read) begin
+            foreach (pending_r[i]) begin
+                if (found < 0 && pending_r[i].id == id && pending_r[i].dst == dst &&
+                    pending_r[i].reorder == reorder && (!reorder || pending_r[i].tag == tag))
+                    found = i;
+            end
+            if (found < 0) $fatal(1, "Unmatched R at NMU ingress");
+            if (last) begin
+                if (found != 0) ingress_r_ooo++;
+                for (int i = 0; i < found; i++) begin
+                    if (pending_r[i].id == id) begin
+                        ingress_r_same_id_ooo++;
+                        break;
+                    end
+                end
+                txn = pending_r[found];
+                pending_r.delete(found);
+            end
+        end else begin
+            foreach (pending_b[i]) begin
+                if (found < 0 && pending_b[i].id == id && pending_b[i].dst == dst &&
+                    pending_b[i].reorder == reorder && (!reorder || pending_b[i].tag == tag))
+                    found = i;
+            end
+            if (found < 0) $fatal(1, "Unmatched B at NMU ingress");
+            if (found != 0) ingress_b_ooo++;
+            for (int i = 0; i < found; i++) begin
+                if (pending_b[i].id == id) begin
+                    ingress_b_same_id_ooo++;
+                    break;
+                end
+            end
+            txn = pending_b[found];
+            b_arrived[txn.seq] = 1'b1;
+            pending_b.delete(found);
+        end
+        if (last) $display("INGRESS_ORDER channel=%s seq=%0d id=%0d src=%0h tag=%0d time=%0t",
+            is_read ? "R" : "B", txn.seq, id, dst, tag, $time);
+    endtask
+
+    always @(posedge clk) begin : check_order
+        order_txn_t txn;
+        int ch, id, tag, dst;
+        bit reorder, last;
+        if (noc_rst_n && reorder_test != 0) begin
+            if (dut.i_response_path.i_ordering.m_aw_valid_o && dut.i_response_path.i_ordering.m_aw_ready_i) begin
+                txn = '{int'(issued_aw.axi.awid), int'(issued_aw.meta.ordering_tag),
+                    int'(issued_aw.meta.route.domain.dst_id), issue_b_cnt++, issued_aw.meta.ordering_req};
+                pending_b.push_back(txn);
+                expected_b[txn.id].push_back(txn);
+            end
+            if (dut.i_response_path.i_ordering.m_ar_valid_o && dut.i_response_path.i_ordering.m_ar_ready_i) begin
+                txn = '{int'(issued_ar.axi.arid), int'(issued_ar.meta.ordering_tag),
+                    int'(issued_ar.meta.route.domain.dst_id), issue_r_cnt++, issued_ar.meta.ordering_req};
+                pending_r.push_back(txn);
+            end
+            if (tx_rsp_valid[NMU_PORT] && tx_rsp_ready[NMU_PORT]) begin
+                ch = ingress_rsp.header[ni_flit_pkg::AXI_CH_LSB +: ni_flit_pkg::AXI_CH_WIDTH];
+                reorder = ingress_rsp.header[ni_flit_pkg::ORDERING_REQ_LSB];
+                tag = ingress_rsp.header[ni_flit_pkg::ORDERING_TAG_LSB +: ni_flit_pkg::ORDERING_TAG_WIDTH];
+                dst = ingress_rsp.header[ni_flit_pkg::SRC_ID_LSB +: ni_flit_pkg::SRC_ID_WIDTH];
+                if (ch == ni_flit_pkg::AXI_CH_NarrowR) begin
+                    id = ingress_rsp.payload[ni_flit_pkg::NARROW_R_RID_LSB +: ni_flit_pkg::NARROW_R_RID_WIDTH];
+                    last = ingress_rsp.payload[ni_flit_pkg::NARROW_R_RLAST_LSB];
+                    check_arrival(1'b1, id, tag, dst, reorder, last);
+                end else begin
+                    id = ingress_rsp.payload[ni_flit_pkg::B_BID_LSB +: ni_flit_pkg::B_BID_WIDTH];
+                    check_arrival(1'b0, id, tag, dst, reorder, 1'b1);
+                end
+            end
+            if (tx_dat_valid[NMU_PORT]) begin
+                id = ingress_dat.payload[ni_flit_pkg::DATA_R_RID_LSB +: ni_flit_pkg::DATA_R_RID_WIDTH];
+                tag = ingress_dat.header[ni_flit_pkg::ORDERING_TAG_LSB +: ni_flit_pkg::ORDERING_TAG_WIDTH];
+                dst = ingress_dat.header[ni_flit_pkg::SRC_ID_LSB +: ni_flit_pkg::SRC_ID_WIDTH];
+                reorder = ingress_dat.header[ni_flit_pkg::ORDERING_REQ_LSB];
+                last = ingress_dat.payload[ni_flit_pkg::DATA_R_RLAST_LSB];
+                check_arrival(1'b1, id, tag, dst, reorder, last);
+            end
+            if (dut.i_response_path.i_ordering.b_retire) begin
+                id = dut.i_response_path.i_ordering.m_b_o.bid;
+                if (expected_b[id].size() == 0) $fatal(1, "Unsolicited B retirement");
+                txn = expected_b[id].pop_front();
+                if (!b_arrived.exists(txn.seq)) $fatal(1, "B retired before its response arrived");
+                if (dut.i_response_path.i_ordering.b_direct) begin
+                    if (txn.reorder != dut.i_response_path.i_ordering.s_b_i.meta.ordering_req ||
+                        (txn.reorder && txn.tag != dut.i_response_path.i_ordering.s_b_i.meta.ordering_tag))
+                        $fatal(1, "B direct retirement order mismatch");
+                end else begin
+                    if (!txn.reorder || txn.tag != dut.i_response_path.i_ordering.b_storage_rd_addr)
+                        $fatal(1, "B buffered retirement order mismatch");
+                    buffered_b_cnt++;
+                end
+                b_arrived.delete(txn.seq);
+            end
+            if (dut.i_response_path.i_ordering.r_retire && !dut.i_response_path.i_ordering.r_direct)
+                buffered_r_cnt++;
+        end
+    end
 
     function automatic void expect_reads(input master_t source);
         foreach (source.ar_queue[i]) begin
@@ -345,10 +545,16 @@ module tb_nmu_cosim;
     initial begin : run
         string stim_dir;
         cmodel_init();
-        router_ctx = cmodel_router_create("router", 0, 0, 2, 2, NUM_DAT_VC);
-        nsu_ctx = cmodel_nsu_create("nsu", 0, NUM_DAT_VC,
-            NSU_META_BUFFER_MAX_UNIQUE_IDS, NSU_META_BUFFER_MAX_OUTSTANDING, 1, "");
-        cmodel_nsu_set_dat_credit_depth(nsu_ctx, NOC_ROUTER_VC_DEPTH);
+        router_ctx = cmodel_router_create("router", ROUTER_X, ROUTER_Y,
+            MESH_DIM, MESH_DIM, NUM_DAT_VC);
+        for (int n = 0; n < NUM_NSUS; n++) begin
+            nsu_ctx[n] = cmodel_nsu_create($sformatf("nsu_%0d", n + 1), nsu_id(n + 1),
+                NUM_DAT_VC, NSU_META_BUFFER_MAX_UNIQUE_IDS,
+                NSU_META_BUFFER_MAX_OUTSTANDING, 0, "");
+            cmodel_nsu_set_dat_credit_depth(nsu_ctx[n], NOC_ROUTER_VC_DEPTH);
+        end
+        void'($value$plusargs("reorder_test=%d", reorder_test));
+        $display("RESPONSE_DELAY enabled=%0d west_setting=%0d", reorder_test != 0, RSP_DELAY_CYCLES);
         $display("DAT_CREDIT_DEPTH router=%0d nmu_rx=%0d nsu_rx=%0d",
             NOC_ROUTER_VC_DEPTH, NOC_ROUTER_VC_DEPTH, NOC_NI_DAT_RX_VC_DEPTH);
         master = new(vip);
@@ -432,6 +638,21 @@ module tb_nmu_cosim;
             $fatal(1, "Required capacity saturation was not reached");
         if (concurrent_rw && (overlap_cnt == 0 || w_during_read_cnt == 0 || r_during_write_cnt == 0))
             $fatal(1, "Read/write concurrency was not exercised");
+        $display("REORDER_COVERAGE b_ooo=%0d r_ooo=%0d b_same_id=%0d r_same_id=%0d b_buffered=%0d r_buffered=%0d",
+            ingress_b_ooo, ingress_r_ooo, ingress_b_same_id_ooo, ingress_r_same_id_ooo,
+            buffered_b_cnt, buffered_r_cnt);
+        for (int n = 0; n < NUM_NSUS; n++) begin
+            $display("DESTINATION port=%0d writes=%0d reads=%0d", n + 1, dst_wr_cnt[n], dst_rd_cnt[n]);
+            if (reorder_test != 0 && (dst_wr_cnt[n] == 0 || dst_rd_cnt[n] == 0))
+                $fatal(1, "Ordering case did not exercise every destination");
+        end
+        if (reorder_test != 0 && (pending_b.size() != 0 || pending_r.size() != 0))
+            $fatal(1, "Pending ingress responses remain");
+        if (reorder_test != 0 && (ingress_b_ooo == 0 || ingress_r_ooo == 0))
+            $fatal(1, "Required response disorder was not reached");
+        if (reorder_test == 2 && (ingress_b_same_id_ooo == 0 || ingress_r_same_id_ooo == 0 ||
+                buffered_b_cnt == 0 || buffered_r_cnt == 0))
+            $fatal(1, "Required same-ID reordering was not reached");
         scoreboard.reset();
         $display("NMU_COSIM_COUNTS writes=%0d reads=%0d r_beats=%0d checked_bytes=%0d",
             b_count, r_count, r_beats, checked_bytes);

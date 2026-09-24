@@ -2,10 +2,10 @@ Depends on: #83 (closed).
 
 ## Objective and revised scope
 
-Build a staged NMU standalone acceptance platform using one production RTL NMU, one C++ Router and one C++ NSU, with an AXI memory behind the NSU. Verify real memory write/readback through the complete round trip. This replaces the old response-ordering implementation scope, whose main datapath already exists.
+Build a staged NMU standalone acceptance platform using one production RTL NMU, one C++ Router and four C++ NSUs, with an AXI memory behind each NSU. Verify real memory write/readback through the complete round trip. This replaces the old response-ordering implementation scope, whose main datapath already exists.
 
 Topology:
-AXI file master + independent scoreboard -> RTL NMU -> single C++ Router -> C++ NSU -> AXI memory; responses return through that same Router to the RTL NMU.
+AXI file master + independent scoreboard -> RTL NMU -> single C++ Router -> four C++ NSU/AXI memory endpoints; responses return through that same Router to the RTL NMU.
 
 Use native REQ/RSP/DAT. One Router owns all three networks; do not instantiate a mesh or replace the production NMU with its C++ model. Keep the current deterministic standalone tests as focused regressions.
 
@@ -29,13 +29,13 @@ Use native REQ/RSP/DAT. One Router owns all three networks; do not instantiate a
 
 | Existing source | Reuse plan | Required adaptation / limit |
 |---|---|---|
-| Standalone control/data single/burst cases | Reuse names, AXI file format, transaction generator/encoder | Map to the one-NSU SAM; replace synthetic R data and synthetic BRESP expectations with memory semantics |
+| Standalone control/data single/burst cases | Reuse names, AXI file format, transaction generator/encoder | Map to the approved four-destination SAM; replace synthetic R data and synthetic BRESP expectations with memory semantics |
 | Standalone outstanding/multi-ID/backpressure/reset | Reuse scenario intent and driver | Audit achieved concurrency and reset/memory lifetime; directed cases have no injected stalls unless the case explicitly tests stalls |
 | Standalone ctrl_rand/data_rand/request_rand | Reuse seeded transaction generation | Prevent ambiguous overlapping read/write dependencies and uninitialized reads; preserve byte strobes and legal bursts |
-| Existing C++ simulation patterns | Reuse gen_test_patterns.py readback/prefill generation and the file-master write-complete-then-read schedule | Generate a one-endpoint unicast workload, not unchanged 2x2/4x4 neighbor/collective traffic |
-| Cross-destination reorder / forced response order | Retain existing deterministic standalone coverage | One NSU/destination cannot claim cross-destination reordering. Different-ID out-of-order coverage requires an actual supporting memory/model schedule and a non-vacuous check |
+| Existing C++ simulation patterns | Reuse gen_test_patterns.py readback/prefill generation and the file-master write-complete-then-read schedule | Generate an endpoint-aware unicast workload, not unchanged 2x2/4x4 neighbor/collective traffic |
+| Cross-destination reorder / forced response order | Retain existing deterministic standalone coverage | The approved four-destination extension checks actual B/R ingress disorder and per-ID retirement |
 
-The existing standalone generator currently requires at least two destinations in each address space. Make only the needed profile-aware adaptation; do not create fake destinations or weaken its existing cross-destination tests.
+The shared generator retains standalone recipes and adds four-destination co-simulation ordering cases.
 
 ## Memory correctness and stimulus scheduling
 
@@ -48,8 +48,8 @@ The existing standalone generator currently requires at least two destinations i
 ## Stages
 
 1. Confirm reuse and boundary compatibility, approve the minimal topology/SAM/credit adapter and pattern matrix.
-2. Integrate one Router/NSU with RTL NMU and existing AXI memory/checker; run control/data single and burst write/readback under VCS.
-3. Add approved outstanding/random/backpressure/reset cases using existing generators and driver; retain separate deterministic reorder tests for unsupported single-destination scenarios.
+2. Integrate one Router and four NSUs with RTL NMU and existing AXI memory/checker; run control/data single and burst write/readback under VCS.
+3. Add approved outstanding/random/backpressure/reset cases using existing generators and driver; retain separate deterministic standalone coverage.
 4. Archive exact commands, seed/configuration, source hashes, actual transfer/compare counts and FSDB/report paths; user reviews acceptance before closure.
 
 ## Acceptance
@@ -98,3 +98,10 @@ All eight added cases pass VCS: ctrl_backpressure, data_backpressure, ctrl_capac
 Three affected baseline cases and the deliberate corruption test also pass. Full sim/tools Python suite: 599 passed. No production RTL, C++ source or DUT parameter change, and no C++ rebuild. Shared pattern.txt now lists 22 cases. Evidence: docs/archive/nmu-cosim-84/additional/report.md.
 
 Issue remains OPEN for user acceptance. Reset during traffic, forced reorder, FIXED/WRAP and additional seeds are not claimed. Existing model-capacity limitations remain documented.
+
+
+## Approved four-destination ordering extension (2026-09-24)
+
+Expand the co-simulation TB to a single Router at (1,1), LOCAL RTL NMU, and four direct C++ NSU/memory endpoints: NORTH (1,2), EAST (2,1), SOUTH (1,0), WEST (0,1). Routing bounds are 4x4 to satisfy the existing generator's power-of-two X requirement; no mesh or extra Router instances are introduced. All endpoint port IDs are zero.
+
+Reuse cross_id_out_of_order and same_id_cross_dst_reorder with MODE=control/data/rand. Only ordering cases enable destination-dependent B/R delay; other cases bypass it. Use unchanged upstream one-cycle AXI delayers to cover every integer cycle in the minimum-delay search. Require real B/R ingress disorder, same-ID buffered retirement where applicable, and existing AXI memory data/order/count checks. Preserve DAT credit depth 32, C++ library reuse, and update the waveform RC for all four wrappers. Minimum common delay is 2 measured cycles for seed 1: control fails disorder coverage at 0/1; all six ordering mode combinations pass at 2. The FSDB-enabled 24-case regression passes. Strengthened payloads distinguish transactions, and all four affected control/data runs pass again. Deliberate corruption is detected. Python suite: 602 passed. All 490 RC paths resolve in FSDB; C++ library hash is unchanged, with no C++ rebuild. Reports and inputs were retrieved with SHA256 verification. Evidence: docs/archive/nmu-cosim-84/four-destination/report.md. Issue remains OPEN for user acceptance.

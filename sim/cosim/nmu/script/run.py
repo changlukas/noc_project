@@ -9,10 +9,13 @@ p = argparse.ArgumentParser()
 p.add_argument("--binary", required=True)
 p.add_argument("--case", required=True)
 p.add_argument("--report", required=True)
+p.add_argument("--mode", choices=("auto", "control", "data", "rand"), default="auto")
 p.add_argument("--wave", action="store_true")
 p.add_argument("--corrupt", action="store_true")
 a = p.parse_args()
 patterns = Path("patterns")
+if a.mode != "auto":
+    patterns /= a.mode
 cases = (patterns / "cases.list").read_text().split()
 if a.case not in cases:
     p.error("Unsupported co-simulation CASE '{}'. Use make list TESTBENCH=cosim "

@@ -1,0 +1,13 @@
+{
+  "case": "same_id_cross_dst_reorder",
+  "mode": "control",
+  "seed": 1,
+  "id_width": 3,
+  "coverage": {
+    "control_write": 16,
+    "control_read": 16,
+    "data_write": 0,
+    "data_read": 0
+  },
+  "profile": "cosim"
+}
