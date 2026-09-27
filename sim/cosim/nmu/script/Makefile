@@ -29,7 +29,7 @@ YAML_HEADERS := $(shell find deps/yaml-cpp/include deps/yaml-cpp/src -name '*.h'
 ifeq ($(WAVE),1)
 WAVE_FLAGS := +define+DUMP_WAVE -P $(PLI_DIR)/novas.tab $(PLI_DIR)/pli.a
 endif
-VCS_FLAGS := -full64 -sverilog -assert svaext -override_timescale=1ns/1ps -debug_access+all -f files.f -top tb_nmu_cosim -pvalue+tb_nmu_cosim.RSP_DELAY_CYCLES=$(RSP_DELAY) -pvalue+tb_nmu_cosim.OUTPUT_REG_TYPE=$(REG_TYPE) -pvalue+tb_nmu_cosim.IO_FIFO_DEPTH=$(IO_FIFO_DEPTH) -pvalue+tb_nmu_cosim.AXI_ID_WIDTH=$(AXI_ID_WIDTH) -pvalue+tb_nmu_cosim.MAX_ACTIVE_IDS=$(MAX_ACTIVE_IDS) -pvalue+tb_nmu_cosim.MAX_OUTSTANDING_PER_ID=$(MAX_OUTSTANDING_PER_ID)
+VCS_FLAGS := -full64 -sverilog -assert svaext -override_timescale=1ps/1ps -debug_access+all -f files.f -top tb_nmu_cosim -pvalue+tb_nmu_cosim.RSP_DELAY_CYCLES=$(RSP_DELAY) -pvalue+tb_nmu_cosim.OUTPUT_REG_TYPE=$(REG_TYPE) -pvalue+tb_nmu_cosim.IO_FIFO_DEPTH=$(IO_FIFO_DEPTH) -pvalue+tb_nmu_cosim.AXI_ID_WIDTH=$(AXI_ID_WIDTH) -pvalue+tb_nmu_cosim.MAX_ACTIVE_IDS=$(MAX_ACTIVE_IDS) -pvalue+tb_nmu_cosim.MAX_OUTSTANDING_PER_ID=$(MAX_OUTSTANDING_PER_ID)
 DPI := $(BUILD)/dpi_$(shell python3 build_key.py cpp "$(CPPFLAGS) $(CXX)")
 YAML_BUILD := $(BUILD)/yaml_$(shell python3 build_key.py yaml "$(CPPFLAGS) $(CXX)")
 SIM := $(BUILD)/vcs_wave$(WAVE)_$(shell python3 build_key.py sv "$(VCS_FLAGS) $(WAVE_FLAGS) $(DPI)")

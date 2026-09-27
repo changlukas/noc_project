@@ -11,7 +11,7 @@ help:
 prepare:
 	python3 prepare.py --rtl-stage "$(RTL_STAGE)" --out "$(OUT)"
 lint: prepare
-	cd "$(OUT)" && verilator --lint-only --timing --assert -Wno-fatal -f files.f --top-module tb_nmu_cosim
+	cd "$(OUT)" && verilator --lint-only --timescale-override 1ps/1ps --timing --assert -Wno-fatal -f files.f --top-module tb_nmu_cosim
 sync: prepare
 	python3 "$(ROOT)/sim/tools/sync_nmu_workstation.py" --source "$(OUT)" --remote-dir /home/mingwei/noc_project/nmu-standalone/cosim
 

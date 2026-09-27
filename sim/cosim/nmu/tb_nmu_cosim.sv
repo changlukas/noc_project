@@ -1,4 +1,4 @@
-`timescale 1ns / 1ps
+`timescale 1ps / 1ps
 `include "axi/assign.svh"
 module tb_nmu_cosim #(
     parameter int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_ID_WIDTH,
@@ -10,6 +10,9 @@ module tb_nmu_cosim #(
     parameter int unsigned IO_FIFO_DEPTH = 32
 );
     import ni_params_pkg::*;
+    localparam time CLK_PERIOD = 1ns;
+    localparam time APPL_DELAY = CLK_PERIOD / 10;
+    localparam time ACQ_DELAY  = CLK_PERIOD / 5;
     localparam int NUM_PORTS = 5;
     localparam int NMU_PORT = 0;
     localparam int NUM_NSUS = NUM_PORTS - 1;
@@ -19,6 +22,8 @@ module tb_nmu_cosim #(
     localparam int NMU_ID   = (ROUTER_Y << ni_flit_pkg::X_WIDTH) | ROUTER_X;
     localparam int NUM_WR_VC = NOC_DAT_VC_MODE == 1 ? NUM_DAT_VC/2 : NUM_DAT_VC;
     initial begin
+        $display("CLOCK_CONFIG axi_period_ps=%0d noc_period_ps=%0d apply_delay_ps=%0d sample_delay_ps=%0d",
+            CLK_PERIOD, CLK_PERIOD, APPL_DELAY, ACQ_DELAY);
         $display("TX_STORAGE req_bits=%0d dat_bits=%0d context_bits=%0d",
             IO_FIFO_DEPTH*$bits(ni_flit_pkg::req_flit_t),
             NUM_WR_VC*IO_FIFO_DEPTH*$bits(ni_flit_pkg::dat_flit_t),
@@ -44,7 +49,7 @@ module tb_nmu_cosim #(
     bit corrupt_rsp = 0;
     logic clk = 0, rst_n = 0;
     wire axi_rst_n, noc_rst_n;
-    always #5 clk = ~clk;
+    always #(CLK_PERIOD / 2) clk = ~clk;
     cc_rstgen_bypass #(.NumRegs(2)) i_axi_reset_sync (
         .clk_i            (clk),
         .rst_ni           (rst_n),
@@ -311,8 +316,8 @@ module tb_nmu_cosim #(
             .AXI_USER_WIDTH     (AXI_AWUSER_WIDTH),
             .WARN_UNINITIALIZED (1'b1),
             .UNINITIALIZED_DATA ("undefined"),
-            .APPL_DELAY         (1ns),
-            .ACQ_DELAY          (2ns)
+            .APPL_DELAY         (APPL_DELAY),
+            .ACQ_DELAY          (ACQ_DELAY)
         ) i_memory (
             .clk_i              (clk),
             .rst_ni             (axi_rst_n),
@@ -354,15 +359,15 @@ module tb_nmu_cosim #(
         .DW (AXI_DATA_WIDTH),
         .IW (AXI_ID_WIDTH),
         .UW (AXI_AWUSER_WIDTH),
-        .TA (1ns),
-        .TT (2ns)
+        .TA (APPL_DELAY),
+        .TT (ACQ_DELAY)
     ) master_t;
     typedef axi_test::axi_scoreboard #(
         .AW (AXI_ADDR_WIDTH),
         .DW (AXI_DATA_WIDTH),
         .IW (AXI_ID_WIDTH),
         .UW (AXI_AWUSER_WIDTH),
-        .TT (2ns)
+        .TT (ACQ_DELAY)
     ) scoreboard_t;
     import "DPI-C" context function int cmodel_check_error(output string message);
     always @(negedge clk) begin : check_model_error
@@ -721,7 +726,7 @@ module tb_nmu_cosim #(
         logic [AXI_ADDR_WIDTH-1:0] address;
         logic [7:0] expected_byte;
         int lane, total_w, total_r, unique_w, unique_r;
-        #2ns;
+        #(ACQ_DELAY);
         if (axi_rst_n && vip.aw_valid && vip.aw_ready) live_w[vip.aw_id]++;
         if (axi_rst_n && vip.ar_valid && vip.ar_ready) live_r[vip.ar_id]++;
         if (axi_rst_n && vip.b_valid && vip.b_ready) begin
